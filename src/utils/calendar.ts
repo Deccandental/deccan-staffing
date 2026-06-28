@@ -1,29 +1,35 @@
 export interface CalendarDay {
-  date: Date;
-  dayNumber: number;
+  date: string;
+  day: number;
   weekday: string;
 }
 
-export function generateMonth(year: number, month: number): CalendarDay[] {
+export function generateMonth(
+  year: number,
+  month: number
+): CalendarDay[] {
+
   const days: CalendarDay[] = [];
 
-  const date = new Date(year, month, 1);
+  const current = new Date(year, month, 1);
 
-  while (date.getMonth() === month) {
-    const weekday = date.toLocaleDateString("en-US", {
+  while (current.getMonth() === month) {
+
+    const weekday = current.toLocaleDateString("en-US", {
       weekday: "short",
     });
 
-    // Skip weekends
     if (weekday !== "Sat" && weekday !== "Sun") {
+
       days.push({
-        date: new Date(date),
-        dayNumber: date.getDate(),
+        date: current.toISOString(),
+        day: current.getDate(),
         weekday,
       });
+
     }
 
-    date.setDate(date.getDate() + 1);
+    current.setDate(current.getDate() + 1);
   }
 
   return days;

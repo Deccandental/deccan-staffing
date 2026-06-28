@@ -1,60 +1,96 @@
 "use client";
 
-import { employees } from "../data/employees";
-
-interface DentistSelectorProps {
-  selected: number[];
-  onChange: (selected: number[]) => void;
+interface Props {
+  selectedDentists: string[];
+  setSelectedDentists: (dentists: string[]) => void;
 }
 
-export default function DentistSelector({
-  selected,
-  onChange,
-}: DentistSelectorProps) {
-  const dentists = employees.filter(
-    (employee) => employee.role === "Dentist"
-  );
+const dentists = [
+  "Dr. Nanjapa",
+  "Dr. Coulter",
+  "Dr. Viraparia",
+  "Dr. Ho",
+];
 
-  function toggle(id: number) {
-    if (selected.includes(id)) {
-      onChange(selected.filter((d) => d !== id));
+export default function DentistSelector({
+  selectedDentists,
+  setSelectedDentists,
+}: Props) {
+
+  function toggleDentist(name: string) {
+
+    if (selectedDentists.includes(name)) {
+
+      setSelectedDentists(
+        selectedDentists.filter((d) => d !== name)
+      );
+
     } else {
-      onChange([...selected, id]);
+
+      setSelectedDentists([
+        ...selectedDentists,
+        name,
+      ]);
+
     }
+
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow p-6 mb-6">
-      <h2 className="text-xl font-bold mb-4">
+
+    <div className="rounded-2xl bg-white p-6 shadow">
+
+      <h2 className="mb-5 text-2xl font-bold">
         Dentists Working Today
       </h2>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="space-y-3">
+
         {dentists.map((dentist) => {
-          const active = selected.includes(dentist.id);
+
+          const selected =
+            selectedDentists.includes(dentist);
 
           return (
+
             <button
-              key={dentist.id}
-              onClick={() => toggle(dentist.id)}
-              className={`rounded-xl border p-4 transition ${
-                active
-                  ? "bg-blue-600 text-white border-blue-600"
-                  : "hover:bg-slate-100"
+              key={dentist}
+              onClick={() => toggleDentist(dentist)}
+              className={`flex w-full items-center justify-between rounded-xl border p-4 transition ${
+                selected
+                  ? "border-blue-600 bg-blue-50"
+                  : "hover:bg-slate-50"
               }`}
             >
-              {dentist.name}
+
+              <span>{dentist}</span>
+
+              <span className="text-xl">
+                {selected ? "✓" : ""}
+              </span>
+
             </button>
+
           );
+
         })}
+
       </div>
 
-      <div className="mt-5 text-gray-600">
-        Dentists Selected:
-        <span className="font-bold ml-2">
-          {selected.length}
-        </span>
+      <div className="mt-6 rounded-xl bg-slate-100 p-4">
+
+        <div className="text-sm text-slate-600">
+          Dentists Scheduled
+        </div>
+
+        <div className="text-4xl font-bold">
+          {selectedDentists.length}
+        </div>
+
       </div>
+
     </div>
+
   );
+
 }
