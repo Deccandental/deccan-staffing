@@ -58,20 +58,29 @@ export default function LeavePage() {
   });
 
   useEffect(() => {
-    setStaff(loadStaff());
-    setRequests(loadLeaveRequests());
-    setOverrides(getOverrides());
+    async function load() {
+      const [s, r, o] = await Promise.all([loadStaff(), loadLeaveRequests(), getOverrides()]);
+      setStaff(s);
+      setRequests(r);
+      setOverrides(o);
+    }
+    load();
   }, []);
 
-  function refresh() {
-    setRequests(loadLeaveRequests());
-    setOverrides(getOverrides());
-  }
-
-  // Refresh data whenever the view changes so approved leaves appear immediately
   useEffect(() => {
-    refresh();
+    async function load() {
+      const [r, o] = await Promise.all([loadLeaveRequests(), getOverrides()]);
+      setRequests(r);
+      setOverrides(o);
+    }
+    load();
   }, [view]);
+
+  async function refresh() {
+    const [r, o] = await Promise.all([loadLeaveRequests(), getOverrides()]);
+    setRequests(r);
+    setOverrides(o);
+  }
 
   const selectedEmployee = staff.find((e) => e.id === Number(form.employeeId));
   const totalDays = form.startDate && form.endDate ? countBusinessDays(form.startDate, form.endDate) : 0;
@@ -92,7 +101,7 @@ export default function LeavePage() {
     if (!form.startDate || !form.endDate) { setError("Please select start and end dates."); return; }
     if (form.endDate < form.startDate) { setError("End date must be after start date."); return; }
 
-    const req = addLeaveRequest({
+    const req = await addLeaveRequest({
       employeeId: Number(form.employeeId), employeeName: selectedEmployee?.name ?? "",
       employeeEmail: form.employeeEmail, startDate: form.startDate, endDate: form.endDate,
       isPartialDay: form.isPartialDay, partialHours: form.partialHours,
@@ -100,11 +109,14 @@ export default function LeavePage() {
     });
 
     try {
-      await fetch("/api/leave/notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request: req, type: "submitted" }) });
+      await fetch("/api/leave/notify", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: req, type: "submitted" }),
+      });
     } catch {}
 
     setSubmitted(true);
-    refresh();
+    await refresh();
   }
 
   const myRequests = requests.filter((r) => r.employeeId === Number(form.employeeId));
@@ -162,7 +174,6 @@ export default function LeavePage() {
 
   return (
     <div className="min-h-screen" style={{ background: "#f5f5f5" }}>
-      {/* Mobile header */}
       <div className="lg:hidden flex items-center justify-between px-4 py-3 bg-white shadow-sm sticky top-0 z-50">
         <div>
           <div style={{ fontWeight: 700, color: "#5a5a5a", fontSize: 16 }}>deccan<span style={{ color: "#e8622a" }}>|</span>dental</div>
@@ -171,7 +182,6 @@ export default function LeavePage() {
         <button onClick={() => setMenuOpen(!menuOpen)} style={{ fontSize: 22, color: "#5a5a5a" }}>☰</button>
       </div>
 
-      {/* Mobile menu */}
       {menuOpen && (
         <div className="lg:hidden fixed inset-0 z-40 bg-black bg-opacity-40" onClick={() => setMenuOpen(false)}>
           <div className="bg-white w-64 h-full p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -187,8 +197,10 @@ export default function LeavePage() {
               { label: "📝 Leave Request", href: "/leave" },
               { label: "🔐 Manage Leave", href: "/leave/manage" },
               { label: "🏖️ Holidays & Closures", href: "/holidays" },
+              { label: "🔄 Temp Staff", href: "/temps" },
             ].map((item) => (
-              <a key={item.href} href={item.href} className="block rounded-xl px-4 py-3 text-sm font-medium mb-1" style={{ color: item.href === "/leave" ? "white" : "#6b7280", backgroundColor: item.href === "/leave" ? "#e8622a" : "transparent" }}>
+              <a key={item.href} href={item.href} className="block rounded-xl px-4 py-3 text-sm font-medium mb-1"
+                style={{ color: item.href === "/leave" ? "white" : "#6b7280", backgroundColor: item.href === "/leave" ? "#e8622a" : "transparent" }}>
                 {item.label}
               </a>
             ))}
@@ -196,9 +208,7 @@ export default function LeavePage() {
         </div>
       )}
 
-      <div className="hidden lg:block">
-        <Sidebar />
-      </div>
+      <div className="hidden lg:block"><Sidebar /></div>
 
       <div className="lg:ml-64 p-4 lg:p-8">
         <div className="mb-6">
@@ -206,72 +216,66 @@ export default function LeavePage() {
           <p className="mt-1 text-gray-400 text-sm">Submit and track your leave requests</p>
         </div>
 
-        {/* Tab bar */}
         <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
           {[
             { key: "request", label: "📝 New Request" },
             { key: "my", label: "📋 My Requests" },
             { key: "all", label: "📊 All Absences" },
           ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setView(tab.key as any)}
+            <button key={tab.key} onClick={() => setView(tab.key as any)}
               className="rounded-xl px-4 py-2 text-sm font-semibold transition whitespace-nowrap flex-shrink-0"
-              style={view === tab.key ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
-            >
+              style={view === tab.key ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
               {tab.label}
             </button>
           ))}
         </div>
 
-        {/* NEW REQUEST */}
         {view === "request" && (
           <div className="max-w-lg mx-auto lg:mx-0">
             {submitted ? (
               <div className="rounded-2xl bg-white p-8 shadow text-center">
                 <div className="text-5xl mb-4">✅</div>
                 <h2 className="text-xl font-bold mb-2" style={{ color: "#5a5a5a" }}>Request Submitted!</h2>
-                <p className="text-gray-400 mb-6 text-sm">Your request has been sent to Dr. Nanjapa for approval. You'll receive an email when it's reviewed.</p>
+                <p className="text-gray-400 mb-6 text-sm">Your request has been sent to Dr. Nanjapa for approval.</p>
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                  <button onClick={() => { setSubmitted(false); setForm({ ...form, startDate: "", endDate: "", notes: "", isPartialDay: false, partialHours: "" }); }} className="rounded-xl px-6 py-2.5 text-sm font-semibold text-white" style={{ backgroundColor: "#e8622a" }}>Submit Another</button>
+                  <button onClick={() => { setSubmitted(false); setForm({ ...form, startDate: "", endDate: "", notes: "", isPartialDay: false, partialHours: "" }); }}
+                    className="rounded-xl px-6 py-2.5 text-sm font-semibold text-white" style={{ backgroundColor: "#e8622a" }}>Submit Another</button>
                   <button onClick={() => setView("my")} className="rounded-xl border border-gray-200 px-6 py-2.5 text-sm font-semibold text-gray-500 hover:bg-gray-50">View My Requests</button>
                 </div>
               </div>
             ) : (
               <div className="rounded-2xl bg-white p-5 lg:p-8 shadow space-y-5">
                 <h2 className="text-lg font-bold" style={{ color: "#5a5a5a" }}>Submit a Leave Request</h2>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Your Name</label>
-                  <select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }}>
+                  <select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))}
+                    className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }}>
                     <option value="">Select your name...</option>
                     {staff.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}
                   </select>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Your Email</label>
-                  <input type="email" value={form.employeeEmail} onChange={(e) => setForm((f) => ({ ...f, employeeEmail: e.target.value }))} placeholder="your.email@mydeccandental.com" className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
+                  <input type="email" value={form.employeeEmail} onChange={(e) => setForm((f) => ({ ...f, employeeEmail: e.target.value }))}
+                    placeholder="your.email@mydeccandental.com" className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
                 </div>
-
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Start Date</label>
-                    <input type="date" value={form.startDate} onChange={(e) => handleDateChange("startDate", e.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
+                    <input type="date" value={form.startDate} onChange={(e) => handleDateChange("startDate", e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">End Date</label>
-                    <input type="date" value={form.endDate} onChange={(e) => handleDateChange("endDate", e.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
+                    <input type="date" value={form.endDate} onChange={(e) => handleDateChange("endDate", e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
                   </div>
                 </div>
-
                 {totalDays > 0 && (
                   <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-500">
                     📅 <strong>{totalDays} working day{totalDays !== 1 ? "s" : ""}</strong> selected
                   </div>
                 )}
-
-                {/* Advisory notice */}
                 <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-700">
                   <p className="font-semibold mb-1">📋 Advance Notice Guidelines</p>
                   <ul className="space-y-0.5 text-xs text-blue-600">
@@ -279,36 +283,36 @@ export default function LeavePage() {
                     <li>• More than 7 days → 6 weeks notice recommended</li>
                     <li>• More than 14 days → 8 weeks notice recommended</li>
                   </ul>
-                  <p className="text-xs text-blue-500 mt-2 italic">Leave may not be approved if sufficient notice is not given.</p>
                   {noticeWarning && <p className="text-xs text-amber-600 mt-2 font-medium">⚠️ {noticeWarning}</p>}
                 </div>
-
                 <div>
                   <label className="flex items-center gap-3 cursor-pointer">
                     <input type="checkbox" checked={form.isPartialDay} onChange={(e) => setForm((f) => ({ ...f, isPartialDay: e.target.checked }))} className="h-5 w-5 rounded" />
                     <span className="text-sm font-medium text-gray-500">Partial day(s)</span>
                   </label>
                   {form.isPartialDay && (
-                    <input type="text" value={form.partialHours} onChange={(e) => setForm((f) => ({ ...f, partialHours: e.target.value }))} placeholder="e.g. Morning only, or 8:30am – 1pm" className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
+                    <input type="text" value={form.partialHours} onChange={(e) => setForm((f) => ({ ...f, partialHours: e.target.value }))}
+                      placeholder="e.g. Morning only, or 8:30am – 1pm" className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
                   )}
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-2">Reason</label>
                   <div className="grid grid-cols-2 gap-2">
                     {(Object.entries(REASON_LABELS) as [LeaveReason, string][]).map(([key, label]) => (
-                      <button key={key} onClick={() => setForm((f) => ({ ...f, reason: key }))} className="rounded-xl border px-3 py-3 text-sm font-medium transition text-left" style={form.reason === key ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>{label}</button>
+                      <button key={key} onClick={() => setForm((f) => ({ ...f, reason: key }))}
+                        className="rounded-xl border px-3 py-3 text-sm font-medium transition text-left"
+                        style={form.reason === key ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>
+                        {label}
+                      </button>
                     ))}
                   </div>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Notes <span className="text-gray-300">(optional)</span></label>
-                  <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={3} placeholder="Any additional details..." className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none resize-none" style={{ fontSize: 16 }} />
+                  <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                    rows={3} placeholder="Any additional details..." className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none resize-none" style={{ fontSize: 16 }} />
                 </div>
-
                 {error && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">🔴 {error}</div>}
-
                 <button onClick={handleSubmit} className="w-full rounded-xl py-4 font-semibold text-white transition hover:opacity-90 text-base" style={{ backgroundColor: "#e8622a" }}>
                   Submit Leave Request
                 </button>
@@ -317,12 +321,12 @@ export default function LeavePage() {
           </div>
         )}
 
-        {/* MY REQUESTS */}
         {view === "my" && (
           <div className="max-w-lg mx-auto lg:mx-0">
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-500 mb-1">Select your name</label>
-              <select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }}>
+              <select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))}
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }}>
                 <option value="">Select name...</option>
                 {staff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
@@ -340,15 +344,17 @@ export default function LeavePage() {
                           {req.startDate !== req.endDate && ` – ${new Date(req.endDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                           {req.startDate === req.endDate && `, ${new Date(req.startDate + "T00:00:00").getFullYear()}`}
                         </div>
-                        <div className="text-sm text-gray-400 mt-0.5">{REASON_LABELS[req.reason]} · {req.totalDays} day{req.totalDays !== 1 ? "s" : ""}{req.isPartialDay && req.partialHours && ` · ${req.partialHours}`}</div>
+                        <div className="text-sm text-gray-400 mt-0.5">{REASON_LABELS[req.reason]} · {req.totalDays} day{req.totalDays !== 1 ? "s" : ""}</div>
                         {req.notes && <div className="text-sm text-gray-400 italic mt-1">"{req.notes}"</div>}
                       </div>
-                      <span className={`rounded-full px-3 py-1 text-xs font-semibold flex-shrink-0 ml-2 ${STATUS_STYLES[req.status]}`}>{req.status.charAt(0).toUpperCase() + req.status.slice(1)}</span>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold flex-shrink-0 ml-2 ${STATUS_STYLES[req.status]}`}>
+                        {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
+                      </span>
                     </div>
                     {req.reviewNote && <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500 mb-3"><span className="font-medium">Manager note:</span> {req.reviewNote}</div>}
                     <div className="flex items-center justify-between text-xs text-gray-300">
                       <span>Submitted {new Date(req.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
-                      {req.status === "pending" && <button onClick={() => { cancelLeaveRequest(req.id); refresh(); }} className="text-red-400 hover:text-red-600 font-medium">Cancel</button>}
+                      {req.status === "pending" && <button onClick={async () => { await cancelLeaveRequest(req.id); await refresh(); }} className="text-red-400 hover:text-red-600 font-medium">Cancel</button>}
                     </div>
                   </div>
                 ))}
@@ -357,7 +363,6 @@ export default function LeavePage() {
           </div>
         )}
 
-        {/* ALL ABSENCES */}
         {view === "all" && (
           <div>
             {!allAuthenticated ? (
@@ -366,9 +371,13 @@ export default function LeavePage() {
                   <div className="text-4xl mb-3">🔐</div>
                   <h2 className="text-xl font-bold mb-1" style={{ color: "#5a5a5a" }}>Manager Access</h2>
                   <p className="text-gray-400 text-sm mb-6">Enter your passcode to view all staff absences</p>
-                  <input type="password" value={allPasscode} onChange={(e) => setAllPasscode(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { if (allPasscode === PASSCODE) setAllAuthenticated(true); else { setAllPasscodeError(true); setAllPasscode(""); } } }} placeholder="Enter passcode" maxLength={6} className={`w-full rounded-xl border px-4 py-3 text-center text-xl tracking-widest font-bold focus:outline-none mb-3 ${allPasscodeError ? "border-red-300 bg-red-50" : "border-gray-200"}`} style={{ fontSize: 24 }} />
+                  <input type="password" value={allPasscode} onChange={(e) => setAllPasscode(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { if (allPasscode === PASSCODE) setAllAuthenticated(true); else { setAllPasscodeError(true); setAllPasscode(""); } } }}
+                    placeholder="Enter passcode" maxLength={6}
+                    className={`w-full rounded-xl border px-4 py-3 text-center text-xl tracking-widest font-bold focus:outline-none mb-3 ${allPasscodeError ? "border-red-300 bg-red-50" : "border-gray-200"}`} style={{ fontSize: 24 }} />
                   {allPasscodeError && <p className="text-red-500 text-sm mb-3">Incorrect passcode.</p>}
-                  <button onClick={() => { if (allPasscode === PASSCODE) setAllAuthenticated(true); else { setAllPasscodeError(true); setAllPasscode(""); } }} className="w-full rounded-xl py-3 font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Unlock</button>
+                  <button onClick={() => { if (allPasscode === PASSCODE) setAllAuthenticated(true); else { setAllPasscodeError(true); setAllPasscode(""); } }}
+                    className="w-full rounded-xl py-3 font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Unlock</button>
                 </div>
               </div>
             ) : (
@@ -393,19 +402,18 @@ export default function LeavePage() {
                     ))}
                   </div>
                 )}
-
                 <div className="flex flex-wrap gap-2">
-                  <select value={filterEmployee} onChange={(e) => setFilterEmployee(e.target.value)} className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none bg-white shadow flex-1" style={{ fontSize: 16 }}>
+                  <select value={filterEmployee} onChange={(e) => setFilterEmployee(e.target.value)}
+                    className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none bg-white shadow flex-1" style={{ fontSize: 16 }}>
                     <option value="">All Staff</option>
                     {staff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
                   </select>
-                  <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none bg-white shadow flex-1" style={{ fontSize: 16 }}>
+                  <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}
+                    className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none bg-white shadow flex-1" style={{ fontSize: 16 }}>
                     <option value="">All Months</option>
                     {months.map((m) => <option key={m} value={m}>{new Date(m + "-01").toLocaleDateString("en-US", { month: "long", year: "numeric" })}</option>)}
                   </select>
                 </div>
-
-                {/* Mobile-friendly cards instead of table */}
                 <div className="space-y-3">
                   {filteredAbsences.length === 0 ? (
                     <div className="rounded-2xl bg-white p-8 text-center shadow"><p className="text-gray-300">No absences found</p></div>
@@ -416,7 +424,6 @@ export default function LeavePage() {
                       : a.startDate === a.endDate
                       ? new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                       : `${new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date((a.endDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
-
                     return (
                       <div key={i} className="rounded-2xl bg-white p-4 shadow">
                         <div className="flex items-start justify-between mb-2">
