@@ -44,19 +44,26 @@ export default function StaffPage() {
   const [form, setForm] = useState<Omit<Employee, "id">>(EMPTY_EMP);
   const [activeTab, setActiveTab] = useState<"staff" | "prefs">("staff");
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { refresh(); }, []);
 
-  function refresh() { setStaff(loadStaff()); setPrefs(loadPrefs()); }
+  async function refresh() {
+    setLoading(true);
+    const [s, p] = await Promise.all([loadStaff(), loadPrefs()]);
+    setStaff(s);
+    setPrefs(p);
+    setLoading(false);
+  }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.name.trim()) return;
-    if (editing) { updateEmployee({ ...form, id: editing.id }); }
-    else { addEmployee(form); }
+    if (editing) { await updateEmployee({ ...form, id: editing.id }); }
+    else { await addEmployee(form); }
     setEditing(null);
     setAdding(false);
     setForm(EMPTY_EMP);
-    refresh();
+    await refresh();
   }
 
   function handleEdit(emp: Employee) {
@@ -65,10 +72,10 @@ export default function StaffPage() {
     setForm({ name: emp.name, role: emp.role, specialty: emp.specialty, color: emp.color, skills: emp.skills, email: emp.email ?? "", defaultSchedule: { ...emp.defaultSchedule } });
   }
 
-  function handleDelete(id: number) {
-    removeEmployee(id);
+  async function handleDelete(id: number) {
+    await removeEmployee(id);
     setConfirmDelete(null);
-    refresh();
+    await refresh();
   }
 
   function toggleSkill(skill: string) {
@@ -82,7 +89,7 @@ export default function StaffPage() {
     setForm((f) => ({ ...f, defaultSchedule: { ...f.defaultSchedule, [day]: !f.defaultSchedule[day] } }));
   }
 
-  function movePref(dentistId: number, assistantId: number, dir: -1 | 1) {
+  async function movePref(dentistId: number, assistantId: number, dir: -1 | 1) {
     const current = prefs[dentistId] ?? [];
     const idx = current.indexOf(assistantId);
     if (idx === -1) return;
@@ -90,21 +97,32 @@ export default function StaffPage() {
     const swap = idx + dir;
     if (swap < 0 || swap >= next.length) return;
     [next[idx], next[swap]] = [next[swap], next[idx]];
-    setDentistPrefs(dentistId, next);
-    refresh();
+    await setDentistPrefs(dentistId, next);
+    await refresh();
   }
 
-  function initPrefs(dentistId: number) {
+  async function initPrefs(dentistId: number) {
     const assistants = staff.filter((e) => e.skills.includes("Assistant") || e.skills.includes("RDA"));
     const current = prefs[dentistId] ?? [];
     const missing = assistants.filter((a) => !current.includes(a.id)).map((a) => a.id);
     const full = [...current.filter((id) => staff.find((e) => e.id === id)), ...missing];
-    setDentistPrefs(dentistId, full);
-    refresh();
+    await setDentistPrefs(dentistId, full);
+    await refresh();
   }
 
   const dentists = staff.filter((e) => e.role === "Dentist");
   const assistants = staff.filter((e) => e.skills.includes("Assistant") || e.skills.includes("RDA"));
+
+  if (loading) {
+    return (
+      <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+        <Sidebar />
+        <div className="ml-64 flex items-center justify-center min-h-screen">
+          <p className="text-gray-400">Loading staff...</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
@@ -132,7 +150,6 @@ export default function StaffPage() {
             {(adding || editing) && (
               <div className="rounded-2xl bg-white p-6 shadow space-y-5">
                 <h2 className="text-xl font-bold" style={{ color: "#5a5a5a" }}>{editing ? "Edit Employee" : "Add Employee"}</h2>
-
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Name</label>
@@ -160,7 +177,7 @@ export default function StaffPage() {
                 )}
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-2">Skills <span className="text-gray-300">(check all that apply)</span></label>
+                  <label className="block text-sm font-medium text-gray-500 mb-2">Skills</label>
                   <div className="flex flex-wrap gap-2">
                     {ALL_SKILLS.map((s) => (
                       <button key={s} onClick={() => toggleSkill(s)} className="rounded-full border px-3 py-1 text-xs font-medium transition" style={form.skills.includes(s) ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>{s}</button>
@@ -225,13 +242,11 @@ export default function StaffPage() {
                       )}
                     </div>
                   </div>
-
                   {emp.skills.length > 1 && (
                     <div className="mb-3 flex flex-wrap gap-1">
                       {emp.skills.map((s) => <span key={s} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{s}</span>)}
                     </div>
                   )}
-
                   <div className="flex gap-1">
                     {DAYS.map((day, i) => {
                       const works = emp.defaultSchedule[day];
@@ -271,9 +286,7 @@ export default function StaffPage() {
                   </div>
                 );
               }
-
               const orderedAssistants = prefIds.map((id) => assistants.find((a) => a.id === id)).filter(Boolean) as Employee[];
-
               return (
                 <div key={dentist.id} className="rounded-2xl bg-white p-6 shadow">
                   <div className="flex items-center gap-3 mb-5">
