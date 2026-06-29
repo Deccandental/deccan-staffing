@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
         method: "POST",
         headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          from: "Deccan Staffing <noreply@mydeccandental.com>",
+          from: "Deccan Dental <noreply@mydeccandental.com>",
           to: ["dr.nanjapa@mydeccandental.com", "ketki@mydeccandental.com"],
           subject: `New Leave Request — ${request.employeeName}`,
           html: `
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
         method: "POST",
         headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          from: "Deccan Staffing <noreply@mydeccandental.com>",
+          from: "Deccan Dental <noreply@mydeccandental.com>",
           to: [request.employeeEmail],
           subject: `Leave Request ${approved ? "Approved" : "Denied"} — ${dateRange}`,
           html: `

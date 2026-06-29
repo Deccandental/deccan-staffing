@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { loadLeaveRequests } from "@/lib/leaveStore";
+import { LeaveRequest } from "@/types/leave";
 import { Sidebar } from "@/components/Sidebar";
 import { employees } from "@/data/employees";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -34,7 +36,8 @@ export default function AvailabilityPage() {
 
   const days = generateMonth(year, month).filter((d) => d.isOpen);
 
-  useEffect(() => { setOverrides(getOverrides()); }, []);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  useEffect(() => { setOverrides(getOverrides()); setLeaveRequests(loadLeaveRequests()); }, []);
 
   function refresh() { setOverrides(getOverrides()); }
 
@@ -145,10 +148,26 @@ export default function AvailabilityPage() {
                           const unavail = !!override;
                           const reasonStyle = REASONS.find((r) => r.key === override?.reason);
 
+                          const halfDayReq = leaveRequests.find(
+                            (r) => r.employeeId === emp.id &&
+                            r.startDate <= d.date && r.endDate >= d.date &&
+                            r.isPartialDay && r.status === "approved"
+                          );
+
                           return (
                             <td key={d.date} className="p-1 text-center">
                               {!worksDefault ? (
                                 <div className="mx-auto h-8 w-8 flex items-center justify-center text-slate-200 text-xs">—</div>
+                              ) : halfDayReq && !unavail ? (
+                                <div
+                                  className="mx-auto h-8 w-8 rounded border flex items-center justify-center relative overflow-hidden cursor-default"
+                                  title={`Half day: ${halfDayReq.partialHours || "partial"}`}
+                                  style={{ border: "1px solid #93c5fd" }}
+                                >
+                                  <div style={{ position: "absolute", top: 0, left: 0, width: "50%", height: "100%", background: "#dbeafe" }} />
+                                  <div style={{ position: "absolute", top: 0, right: 0, width: "50%", height: "100%", background: "#bbf7d0" }} />
+                                  <span style={{ position: "relative", zIndex: 1, fontSize: 9, color: "#1e40af", fontWeight: 700 }}>½</span>
+                                </div>
                               ) : (
                                 <button
                                   onClick={() => handleToggle(emp.id, d.date)}

@@ -14,6 +14,7 @@ export function Sidebar() {
     { label: "👥 Staff", href: "/staff" },
     { label: "📝 Leave Request", href: "/leave" },
     { label: "🔐 Manage Leave", href: "/leave/manage" },
+    { label: "🏖️ Holidays & Closures", href: "/holidays" },
   ];
 
   return (

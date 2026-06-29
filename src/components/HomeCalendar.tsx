@@ -150,8 +150,8 @@ export default function HomeCalendar() {
                     );
                   }
 
-                  const bgColor = isSelected ? "#e8622a" : status === "complete" ? "#f0fdf4" : status === "warning" ? "#fffbeb" : "#fafafa";
-                  const borderColor = isSelected ? "#e8622a" : status === "complete" ? "#bbf7d0" : status === "warning" ? "#fde68a" : "#e5e5e5";
+                  const bgColor = isSelected ? "#e8622a" : day.isHoliday ? "#fee2e2" : status === "complete" ? "#f0fdf4" : status === "warning" ? "#fffbeb" : "#fafafa";
+                  const borderColor = isSelected ? "#e8622a" : day.isHoliday ? "#fca5a5" : status === "complete" ? "#bbf7d0" : status === "warning" ? "#fde68a" : "#e5e5e5";
 
                   return (
                     <button key={day.date} onClick={() => setSelectedDate(isSelected ? null : day.date)}
