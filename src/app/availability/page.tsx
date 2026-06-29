@@ -122,4 +122,140 @@ export default function AvailabilityPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-            <span className="flex items-center gap-1"><span className="inline-block
+            <span className="flex items-center gap-1"><span className="inline-block h-4 w-4 rounded bg-green-100 border border-green-200" /> Working</span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-4 w-4 rounded border border-slate-300 overflow-hidden relative">
+                <span style={{ position: "absolute", left: 0, top: 0, width: "50%", height: "100%", background: "#bfdbfe" }} />
+                <span style={{ position: "absolute", right: 0, top: 0, width: "50%", height: "100%", background: "#bbf7d0" }} />
+              </span> AM off
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-4 w-4 rounded border border-slate-300 overflow-hidden relative">
+                <span style={{ position: "absolute", left: 0, top: 0, width: "50%", height: "100%", background: "#bbf7d0" }} />
+                <span style={{ position: "absolute", right: 0, top: 0, width: "50%", height: "100%", background: "#bfdbfe" }} />
+              </span> PM off
+            </span>
+            {REASONS.map((r) => (
+              <span key={r.key} className="flex items-center gap-1">
+                <span className={`inline-block h-4 w-4 rounded ${r.cell}`} /> {r.label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="text-center py-20 text-slate-400">Loading availability...</div>
+        ) : (
+          <div className="space-y-8">
+            {ROLE_GROUPS.map(({ label, roles }) => {
+              const members = staff.filter((e) => (roles as readonly string[]).includes(e.role));
+              if (members.length === 0) return null;
+              return (
+                <div key={label} className="rounded-2xl bg-white shadow overflow-hidden">
+                  <div className="px-6 py-4 border-b flex items-center gap-3">
+                    <h2 className="text-lg font-bold">{label}</h2>
+                    <span className="rounded-full bg-slate-100 text-slate-500 text-xs font-semibold px-2 py-0.5">{members.length}</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse text-sm">
+                      <thead>
+                        <tr className="bg-slate-50">
+                          <th className="p-3 text-left font-semibold text-slate-500 w-36">Name</th>
+                          {days.map((d) => (
+                            <th key={d.date} className="p-2 text-center font-medium text-slate-400 min-w-[44px]">
+                              <div className="text-xs">{d.weekday}</div>
+                              <div className="text-xs font-bold text-slate-600">{d.day}</div>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {members.map((emp) => (
+                          <tr key={emp.id} className="border-t">
+                            <td className="p-3 font-medium">
+                              <div className="flex items-center gap-2">
+                                <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: emp.color }} />
+                                <span>{emp.name}</span>
+                              </div>
+                              <div className="text-xs text-slate-400 ml-4">{emp.role}</div>
+                            </td>
+                            {days.map((d) => {
+                              const schedKey = DAY_MAP[d.weekday];
+                              const worksDefault = schedKey ? emp.defaultSchedule[schedKey] : false;
+                              const override = getOverride(emp.id, d.date);
+                              const reasonStyle = REASONS.find((r) => r.key === override?.reason) ?? REASONS[1];
+
+                              const approvedHalfReq = leaveRequests.find(
+                                (r) => r.employeeId === emp.id &&
+                                  r.startDate <= d.date && r.endDate >= d.date &&
+                                  r.isPartialDay && r.status === "approved"
+                              );
+
+                              const isFullDay = override && !override.halfDay;
+                              const isHalfAM = override?.halfDay === "AM";
+                              const isHalfPM = override?.halfDay === "PM";
+                              const isHalfFromLeave = approvedHalfReq && !override;
+
+                              const tooltip = isFullDay
+                                ? `${override?.reason} — full day out. Click to clear.`
+                                : isHalfAM ? `AM off (${override?.reason}). Click for PM off.`
+                                : isHalfPM ? `PM off (${override?.reason}). Click for full day.`
+                                : isHalfFromLeave ? `Half day from approved leave`
+                                : "Click: AM off → PM off → Full day → Clear";
+
+                              return (
+                                <td key={d.date} className="p-1 text-center">
+                                  {!worksDefault ? (
+                                    <div className="mx-auto h-8 w-8 flex items-center justify-center text-slate-200 text-xs">—</div>
+                                  ) : isFullDay ? (
+                                    <button onClick={() => handleToggle(emp.id, d.date)} title={tooltip}
+                                      className={`mx-auto h-8 w-8 rounded border text-xs font-bold transition hover:opacity-75 flex items-center justify-center ${reasonStyle.cell}`}>
+                                      {reasonStyle.letter}
+                                    </button>
+                                  ) : isHalfAM ? (
+                                    <button onClick={() => handleToggle(emp.id, d.date)} title={tooltip}
+                                      className="mx-auto h-8 w-8 rounded border flex items-center justify-center relative overflow-hidden hover:opacity-75 transition"
+                                      style={{ borderColor: reasonStyle.color }}>
+                                      <div style={{ position: "absolute", top: 0, left: 0, width: "50%", height: "100%", background: reasonStyle.color }} />
+                                      <div style={{ position: "absolute", top: 0, right: 0, width: "50%", height: "100%", background: "#bbf7d0" }} />
+                                      <span style={{ position: "relative", zIndex: 1, fontSize: 8, fontWeight: 700, color: "#374151" }}>AM</span>
+                                    </button>
+                                  ) : isHalfPM ? (
+                                    <button onClick={() => handleToggle(emp.id, d.date)} title={tooltip}
+                                      className="mx-auto h-8 w-8 rounded border flex items-center justify-center relative overflow-hidden hover:opacity-75 transition"
+                                      style={{ borderColor: reasonStyle.color }}>
+                                      <div style={{ position: "absolute", top: 0, left: 0, width: "50%", height: "100%", background: "#bbf7d0" }} />
+                                      <div style={{ position: "absolute", top: 0, right: 0, width: "50%", height: "100%", background: reasonStyle.color }} />
+                                      <span style={{ position: "relative", zIndex: 1, fontSize: 8, fontWeight: 700, color: "#374151" }}>PM</span>
+                                    </button>
+                                  ) : isHalfFromLeave ? (
+                                    <div title={tooltip}
+                                      className="mx-auto h-8 w-8 rounded border flex items-center justify-center relative overflow-hidden cursor-default"
+                                      style={{ border: "1px solid #93c5fd" }}>
+                                      <div style={{ position: "absolute", top: 0, left: 0, width: "50%", height: "100%", background: "#dbeafe" }} />
+                                      <div style={{ position: "absolute", top: 0, right: 0, width: "50%", height: "100%", background: "#bbf7d0" }} />
+                                      <span style={{ position: "relative", zIndex: 1, fontSize: 9, color: "#1e40af", fontWeight: 700 }}>½</span>
+                                    </div>
+                                  ) : (
+                                    <button onClick={() => handleToggle(emp.id, d.date)} title={tooltip}
+                                      className="mx-auto h-8 w-8 rounded border text-xs font-bold transition hover:opacity-75 flex items-center justify-center bg-green-100 border-green-200 text-green-700">
+                                      ✓
+                                    </button>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
