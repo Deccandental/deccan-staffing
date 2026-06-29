@@ -26,7 +26,6 @@ export function buildDailyAssignments(
 
   function isUnavailable(emp: Employee): boolean {
     if (!date) return false;
-    // Remote staff are still available — only mark unavailable if not remote
     return overrides.some((o) => o.employeeId === emp.id && o.date === date && !o.halfDay && o.reason !== "remote");
   }
 
