@@ -61,7 +61,7 @@ export default function StaffPage() {
   function handleEdit(emp: Employee) {
     setEditing(emp);
     setAdding(false);
-    setForm({ name: emp.name, role: emp.role, specialty: emp.specialty, color: emp.color, skills: emp.skills, defaultSchedule: { ...emp.defaultSchedule } });
+    setForm({ name: emp.name, role: emp.role, specialty: emp.specialty, color: emp.color, skills: emp.skills, defaultSchedule: { ...emp.defaultSchedule }, email: emp.email ?? "" });
   }
 
   function handleDelete(id: number) {
@@ -136,6 +136,10 @@ export default function StaffPage() {
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Name</label>
                     <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="Full name" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Email Address</label>
+                    <input type="email" value={(form as any).email ?? ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="staff@mydeccandental.com" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Primary Role</label>
