@@ -16,18 +16,11 @@ const CLOSED_WEEKDAYS = new Set([0, 6]); // Sun=0, Sat=6 only
 export function generateMonth(
   year: number,
   month: number,
-  openTuesdays: { date: string; halfDay: "AM" | "PM" | null }[] = []
+  openTuesdays: { date: string; halfDay: "AM" | "PM" | null }[] = [],
+  holidays: { date: string; name: string }[] = []
 ): CalendarDay[] {
-  let holidayMap: Record<string, string> = {};
-  if (typeof window !== "undefined") {
-    try {
-      const raw = localStorage.getItem("deccan-holidays-v1");
-      if (raw) {
-        const holidays = JSON.parse(raw) as { date: string; name: string }[];
-        holidays.forEach((h) => { holidayMap[h.date] = h.name; });
-      }
-    } catch {}
-  }
+  const holidayMap: Record<string, string> = {};
+  holidays.forEach((h) => { holidayMap[h.date] = h.name; });
 
   const openTuesdayMap: Record<string, "AM" | "PM" | null> = {};
   openTuesdays.forEach((t) => { openTuesdayMap[t.date] = t.halfDay; });
