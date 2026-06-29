@@ -6,6 +6,7 @@ import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getWeekday } from "@/lib/dateUtils";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
+import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { Employee } from "@/types/employee";
 import MonthlyOverview from "./MonthlyOverview";
 import DailyAssignmentPanel from "./DailyAssignmentPanel";
@@ -31,13 +32,19 @@ export default function ScheduleBuilder() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
+  const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [schedule, setSchedule] = useState<Record<string, { dentists: string[] }>>({});
   const [selectedDate, setSelectedDate] = useState("");
 
   useEffect(() => {
-    loadStaff().then(setStaff);
-    getOverrides().then(setOverrides);
-    loadPrefs().then(setPrefs);
+    async function load() {
+      const [s, o, p, ot] = await Promise.all([loadStaff(), getOverrides(), loadPrefs(), getOpenTuesdays()]);
+      setStaff(s);
+      setOverrides(o);
+      setPrefs(p);
+      setOpenTuesdays(ot);
+    }
+    load();
   }, []);
 
   const SCHEDULE_KEY = "deccan-schedule-v1";
@@ -57,7 +64,7 @@ export default function ScheduleBuilder() {
     }
   }, []);
 
-  const openDays = generateMonth(year, month).filter((d) => d.isOpen);
+  const openDays = generateMonth(year, month, openTuesdays).filter((d) => d.isOpen);
 
   function applyDefaults() {
     const filled: Record<string, { dentists: string[] }> = { ...schedule };
@@ -170,7 +177,7 @@ export default function ScheduleBuilder() {
             <button onClick={nextMonth} className="rounded-xl border px-4 py-2 text-slate-500 hover:bg-slate-50 transition">→</button>
           </div>
           <div className="rounded-xl bg-slate-50 p-4 mb-8">
-            <p className="text-sm text-slate-500">{totalDays} working days in {formatMonthYear(year, month)} (Mon, Wed, Thu, Fri only)</p>
+            <p className="text-sm text-slate-500">{totalDays} working days in {formatMonthYear(year, month)}</p>
           </div>
           <button onClick={() => { applyDefaults(); setStep(2); }} className="rounded-xl bg-cyan-600 px-8 py-3 font-semibold text-white hover:bg-cyan-700 transition">
             Continue to Mark Absences →
@@ -218,7 +225,7 @@ export default function ScheduleBuilder() {
             </div>
           </div>
 
-          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} />
+          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} />
 
           {selectedDate ? (
             <div className="grid gap-6 lg:grid-cols-2">
@@ -320,7 +327,10 @@ export default function ScheduleBuilder() {
                   const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
                   return (
                     <tr key={day.date} className="border-b hover:bg-slate-50 cursor-pointer" onClick={() => { handleSelectDate(day.date); setStep(3); }}>
-                      <td className="p-4 font-medium">{dateLabel}</td>
+                      <td className="p-4 font-medium">
+                        {dateLabel}
+                        {day.isTuesday && <span className="ml-2 rounded-full bg-blue-100 text-blue-600 text-xs px-1.5 py-0.5">Tue</span>}
+                      </td>
                       <td className="p-4">
                         {assignments?.dentists.map(({ dentist, assistant }) => (
                           <div key={dentist.id} className="flex items-center gap-1.5 text-xs mb-0.5">
