@@ -58,23 +58,23 @@ export default function HomeCalendar() {
     <div style={{ fontFamily: "Inter, system-ui, sans-serif" }}>
 
       {/* Hero header */}
-      <div className="mb-8 rounded-3xl overflow-hidden" style={{ background: "linear-gradient(135deg, #3d3d3d 0%, #5a5a5a 50%, #6b6b6b 100%)", position: "relative" }}>
+      <div className="mb-8 rounded-3xl overflow-hidden" style={{ background: "linear-gradient(135deg, #6b6b6b 0%, #7a7a7a 50%, #8a8a8a 100%)", position: "relative" }}>
         <div style={{ position: "absolute", right: -40, top: -40, width: 280, height: 280, borderRadius: "50%", background: "rgba(232,98,42,0.12)", pointerEvents: "none" }} />
         <div style={{ position: "absolute", right: 40, bottom: -60, width: 180, height: 180, borderRadius: "50%", background: "rgba(232,98,42,0.08)", pointerEvents: "none" }} />
 
-        <div className="p-8 relative">
+        <div className="p-5 relative">
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#e8622a" }} />
                 <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase" }}>Staff Scheduler</span>
               </div>
-              <h1 style={{ color: "white", fontSize: 32, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>
+              <h1 style={{ color: "white", fontSize: 22, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>
                 deccan<span style={{ color: "#e8622a" }}>|</span>dental
               </h1>
               <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, margin: "4px 0 0", letterSpacing: "0.15em", textTransform: "uppercase", fontWeight: 400 }}>Sleep Center</p>
 
-              <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 15, marginTop: 20 }}>
+              <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginTop: 12 }}>
                 {formatMonthYear(year, month)} — {completeDays} of {openDays.length} days fully staffed
               </p>
 
@@ -101,7 +101,7 @@ export default function HomeCalendar() {
               { label: "Not Scheduled", value: openDays.filter(d => getDayStatus(d.date) === "empty").length },
             ].map((stat) => (
               <div key={stat.label}>
-                <div style={{ color: "white", fontSize: 24, fontWeight: 700 }}>{stat.value}</div>
+                <div style={{ color: "white", fontSize: 18, fontWeight: 700 }}>{stat.value}</div>
                 <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 2 }}>{stat.label}</div>
               </div>
             ))}
