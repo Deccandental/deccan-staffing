@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { loadStaff } from "@/lib/staffStore";
+import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getWeekday } from "@/lib/dateUtils";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { Employee } from "@/types/employee";
 import MonthlyOverview from "./MonthlyOverview";
-import DentistSelector from "./DentistSelector";
 import DailyAssignmentPanel from "./DailyAssignmentPanel";
 import PrintSchedule from "./PrintSchedule";
 import PrintIndividualSchedule from "./PrintIndividualSchedule";
@@ -31,12 +30,14 @@ export default function ScheduleBuilder() {
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
+  const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [schedule, setSchedule] = useState<Record<string, { dentists: string[] }>>({});
   const [selectedDate, setSelectedDate] = useState("");
 
   useEffect(() => {
     loadStaff().then(setStaff);
     getOverrides().then(setOverrides);
+    loadPrefs().then(setPrefs);
   }, []);
 
   const SCHEDULE_KEY = "deccan-schedule-v1";
@@ -93,7 +94,7 @@ export default function ScheduleBuilder() {
     for (const day of openDays) {
       const daySched = schedule[day.date];
       if (!daySched) { statuses[day.date] = "empty"; continue; }
-      const assignments = buildDailyAssignments(staff, daySched.dentists, day.date);
+      const assignments = buildDailyAssignments(staff, daySched.dentists, day.date, prefs, overrides);
       if (assignments.warnings.some((w) => w.severity === "error")) {
         statuses[day.date] = "warning";
       } else if (assignments.warnings.length > 0) {
@@ -105,7 +106,7 @@ export default function ScheduleBuilder() {
       }
     }
     return statuses;
-  }, [schedule, staff, openDays]);
+  }, [schedule, staff, openDays, prefs, overrides]);
 
   const completedDays = Object.values(dayStatuses).filter((s) => s === "complete").length;
   const warningDays = Object.values(dayStatuses).filter((s) => s === "warning").length;
@@ -115,8 +116,8 @@ export default function ScheduleBuilder() {
   const workingDentists = selectedDate && schedule[selectedDate] ? schedule[selectedDate].dentists : [];
   const selectedAssignments = useMemo(() => {
     if (!selectedDate) return undefined;
-    return buildDailyAssignments(staff, workingDentists, selectedDate);
-  }, [staff, workingDentists, selectedDate, schedule]);
+    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides);
+  }, [staff, workingDentists, selectedDate, schedule, prefs, overrides]);
 
   function isUnavailable(empId: number, date: string): boolean {
     return overrides.some((o) => o.employeeId === empId && o.date === date && !o.halfDay);
@@ -314,7 +315,7 @@ export default function ScheduleBuilder() {
               <tbody>
                 {openDays.map((day) => {
                   const daySched = schedule[day.date];
-                  const assignments = daySched ? buildDailyAssignments(staff, daySched.dentists, day.date) : null;
+                  const assignments = daySched ? buildDailyAssignments(staff, daySched.dentists, day.date, prefs, overrides) : null;
                   const status = dayStatuses[day.date];
                   const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
                   return (
