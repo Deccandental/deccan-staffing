@@ -43,7 +43,7 @@ export function generateMonth(
     const dateStr = date.toISOString().split("T")[0];
     const holidayName = holidayMap[dateStr];
     const isHoliday = !!holidayName;
-    const isOpenTuesday = isTuesday && !!openTuesdayMap[dateStr] !== undefined && dateStr in openTuesdayMap;
+    const isOpenTuesday = isTuesday && dateStr in openTuesdayMap;
     const tuesdayHalfDay = openTuesdayMap[dateStr] ?? null;
     const isOpen = !CLOSED_WEEKDAYS.has(dow) && !isHoliday && (!isTuesday || isOpenTuesday);
 
