@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DailyAssignmentsResult } from "@/lib/assignmentEngine";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
@@ -15,9 +15,13 @@ const EMPTY: DailyAssignmentsResult = { dentists: [], frontDesk: [], hygienists:
 export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY }: Props) {
   const [overrides, setOverrides] = useState<Record<number, number | null>>({});
   const [swapping, setSwapping] = useState<number | null>(null);
+  const [staff, setStaff] = useState<Employee[]>([]);
 
-  const staff = loadStaff();
-  const availableAssistants = staff.filter((e) => e.skills.includes("Assistant"));
+  useEffect(() => {
+    loadStaff().then(setStaff);
+  }, []);
+
+  const availableAssistants = staff.filter((e) => e.skills.includes("Assistant") || e.skills.includes("RDA"));
 
   const dateLabel = selectedDate
     ? new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
