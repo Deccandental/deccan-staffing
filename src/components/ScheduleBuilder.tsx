@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getWeekday } from "@/lib/dateUtils";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
+import { loadSchedule, saveDaySchedule, MonthSchedule } from "@/lib/scheduleStore";
 import { Employee } from "@/types/employee";
 import MonthlyOverview from "./MonthlyOverview";
 import DailyAssignmentPanel from "./DailyAssignmentPanel";
@@ -33,8 +34,9 @@ export default function ScheduleBuilder() {
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
-  const [schedule, setSchedule] = useState<Record<string, { dentists: string[] }>>({});
+  const [schedule, setSchedule] = useState<MonthSchedule>({});
   const [selectedDate, setSelectedDate] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -57,27 +59,20 @@ export default function ScheduleBuilder() {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
-  const SCHEDULE_KEY = "deccan-schedule-v1";
-
+  // Load schedule from Supabase when month/year changes
   useEffect(() => {
-    if (typeof window !== "undefined" && Object.keys(schedule).length > 0) {
-      localStorage.setItem(SCHEDULE_KEY, JSON.stringify(schedule));
+    async function load() {
+      const saved = await loadSchedule(year, month);
+      setSchedule(saved);
     }
-  }, [schedule]);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem(SCHEDULE_KEY);
-        if (saved) setSchedule(JSON.parse(saved));
-      } catch {}
-    }
-  }, []);
+    load();
+  }, [year, month]);
 
   const openDays = generateMonth(year, month, openTuesdays).filter((d) => d.isOpen);
 
-  function applyDefaults() {
-    const filled: Record<string, { dentists: string[] }> = { ...schedule };
+  async function applyDefaults() {
+    const filled: MonthSchedule = { ...schedule };
+    const toSave: { date: string; dentists: string[] }[] = [];
     for (const day of openDays) {
       if (!filled[day.date]) {
         const dowKey = getWeekday(day.date);
@@ -85,12 +80,16 @@ export default function ScheduleBuilder() {
           .filter((e) => e.role === "Dentist" && (day.isOpenTuesday || e.defaultSchedule[dowKey]))
           .map((e) => e.name);
         filled[day.date] = { dentists };
+        toSave.push({ date: day.date, dentists });
       }
     }
     setSchedule(filled);
+    setSaving(true);
+    await Promise.all(toSave.map(({ date, dentists }) => saveDaySchedule(date, dentists)));
+    setSaving(false);
   }
 
-  function handleSelectDate(date: string) {
+  async function handleSelectDate(date: string) {
     setSelectedDate(date);
     if (!schedule[date]) {
       const dowKey = getWeekday(date);
@@ -99,12 +98,16 @@ export default function ScheduleBuilder() {
         .filter((e) => e.role === "Dentist" && (day?.isOpenTuesday || e.defaultSchedule[dowKey]))
         .map((e) => e.name);
       setSchedule((c) => ({ ...c, [date]: { dentists } }));
+      await saveDaySchedule(date, dentists);
     }
   }
 
-  function setWorkingDentists(dentists: string[]) {
+  async function setWorkingDentists(dentists: string[]) {
     if (!selectedDate) return;
     setSchedule((c) => ({ ...c, [selectedDate]: { dentists } }));
+    setSaving(true);
+    await saveDaySchedule(selectedDate, dentists);
+    setSaving(false);
   }
 
   const dayStatuses = useMemo(() => {
@@ -226,6 +229,7 @@ export default function ScheduleBuilder() {
                   {completedDays} of {totalDays} days complete
                   {warningDays > 0 && <span className="ml-2 text-amber-500">· {warningDays} with warnings</span>}
                 </span>
+                {saving && <span className="ml-3 text-xs text-cyan-500">💾 Saving...</span>}
               </div>
               <div className="flex gap-2">
                 <button onClick={applyDefaults} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">↺ Re-apply Defaults</button>
@@ -248,6 +252,7 @@ export default function ScheduleBuilder() {
                 <p className="text-sm text-slate-400 mb-2">Select which dentists are working today</p>
                 <div className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
                   👥 {workingDentists.length} dentist{workingDentists.length !== 1 ? "s" : ""} selected
+                  {saving && <span className="ml-2 text-cyan-500">💾 Saving...</span>}
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {allDentists.map((name) => {
