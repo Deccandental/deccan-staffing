@@ -201,8 +201,13 @@ export default function StaffPage() {
                       <div>
                         <div className="font-semibold" style={{ color: "#5a5a5a" }}>{emp.name}</div>
                         <div className="flex flex-wrap gap-1 mt-1">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role] ?? "bg-slate-100 text-slate-600"}`}>{emp.role}</span>
-                          {emp.specialty && <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">{emp.specialty}</span>}
+                          {emp.role === "Dentist" ? (
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role]}`}>
+                              {emp.specialty ?? "Dentist"}
+                            </span>
+                          ) : (
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role] ?? "bg-slate-100 text-slate-600"}`}>{emp.role}</span>
+                          )}
                         </div>
                       </div>
                     </div>
