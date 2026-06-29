@@ -42,22 +42,31 @@ export function Sidebar() {
     <aside
       className="fixed left-0 top-0 z-50 h-screen w-64 flex flex-col"
       style={{
-        background: "linear-gradient(180deg, #1e1e2e 0%, #2a2a3e 100%)",
-        borderRight: "1px solid rgba(255,255,255,0.06)",
+        background: "linear-gradient(180deg, #2d3148 0%, #353a56 100%)",
+        borderRight: "1px solid rgba(255,255,255,0.08)",
       }}
     >
       {/* Logo area */}
-      <div className="px-6 py-6 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-        <Image
-          src="/logo.svg"
-          alt="Deccan Dental Sleep Center"
-          width={160}
-          height={60}
-          className="object-contain brightness-0 invert"
-          priority
-        />
+      <div
+        className="px-5 py-5 flex-shrink-0"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
+      >
+        {/* White background pill so logo is always visible */}
         <div
-          className="mt-2 text-xs font-semibold tracking-widest uppercase"
+          className="rounded-xl px-3 py-2.5 flex items-center justify-center"
+          style={{ background: "white" }}
+        >
+          <Image
+            src="/logo.svg"
+            alt="Deccan Dental Sleep Center"
+            width={160}
+            height={55}
+            className="object-contain"
+            priority
+          />
+        </div>
+        <div
+          className="mt-3 text-xs font-semibold tracking-widest uppercase text-center"
           style={{ color: "rgba(255,255,255,0.3)" }}
         >
           Staff Scheduler
@@ -65,12 +74,12 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
+      <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
         {navGroups.map((group) => (
           <div key={group.label}>
             <div
-              className="text-xs font-bold uppercase tracking-widest mb-2 px-3"
-              style={{ color: "rgba(255,255,255,0.25)" }}
+              className="text-xs font-bold uppercase tracking-widest mb-1.5 px-3"
+              style={{ color: "rgba(255,255,255,0.28)" }}
             >
               {group.label}
             </div>
@@ -81,35 +90,40 @@ export function Sidebar() {
                   <Link
                     key={item.href}
                     href={item.href}
-                    className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150"
+                    className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 group"
                     style={
                       active
                         ? {
                             background: "#e8622a",
                             color: "white",
-                            boxShadow: "0 4px 12px rgba(232, 98, 42, 0.4)",
+                            boxShadow: "0 4px 14px rgba(232, 98, 42, 0.35)",
                           }
                         : {
-                            color: "rgba(255,255,255,0.55)",
+                            color: "rgba(255,255,255,0.6)",
                           }
                     }
                     onMouseEnter={(e) => {
                       if (!active) {
-                        (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.07)";
-                        (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.9)";
+                        (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
+                        (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.95)";
                       }
                     }}
                     onMouseLeave={(e) => {
                       if (!active) {
                         (e.currentTarget as HTMLElement).style.background = "transparent";
-                        (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.55)";
+                        (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.6)";
                       }
                     }}
                   >
-                    <span className="text-base leading-none w-5 text-center flex-shrink-0">{item.icon}</span>
-                    <span>{item.label}</span>
+                    <span className="text-base leading-none w-5 text-center flex-shrink-0">
+                      {item.icon}
+                    </span>
+                    <span className="flex-1">{item.label}</span>
                     {active && (
-                      <span className="ml-auto h-1.5 w-1.5 rounded-full bg-white opacity-80 flex-shrink-0" />
+                      <span
+                        className="h-1.5 w-1.5 rounded-full flex-shrink-0"
+                        style={{ background: "rgba(255,255,255,0.85)" }}
+                      />
                     )}
                   </Link>
                 );
@@ -121,8 +135,8 @@ export function Sidebar() {
 
       {/* Footer */}
       <div
-        className="px-6 py-4 flex-shrink-0"
-        style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}
+        className="px-5 py-4 flex-shrink-0"
+        style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}
       >
         <div className="flex items-center gap-3">
           <div
@@ -132,10 +146,10 @@ export function Sidebar() {
             D
           </div>
           <div>
-            <div className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.7)" }}>
+            <div className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>
               Deccan Dental
             </div>
-            <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+            <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
               Sleep Center
             </div>
           </div>
