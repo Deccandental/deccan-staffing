@@ -24,6 +24,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   role: "Assistant",
   color: "#2563eb",
   skills: ["Assistant"],
+  email: "",
   defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
 };
 
@@ -61,7 +62,7 @@ export default function StaffPage() {
   function handleEdit(emp: Employee) {
     setEditing(emp);
     setAdding(false);
-    setForm({ name: emp.name, role: emp.role, specialty: emp.specialty, color: emp.color, skills: emp.skills, defaultSchedule: { ...emp.defaultSchedule }, email: emp.email ?? "" });
+    setForm({ name: emp.name, role: emp.role, specialty: emp.specialty, color: emp.color, skills: emp.skills, email: emp.email ?? "", defaultSchedule: { ...emp.defaultSchedule } });
   }
 
   function handleDelete(id: number) {
@@ -138,8 +139,8 @@ export default function StaffPage() {
                     <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="Full name" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Email Address</label>
-                    <input type="email" value={(form as any).email ?? ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="staff@mydeccandental.com" />
+                    <label className="block text-sm font-medium text-gray-500 mb-1">Email Address</label>
+                    <input type="email" value={form.email ?? ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="staff@mydeccandental.com" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Primary Role</label>
@@ -149,7 +150,6 @@ export default function StaffPage() {
                   </div>
                 </div>
 
-                {/* Specialty — only for Dentists */}
                 {form.role === "Dentist" && (
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Specialty</label>
@@ -203,11 +203,10 @@ export default function StaffPage() {
                       <div className="h-10 w-10 rounded-full flex items-center justify-center text-white font-bold" style={{ backgroundColor: emp.color }}>{emp.name.charAt(0)}</div>
                       <div>
                         <div className="font-semibold" style={{ color: "#5a5a5a" }}>{emp.name}</div>
+                        {emp.email && <div className="text-xs text-gray-400">{emp.email}</div>}
                         <div className="flex flex-wrap gap-1 mt-1">
                           {emp.role === "Dentist" ? (
-                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role]}`}>
-                              {emp.specialty ?? "Dentist"}
-                            </span>
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role]}`}>{emp.specialty ?? "Dentist"}</span>
                           ) : (
                             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role] ?? "bg-slate-100 text-slate-600"}`}>{emp.role}</span>
                           )}
