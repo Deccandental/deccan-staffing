@@ -263,7 +263,10 @@ export default function ScheduleBuilder() {
                 <h3 className="text-lg font-bold mb-1">
                   {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
                 </h3>
-                <p className="text-sm text-slate-400 mb-5">Select which dentists are working today</p>
+                <p className="text-sm text-slate-400 mb-2">Select which dentists are working today</p>
+                <div className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                  👥 {workingDentists.length} dentist{workingDentists.length !== 1 ? "s" : ""} selected — {workingDentists.length} assistant{workingDentists.length !== 1 ? "s" : ""} required
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {allDentists.map((name) => {
                     const checked = workingDentists.includes(name);
@@ -285,6 +288,15 @@ export default function ScheduleBuilder() {
                 </div>
               </div>
 
+              {selectedAssignments && selectedAssignments.warnings.length > 0 && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-1">
+                  {selectedAssignments.warnings.map((w, i) => (
+                    <p key={i} className={`text-sm font-medium ${w.severity === "error" ? "text-red-600" : "text-amber-600"}`}>
+                      {w.severity === "error" ? "🔴" : "⚠️"} {w.message}
+                    </p>
+                  ))}
+                </div>
+              )}
               <DailyAssignmentPanel
                 selectedDate={selectedDate}
                 assignments={selectedAssignments}
