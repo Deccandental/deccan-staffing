@@ -216,7 +216,7 @@ export default function HomeCalendar() {
                 </div>
 
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#9a9a9a", marginBottom: 8 }}>Hygienist</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#9a9a9a", marginBottom: 8 }}>Hygienist/Assisted Hygiene</div>
                   {selectedAssignments.hygienists.length === 0 ? <p style={{ fontSize: 12, color: "#d4d4d4" }}>None available</p> :
                     selectedAssignments.hygienists.map((e) => (
                       <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5a5a5a", marginBottom: 4 }}>

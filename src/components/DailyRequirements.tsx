@@ -28,7 +28,7 @@ export default function DailyRequirements({
         </div>
 
         <div className="flex items-center justify-between rounded-lg border p-4">
-          <span>Hygienists Required</span>
+          <span>Hygienist/Assisted Hygiene Required</span>
           <span className="font-semibold">1</span>
         </div>
       </div>

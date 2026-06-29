@@ -132,7 +132,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
       </section>
 
       <section className="rounded-xl border p-4">
-        <h3 className="mb-3 font-semibold text-slate-700">Hygienist</h3>
+        <h3 className="mb-3 font-semibold text-slate-700">Hygienist/Assisted Hygiene</h3>
         {assignments.hygienists.length === 0 ? (
           <p className="text-sm text-slate-400">None available</p>
         ) : (
