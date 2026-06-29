@@ -113,9 +113,10 @@ export default function ScheduleBuilder() {
 
   const allDentists = staff.filter((e) => e.role === "Dentist").map((e) => e.name);
   const workingDentists = selectedDate && schedule[selectedDate] ? schedule[selectedDate].dentists : [];
-  const selectedAssignments = selectedDate
-    ? buildDailyAssignments(staff, workingDentists, selectedDate)
-    : undefined;
+  const selectedAssignments = useMemo(() => {
+    if (!selectedDate) return undefined;
+    return buildDailyAssignments(staff, workingDentists, selectedDate);
+  }, [staff, workingDentists, selectedDate, schedule]);
 
   function prevMonth() {
     if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1);
