@@ -1,8 +1,8 @@
 import { Employee } from "@/types/employee";
 import { DailyAssignments, DentistAssignment } from "@/types/assignment";
 import { getWeekday } from "./dateUtils";
-import { isUnavailable } from "./overrides";
-import { loadPrefs } from "./staffStore";
+import { StaffOverride } from "./overrides";
+import { DentistPrefs } from "./staffStore";
 
 export interface AssignmentWarning {
   severity: "warning" | "error";
@@ -16,16 +16,21 @@ export interface DailyAssignmentsResult extends DailyAssignments {
 export function buildDailyAssignments(
   employees: Employee[],
   workingDentistNames: string[],
-  date?: string
+  date?: string,
+  prefs: DentistPrefs = {},
+  overrides: StaffOverride[] = []
 ): DailyAssignmentsResult {
   const weekday = date ? getWeekday(date) : null;
-  const prefs = loadPrefs();
   const warnings: AssignmentWarning[] = [];
+
+  function isUnavailable(emp: Employee): boolean {
+    if (!date) return false;
+    return overrides.some((o) => o.employeeId === emp.id && o.date === date && !o.halfDay);
+  }
 
   function isAvailable(emp: Employee): boolean {
     const worksDay = weekday ? emp.defaultSchedule[weekday] : true;
-    const notOverridden = date ? !isUnavailable(emp.id, date) : true;
-    return worksDay && notOverridden;
+    return worksDay && !isUnavailable(emp);
   }
 
   const karla = employees.find((e) => e.name.startsWith("Karla"));
@@ -64,7 +69,6 @@ export function buildDailyAssignments(
     (e) => e.skills.includes("Assistant") && isAvailable(e) && !assignedIds.has(e.id)
   );
 
-  // Warn early if there aren't enough assistants for the dentists scheduled
   if (allAssistants.length < dentists.length) {
     const shortage = dentists.length - allAssistants.length;
     warnings.push({
