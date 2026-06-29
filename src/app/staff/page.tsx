@@ -189,7 +189,7 @@ export default function StaffPage() {
                   <label className="block text-sm font-medium text-gray-500 mb-2">Default Schedule</label>
                   <div className="flex gap-2">
                     {DAYS.map((day, i) => (
-                      <button key={day} onClick={() => toggleDay(day)} disabled={day === "tuesday"} className="flex-1 rounded-lg py-2 text-xs font-semibold transition" style={form.defaultSchedule[day] ? { backgroundColor: "#e8622a", color: "white" } : { background: "#f1f5f9", color: "#9ca3af" }}>
+                      <button key={day} onClick={() => toggleDay(day)} disabled={false} className="flex-1 rounded-lg py-2 text-xs font-semibold transition" style={form.defaultSchedule[day] ? { backgroundColor: "#e8622a", color: "white" } : { background: "#f1f5f9", color: "#9ca3af" }}>
                         {DAY_LABELS[i]}
                       </button>
                     ))}
