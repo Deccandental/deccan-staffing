@@ -39,8 +39,8 @@ export default function HolidaysPage() {
   useEffect(() => { if (authenticated) refresh(); }, [authenticated]);
 
   async function refresh() {
-    setHolidays(loadHolidays().sort((a, b) => a.date.localeCompare(b.date)));
-    const ot = await getOpenTuesdays();
+    const [h, ot] = await Promise.all([loadHolidays(), getOpenTuesdays()]);
+    setHolidays(h.sort((a, b) => a.date.localeCompare(b.date)));
     setOpenTuesdays(ot.sort((a, b) => a.date.localeCompare(b.date)));
   }
 
@@ -49,18 +49,18 @@ export default function HolidaysPage() {
     else { setPasscodeError(true); setPasscode(""); }
   }
 
-  function handleAdd() {
+  async function handleAdd() {
     setError("");
     if (!form.date) { setError("Please select a date."); return; }
     if (!form.name.trim()) { setError("Please enter a name."); return; }
-    addHoliday({ date: form.date, name: form.name.trim(), type: form.type });
+    await addHoliday({ date: form.date, name: form.name.trim(), type: form.type });
     setForm({ date: "", name: "", type: "holiday" });
-    refresh();
+    await refresh();
   }
 
-  function handleRemove(date: string) {
-    removeHoliday(date);
-    refresh();
+  async function handleRemove(date: string) {
+    await removeHoliday(date);
+    await refresh();
   }
 
   async function handleAddTuesday() {
@@ -70,15 +70,15 @@ export default function HolidaysPage() {
     if (dow !== 2) { setTuesdayError("Please select a Tuesday date."); return; }
     await addOpenTuesday(tuesdayForm.date, tuesdayForm.halfDay);
     setTuesdayForm({ date: "", halfDay: null });
-    refresh();
+    await refresh();
   }
 
   async function handleRemoveTuesday(date: string) {
     await removeOpenTuesday(date);
-    refresh();
+    await refresh();
   }
 
-  const days = generateMonth(year, month, openTuesdays);
+  const days = generateMonth(year, month, openTuesdays, holidays);
   const firstDow = new Date(year, month - 1, 1).getDay();
   const blanks = Array.from({ length: firstDow });
 
@@ -121,17 +121,21 @@ export default function HolidaysPage() {
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Date</label>
-                  <input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none" />
+                  <input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+                    className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Name</label>
-                  <input type="text" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Thanksgiving, Staff Training Day" className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none" />
+                  <input type="text" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g. Thanksgiving, Staff Training Day"
+                    className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-2">Type</label>
                   <div className="flex gap-2">
                     {(["holiday", "closure", "other"] as const).map((t) => (
-                      <button key={t} onClick={() => setForm((f) => ({ ...f, type: t }))} className="flex-1 rounded-xl border py-2 text-xs font-semibold transition"
+                      <button key={t} onClick={() => setForm((f) => ({ ...f, type: t }))}
+                        className="flex-1 rounded-xl border py-2 text-xs font-semibold transition"
                         style={form.type === t ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>
                         {TYPE_LABELS[t]}
                       </button>
@@ -152,7 +156,8 @@ export default function HolidaysPage() {
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Select a Tuesday</label>
-                  <input type="date" value={tuesdayForm.date} onChange={(e) => setTuesdayForm((f) => ({ ...f, date: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none" />
+                  <input type="date" value={tuesdayForm.date} onChange={(e) => setTuesdayForm((f) => ({ ...f, date: e.target.value }))}
+                    className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-2">Open for</label>
@@ -185,9 +190,7 @@ export default function HolidaysPage() {
                         <div className="text-sm font-semibold" style={{ color: "#1e40af" }}>
                           {new Date(t.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
                         </div>
-                        <div className="text-xs text-blue-400">
-                          {t.halfDay ? `${t.halfDay} only` : "Full day"}
-                        </div>
+                        <div className="text-xs text-blue-400">{t.halfDay ? `${t.halfDay} only` : "Full day"}</div>
                       </div>
                       <button onClick={() => handleRemoveTuesday(t.date)} className="rounded-lg px-3 py-1 text-xs text-red-400 hover:bg-red-50 hover:text-red-600 transition font-medium">Remove</button>
                     </div>
@@ -231,7 +234,7 @@ export default function HolidaysPage() {
             </div>
           </div>
 
-          {/* Right column - holidays list */}
+          {/* Right column */}
           <div className="space-y-4">
             <div className="rounded-2xl bg-white shadow overflow-hidden">
               <div className="px-6 py-4" style={{ borderBottom: "1px solid #f5f5f5" }}>
