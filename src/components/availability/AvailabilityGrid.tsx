@@ -29,24 +29,24 @@ export default function AvailabilityGrid({
   }
 
   return (
-    <div className="overflow-auto rounded-xl border bg-white shadow">
-      <table className="min-w-full border-collapse text-sm">
-        <thead className="sticky top-0 bg-slate-100">
+    <div className="rounded-2xl bg-white shadow overflow-auto">
+      <table className="w-full border-collapse">
+        <thead>
           <tr>
-            <th className="border p-3 text-left min-w-[230px]">
+            <th className="sticky left-0 bg-white border p-3 text-left min-w-[220px]">
               Employee
             </th>
 
             {days.map((day) => (
               <th
                 key={day.date}
-                className="border p-2 min-w-[58px]"
+                className="border p-2 min-w-[58px] text-center"
               >
-                <div className="font-bold">
+                <div className="font-semibold">
                   {day.day}
                 </div>
 
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-gray-500">
                   {day.weekday}
                 </div>
               </th>
@@ -57,21 +57,21 @@ export default function AvailabilityGrid({
         <tbody>
           {employees.map((employee) => (
             <tr key={employee.id}>
-              <td className="border p-3">
+              <td className="sticky left-0 bg-white border p-3">
                 <div className="flex items-center gap-3">
-                  <div
-                    className="h-4 w-4 rounded-full"
+                  <span
+                    className="w-3 h-3 rounded-full"
                     style={{
                       backgroundColor: employee.color,
                     }}
                   />
 
                   <div>
-                    <div className="font-semibold">
+                    <div className="font-medium">
                       {employee.name}
                     </div>
 
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-gray-500">
                       {employee.role}
                     </div>
                   </div>
@@ -93,13 +93,14 @@ export default function AvailabilityGrid({
                     className="border text-center"
                   >
                     <button
+                      type="button"
                       onClick={() =>
                         toggle(employee.id, day.date)
                       }
-                      className={`h-7 w-7 rounded-full transition hover:scale-110 ${
+                      className={`w-6 h-6 rounded-full transition ${
                         available
-                          ? "bg-green-500"
-                          : "bg-red-500"
+                          ? "bg-green-500 hover:bg-green-600"
+                          : "bg-red-500 hover:bg-red-600"
                       }`}
                     />
                   </td>

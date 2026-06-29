@@ -1,61 +1,51 @@
 "use client";
 
 interface Props {
-  dentistsWorking: number;
+  dentistCount: number;
 }
 
 export default function DailyRequirements({
-  dentistsWorking,
+  dentistCount,
 }: Props) {
-  const assistants = dentistsWorking;
-
-  const frontDesk = 2;
-
-  const hygienists = 1;
+  const assistantsRequired = dentistCount;
+  const frontDeskRequired = 2;
+  const hygienistsRequired = 1;
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
-
-      <h2 className="mb-5 text-2xl font-bold">
-        Daily Requirements
+      <h2 className="mb-6 text-2xl font-bold">
+        Staffing Requirements
       </h2>
 
       <div className="space-y-4">
-
-        <div className="flex justify-between border-b pb-2">
-          <span>Dentists</span>
-          <span className="font-bold">
-            {dentistsWorking}
+        <div className="flex items-center justify-between rounded-xl border p-4">
+          <span>Dentists Working</span>
+          <span className="font-semibold">
+            {dentistCount}
           </span>
         </div>
 
-        <div className="flex justify-between border-b pb-2">
-          <span>Front Desk</span>
-          <span className="font-bold">
-            {frontDesk}
+        <div className="flex items-center justify-between rounded-xl border p-4">
+          <span>Assistants Required</span>
+          <span className="font-semibold">
+            {assistantsRequired}
           </span>
         </div>
 
-        <div className="flex justify-between border-b pb-2">
-          <span>Assistants</span>
-          <span className="font-bold">
-            {assistants}
+        <div className="flex items-center justify-between rounded-xl border p-4">
+          <span>Front Desk Required</span>
+          <span className="font-semibold">
+            {frontDeskRequired}
           </span>
         </div>
 
-        <div className="flex justify-between">
-          <span>Hygienist</span>
-          <span className="font-bold">
-            {hygienists}
+        <div className="flex items-center justify-between rounded-xl border p-4">
+          <span>Hygienists Required</span>
+          <span className="font-semibold">
+            {hygienistsRequired}
           </span>
         </div>
-
       </div>
-
-      <div className="mt-6 rounded-xl bg-green-100 p-3 text-center font-semibold text-green-700">
-        Staffing Requirements Updated
-      </div>
-
     </div>
   );
 }

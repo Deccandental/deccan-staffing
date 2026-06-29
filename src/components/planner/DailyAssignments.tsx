@@ -1,148 +1,65 @@
 "use client";
 
-import { buildAssignments } from "@/utils/scheduler";
+import { DailyAssignments as DailyAssignmentsType } from "@/types/assignment";
 
 interface Props {
-  dentistsWorking: string[];
-  overrides: Record<string, string>;
-  setOverrides: React.Dispatch<
-    React.SetStateAction<Record<string, string>>
-  >;
+  selectedDate: string;
+  assignments?: DailyAssignmentsType;
 }
 
-const assistantChoices = [
-  "Karla",
-  "Stephanie",
-  "Unique",
-  "Cindy",
-  "Temp Assistant",
-];
+const EMPTY: DailyAssignmentsType = { dentists: [], frontDesk: [], hygienists: [] };
 
-export default function DailyAssignments({
-  dentistsWorking,
-  overrides,
-  setOverrides,
-}: Props) {
-
-  const assignments = buildAssignments(dentistsWorking);
-
-  function changeAssignment(
-    dentist: string,
-    assistant: string
-  ) {
-    setOverrides({
-      ...overrides,
-      [dentist]: assistant,
-    });
-  }
+export default function DailyAssignments({ selectedDate, assignments = EMPTY }: Props) {
+  const dateLabel = selectedDate
+    ? new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      })
+    : "Select a day";
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
+      <h2 className="mb-1 text-2xl font-bold">Daily Assignments</h2>
+      <p className="mb-6 text-slate-500">{dateLabel}</p>
 
-      <h2 className="mb-6 text-2xl font-bold">
-        Automatic Assignments
-      </h2>
-
-      {/* Front Desk */}
-
-      <div className="mb-8">
-
-        <h3 className="mb-2 text-lg font-semibold">
-          Front Desk
-        </h3>
-
-        {assignments.frontDesk.map((employee) => (
-          <div
-            key={employee.id}
-            className="py-1"
-          >
-            ✅ {employee.name}
-          </div>
-        ))}
-
-      </div>
-
-      {/* Hygienist */}
-
-      <div className="mb-8">
-
-        <h3 className="mb-2 text-lg font-semibold">
-          Hygienist
-        </h3>
-
-        {assignments.hygienists.map((employee) => (
-          <div
-            key={employee.id}
-            className="py-1"
-          >
-            ✅ {employee.name}
-          </div>
-        ))}
-
-      </div>
-
-      {/* Dentist Assignments */}
-
-      <div>
-
-        <h3 className="mb-4 text-lg font-semibold">
-          Dentist Assignments
-        </h3>
-
-        <div className="space-y-3">
-
-          {assignments.assistants.map((assignment) => {
-
-            const currentAssistant =
-              overrides[assignment.dentist] ??
-              assignment.assistant?.name ??
-              "Temp Assistant";
-
-            return (
-
-              <div
-                key={assignment.dentist}
-                className="rounded-xl border p-4"
-              >
-
-                <div className="mb-2 font-semibold">
-                  {assignment.dentist}
+      <div className="space-y-4">
+        <section className="rounded-xl border p-4">
+          <h3 className="mb-3 font-semibold">Dentist / Assistant Pairings</h3>
+          {assignments.dentists.length === 0 ? (
+            <p className="text-sm text-slate-400">No dentists selected.</p>
+          ) : (
+            <div className="space-y-2">
+              {assignments.dentists.map(({ dentist, assistant }) => (
+                <div key={dentist.id} className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                  <span className="font-medium">{dentist.name}</span>
+                  <span className={assistant ? "text-slate-600" : "text-amber-500"}>
+                    {assistant?.name ?? "No Assistant"}
+                  </span>
                 </div>
+              ))}
+            </div>
+          )}
+        </section>
 
-                <select
-                  value={currentAssistant}
-                  onChange={(e) =>
-                    changeAssignment(
-                      assignment.dentist,
-                      e.target.value
-                    )
-                  }
-                  className="w-full rounded-lg border p-2"
-                >
+        <section className="rounded-xl border p-4">
+          <h3 className="mb-3 font-semibold">Front Desk</h3>
+          {assignments.frontDesk.length === 0 ? (
+            <p className="text-sm text-slate-400">None available</p>
+          ) : assignments.frontDesk.map((e) => (
+            <div key={e.id} className="text-sm py-1">{e.name}</div>
+          ))}
+        </section>
 
-                  {assistantChoices.map((assistant) => (
-
-                    <option
-                      key={assistant}
-                      value={assistant}
-                    >
-                      {assistant}
-                    </option>
-
-                  ))}
-
-                </select>
-
-              </div>
-
-            );
-
-          })}
-
-        </div>
-
+        <section className="rounded-xl border p-4">
+          <h3 className="mb-3 font-semibold">Hygienist</h3>
+          {assignments.hygienists.length === 0 ? (
+            <p className="text-sm text-slate-400">None available</p>
+          ) : assignments.hygienists.map((e) => (
+            <div key={e.id} className="text-sm py-1">{e.name}</div>
+          ))}
+        </section>
       </div>
-
     </div>
   );
 }

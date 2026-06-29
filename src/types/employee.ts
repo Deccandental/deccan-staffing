@@ -1,22 +1,23 @@
+export type DentistSpecialty =
+  | "General Dentist"
+  | "Prosthodontist"
+  | "Periodontist"
+  | "Endodontist";
+
 export type EmployeeRole =
   | "Dentist"
+  | "RDA"
   | "Assistant"
   | "Front Desk"
   | "Hygienist";
 
 export interface Employee {
   id: number;
-
   name: string;
-
   role: EmployeeRole;
-
-  skills: EmployeeRole[];
-
-  active: boolean;
-
+  specialty?: DentistSpecialty;  // only for Dentists
   color: string;
-
+  skills: string[];
   defaultSchedule: {
     monday: boolean;
     tuesday: boolean;

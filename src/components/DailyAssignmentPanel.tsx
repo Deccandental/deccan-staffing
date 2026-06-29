@@ -1,118 +1,151 @@
-import { employees } from "../data/employees";
+"use client";
+
+import { useState } from "react";
+import { DailyAssignmentsResult } from "@/lib/assignmentEngine";
+import { Employee } from "@/types/employee";
+import { loadStaff } from "@/lib/staffStore";
 
 interface Props {
   selectedDate: string;
+  assignments?: DailyAssignmentsResult;
 }
 
-export default function DailyAssignmentPanel({
-  selectedDate,
-}: Props) {
-  const dentists = employees.filter(
-    (e) => e.role === "Dentist"
-  );
+const EMPTY: DailyAssignmentsResult = { dentists: [], frontDesk: [], hygienists: [], warnings: [] };
 
-  const assistants = employees.filter(
-    (e) => e.skills.includes("Assistant")
-  );
+export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY }: Props) {
+  const [overrides, setOverrides] = useState<Record<number, number | null>>({});
+  const [swapping, setSwapping] = useState<number | null>(null);
 
-  const frontDesk = employees.filter(
-    (e) => e.skills.includes("Front Desk")
-  );
+  const staff = loadStaff();
+  const availableAssistants = staff.filter((e) => e.skills.includes("Assistant"));
 
-  const hygienists = employees.filter(
-    (e) => e.role === "Hygienist"
-  );
+  const dateLabel = selectedDate
+    ? new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
+        weekday: "long", month: "long", day: "numeric",
+      })
+    : "";
+
+  function getAssistant(dentistId: number, defaultAssistant: Employee | null): Employee | null {
+    if (dentistId in overrides) {
+      const ovId = overrides[dentistId];
+      return ovId ? staff.find((e) => e.id === ovId) ?? null : null;
+    }
+    return defaultAssistant;
+  }
+
+  function handleOverride(dentistId: number, value: string) {
+    setOverrides((o) => ({ ...o, [dentistId]: value ? Number(value) : null }));
+    setSwapping(null);
+  }
 
   return (
-    <div className="bg-white rounded-2xl shadow p-6">
-
-      <h2 className="text-2xl font-bold mb-6">
-        Daily Assignments
-      </h2>
-
-      <p className="text-gray-500 mb-6">
-        {selectedDate || "Select a day from the planner"}
-      </p>
-
-      <div className="space-y-6">
-
-        <section>
-
-          <h3 className="font-semibold mb-2">
-            Dentists
-          </h3>
-
-          {dentists.map((d) => (
-            <label
-              key={d.id}
-              className="block"
-            >
-              <input type="checkbox" className="mr-2" />
-              {d.name}
-            </label>
-          ))}
-
-        </section>
-
-        <section>
-
-          <h3 className="font-semibold mb-2">
-            Assistants
-          </h3>
-
-          <select className="border rounded p-2 w-full">
-            <option>Select Assistant</option>
-
-            {assistants.map((a) => (
-              <option key={a.id}>
-                {a.name}
-              </option>
-            ))}
-
-          </select>
-
-        </section>
-
-        <section>
-
-          <h3 className="font-semibold mb-2">
-            Front Desk
-          </h3>
-
-          <select className="border rounded p-2 w-full">
-            <option>Select Front Desk</option>
-
-            {frontDesk.map((f) => (
-              <option key={f.id}>
-                {f.name}
-              </option>
-            ))}
-
-          </select>
-
-        </section>
-
-        <section>
-
-          <h3 className="font-semibold mb-2">
-            Hygienist
-          </h3>
-
-          <select className="border rounded p-2 w-full">
-            <option>Select Hygienist</option>
-
-            {hygienists.map((h) => (
-              <option key={h.id}>
-                {h.name}
-              </option>
-            ))}
-
-          </select>
-
-        </section>
-
+    <div className="rounded-2xl bg-white p-6 shadow">
+      <div className="mb-5">
+        <h2 className="text-2xl font-bold">Daily Assignments</h2>
+        <p className="mt-1 text-slate-500">{dateLabel || "Select a day"}</p>
       </div>
 
+      {assignments.warnings.length > 0 && (
+        <div className="mb-4 space-y-1 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          {assignments.warnings.map((w, i) => (
+            <p key={i} className={`text-sm ${w.severity === "error" ? "text-red-600" : "text-amber-700"}`}>
+              {w.severity === "error" ? "🔴" : "⚠️"} {w.message}
+            </p>
+          ))}
+        </div>
+      )}
+
+      <section className="mb-4 rounded-xl border p-4">
+        <h3 className="mb-3 font-semibold text-slate-700">Dentist / Assistant Pairings</h3>
+        {assignments.dentists.length === 0 ? (
+          <p className="text-sm text-slate-400">No dentists selected.</p>
+        ) : (
+          <div className="space-y-2">
+            {assignments.dentists.map(({ dentist, assistant }) => {
+              const resolvedAssistant = getAssistant(dentist.id, assistant);
+              const isOverridden = dentist.id in overrides;
+              return (
+                <div key={dentist.id} className="rounded-lg bg-slate-50 px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2 font-medium text-sm">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dentist.color }} />
+                      {dentist.name}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {swapping === dentist.id ? (
+                        <div className="flex items-center gap-1">
+                          <select
+                            className="rounded border border-slate-200 px-2 py-1 text-xs"
+                            defaultValue={resolvedAssistant?.id ?? ""}
+                            onChange={(e) => handleOverride(dentist.id, e.target.value)}
+                          >
+                            <option value="">No Assistant</option>
+                            {availableAssistants.map((a) => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                          </select>
+                          <button onClick={() => setSwapping(null)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className={`text-sm flex items-center gap-1.5 ${resolvedAssistant ? "text-slate-600" : "text-amber-500"}`}>
+                            {resolvedAssistant ? (
+                              <>
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: resolvedAssistant.color }} />
+                                {resolvedAssistant.name}
+                                {isOverridden && <span className="text-xs text-cyan-500 ml-1">(manual)</span>}
+                              </>
+                            ) : "No Assistant"}
+                          </span>
+                          <button
+                            onClick={() => setSwapping(dentist.id)}
+                            className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition"
+                            title="Override assignment"
+                          >
+                            swap
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className="mb-4 rounded-xl border p-4">
+        <h3 className="mb-3 font-semibold text-slate-700">Front Desk</h3>
+        {assignments.frontDesk.length === 0 ? (
+          <p className="text-sm text-slate-400">None available</p>
+        ) : (
+          <div className="space-y-1">
+            {assignments.frontDesk.map((e) => (
+              <div key={e.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: e.color }} />
+                {e.name}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border p-4">
+        <h3 className="mb-3 font-semibold text-slate-700">Hygienist</h3>
+        {assignments.hygienists.length === 0 ? (
+          <p className="text-sm text-slate-400">None available</p>
+        ) : (
+          <div className="space-y-1">
+            {assignments.hygienists.map((e) => (
+              <div key={e.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: e.color }} />
+                {e.name}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

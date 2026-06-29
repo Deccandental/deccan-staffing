@@ -5,57 +5,33 @@ interface Props {
 export default function DailyRequirements({
   dentistCount,
 }: Props) {
-  const assistants = dentistCount;
-  const frontDesk = 2;
-  const hygienists = 1;
-
   return (
-    <div className="bg-white rounded-2xl shadow p-6 mb-6">
-
-      <h2 className="text-xl font-bold mb-4">
-        Staffing Requirements
+    <div className="rounded-2xl bg-white p-6 shadow">
+      <h2 className="mb-6 text-2xl font-bold">
+        Daily Requirements
       </h2>
 
-      <div className="grid grid-cols-4 gap-4">
-
-        <div className="rounded-xl bg-blue-50 p-4">
-          <div className="text-sm text-gray-500">
-            Dentists
-          </div>
-          <div className="text-3xl font-bold">
-            {dentistCount}
-          </div>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <span>Dentists Scheduled</span>
+          <span className="font-semibold">{dentistCount}</span>
         </div>
 
-        <div className="rounded-xl bg-green-50 p-4">
-          <div className="text-sm text-gray-500">
-            Front Desk
-          </div>
-          <div className="text-3xl font-bold">
-            {frontDesk}
-          </div>
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <span>Front Desk Required</span>
+          <span className="font-semibold">2</span>
         </div>
 
-        <div className="rounded-xl bg-yellow-50 p-4">
-          <div className="text-sm text-gray-500">
-            Assistants
-          </div>
-          <div className="text-3xl font-bold">
-            {assistants}
-          </div>
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <span>Assistants Required</span>
+          <span className="font-semibold">{dentistCount}</span>
         </div>
 
-        <div className="rounded-xl bg-purple-50 p-4">
-          <div className="text-sm text-gray-500">
-            Hygienists
-          </div>
-          <div className="text-3xl font-bold">
-            {hygienists}
-          </div>
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <span>Hygienists Required</span>
+          <span className="font-semibold">1</span>
         </div>
-
       </div>
-
     </div>
   );
 }

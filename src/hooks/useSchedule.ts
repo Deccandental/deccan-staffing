@@ -1,36 +1,64 @@
 "use client";
 
-import { useState } from "react";
-import { ScheduleData } from "../types/schedule";
+import { useMemo, useState } from "react";
+import { employees } from "@/data/employees";
+import { buildDailyAssignments } from "@/lib/assignmentEngine";
+import { getWeekday } from "@/lib/dateUtils";
+
+interface DaySchedule {
+  dentists: string[];
+}
 
 export function useSchedule() {
-  const [schedule, setSchedule] = useState<ScheduleData>({});
+  const [selectedDate, setSelectedDate] = useState("");
+  const [schedule, setSchedule] = useState<Record<string, DaySchedule>>({});
 
-  function getDay(date: string) {
-    return (
-      schedule[date] || {
-        date,
-        dentists: [],
-        assistants: [],
-        frontDesk: [],
-        hygienists: [],
-      }
-    );
-  }
+  const allDentists = employees
+    .filter((e) => e.role === "Dentist")
+    .map((e) => e.name);
 
-  function updateDay(date: string, updates: Partial<ReturnType<typeof getDay>>) {
+  const workingDentists =
+    selectedDate && schedule[selectedDate]
+      ? schedule[selectedDate].dentists
+      : [];
+
+  function setWorkingDentists(dentists: string[]) {
+    if (!selectedDate) return;
     setSchedule((current) => ({
       ...current,
-      [date]: {
-        ...getDay(date),
-        ...updates,
-      },
+      [selectedDate]: { dentists },
     }));
   }
 
+  function handleSelectDate(date: string) {
+    setSelectedDate(date);
+    if (!schedule[date]) {
+      const dowKey = getWeekday(date);
+      const defaultDentists = employees
+        .filter((e) => e.role === "Dentist" && e.defaultSchedule[dowKey])
+        .map((e) => e.name);
+
+      setSchedule((current) => ({
+        ...current,
+        [date]: { dentists: defaultDentists },
+      }));
+    }
+  }
+
+  const assignments = useMemo(() => {
+    return buildDailyAssignments(employees, workingDentists, selectedDate || undefined);
+  }, [workingDentists, selectedDate]);
+
+  const dentistCount = assignments.dentists.length;
+
   return {
+    selectedDate,
+    setSelectedDate: handleSelectDate,
+    allDentists,
+    workingDentists,
+    setWorkingDentists,
+    assignments,
+    dentistCount,
     schedule,
-    getDay,
-    updateDay,
   };
 }

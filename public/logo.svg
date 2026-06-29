@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60">
+  <!-- Circle icon -->
+  <circle cx="30" cy="30" r="28" fill="#5a5a5a"/>
+  <path d="M30 2 A28 28 0 0 1 30 58 Z" fill="#7a7a7a"/>
+  <circle cx="22" cy="35" r="10" fill="none" stroke="white" stroke-width="2"/>
+  <circle cx="22" cy="35" r="5" fill="#e8622a"/>
+
+  <!-- deccan -->
+  <text x="68" y="32" font-family="Arial, sans-serif" font-size="20" font-weight="300" fill="#5a5a5a">deccan</text>
+  <!-- orange pipe -->
+  <rect x="132" y="14" width="2.5" height="22" fill="#e8622a"/>
+  <!-- dental -->
+  <text x="138" y="32" font-family="Arial, sans-serif" font-size="20" font-weight="300" fill="#5a5a5a">dental</text>
+  <!-- SLEEP CENTER -->
+  <text x="69" y="48" font-family="Arial, sans-serif" font-size="9" font-weight="400" letter-spacing="3" fill="#9a9a9a">SLEEP CENTER</text>
+</svg>

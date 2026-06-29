@@ -1,17 +1,18 @@
-"use client";
-
-import { employees } from "@/data/employees";
+import { employees } from "../data/employees";
 
 export default function StaffTable() {
   return (
-    <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
-      <table className="min-w-full text-sm">
-        <thead className="bg-slate-100">
-          <tr>
-            <th className="p-3 text-left">Name</th>
-            <th className="p-3 text-left">Role</th>
-            <th className="p-3 text-left">Skills</th>
-            <th className="p-3 text-left">Status</th>
+    <div className="rounded-2xl bg-white p-6 shadow">
+      <h2 className="mb-6 text-2xl font-bold">
+        Staff Directory
+      </h2>
+
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="border-b text-left">
+            <th className="p-3">Name</th>
+            <th className="p-3">Role</th>
+            <th className="p-3">Skills</th>
           </tr>
         </thead>
 
@@ -19,17 +20,16 @@ export default function StaffTable() {
           {employees.map((employee) => (
             <tr
               key={employee.id}
-              className="border-t hover:bg-slate-50"
+              className="border-b hover:bg-gray-50"
             >
-              <td className="p-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="h-4 w-4 rounded-full"
+              <td className="p-3 font-medium">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="h-3 w-3 rounded-full"
                     style={{
                       backgroundColor: employee.color,
                     }}
                   />
-
                   {employee.name}
                 </div>
               </td>
@@ -40,18 +40,6 @@ export default function StaffTable() {
 
               <td className="p-3">
                 {employee.skills.join(", ")}
-              </td>
-
-              <td className="p-3">
-                {employee.active ? (
-                  <span className="rounded bg-green-100 px-2 py-1 text-green-700">
-                    Active
-                  </span>
-                ) : (
-                  <span className="rounded bg-red-100 px-2 py-1 text-red-700">
-                    Inactive
-                  </span>
-                )}
               </td>
             </tr>
           ))}
