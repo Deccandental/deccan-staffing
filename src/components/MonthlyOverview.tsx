@@ -32,7 +32,9 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
 
       <div className="grid grid-cols-7 mb-2">
         {DAY_HEADERS.map((h) => (
-          <div key={h} className={`py-1 text-center text-xs font-semibold uppercase tracking-wide ${h === "Sun" || h === "Sat" ? "text-slate-300" : h === "Tue" ? "text-blue-300" : "text-slate-400"}`}>
+          <div key={h} className={`py-1 text-center text-xs font-semibold uppercase tracking-wide ${
+            h === "Sun" || h === "Sat" ? "text-slate-300" : h === "Tue" ? "text-blue-300" : "text-slate-400"
+          }`}>
             {h}
           </div>
         ))}
@@ -48,7 +50,7 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
           if (!day.isOpen) {
             return (
               <div key={day.date} className="rounded-lg p-2 text-center select-none"
-                style={{ opacity: isOpenTue ? 1 : 0.25 }}>
+                style={{ opacity: 0.25 }}>
                 <div className="text-xs text-slate-400">{day.weekday}</div>
                 <div className="text-sm font-medium text-slate-400">{day.day}</div>
               </div>
