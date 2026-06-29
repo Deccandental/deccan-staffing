@@ -272,17 +272,29 @@ export default function ScheduleBuilder() {
                   {allDentists.map((name) => {
                     const checked = workingDentists.includes(name);
                     const emp = staff.find((e) => e.name === name);
+                    const unavailable = emp && selectedDate ? isUnavailable(emp.id, selectedDate) : false;
                     return (
                       <button
                         key={name}
-                        onClick={() => setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name])}
-                        className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${checked ? "border-cyan-500 bg-cyan-50" : "border-slate-200 hover:bg-slate-50"}`}
+                        onClick={() => {
+                          if (unavailable) return;
+                          setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name]);
+                        }}
+                        className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
+                          unavailable ? "border-red-100 bg-red-50 opacity-60 cursor-not-allowed"
+                          : checked ? "border-orange-400 bg-orange-50"
+                          : "border-slate-200 hover:bg-slate-50"
+                        }`}
                       >
                         <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }} />
                         <span className="text-sm font-medium">{name}</span>
-                        <span className={`ml-auto h-4 w-4 rounded border flex items-center justify-center text-xs ${checked ? "bg-cyan-500 border-cyan-500 text-white" : "border-slate-300"}`}>
-                          {checked ? "✓" : ""}
-                        </span>
+                        {unavailable ? (
+                          <span className="ml-auto text-xs text-red-400 font-medium">Unavailable</span>
+                        ) : (
+                          <span className={`ml-auto h-4 w-4 rounded border flex items-center justify-center text-xs ${checked ? "text-white" : "border-slate-300"}`} style={checked ? { backgroundColor: "#e8622a", borderColor: "#e8622a" } : {}}>
+                            {checked ? "✓" : ""}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
