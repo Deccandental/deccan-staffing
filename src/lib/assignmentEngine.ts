@@ -109,7 +109,7 @@ export function buildDailyAssignments(
   }
 
   const orderedAssignments = dentists.map((d) => dentistAssignments.find((a) => a.dentist.id === d.id)!);
-  const hygienists = employees.filter((e) => e.role === "Hygienist" && isAvailable(e)).slice(0, 1);
+ const hygienists = employees.filter((e) => (e.role === "Hygienist" || e.skills.includes("Hygienist")) && isAvailable(e)).slice(0, 1);
 
   if (hygienists.length === 0 && dentists.length > 0) {
     warnings.push({ severity: "warning", message: "No hygienist available." });
