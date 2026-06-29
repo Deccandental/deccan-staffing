@@ -299,6 +299,7 @@ export default function ScheduleBuilder() {
                 </div>
               )}
               <DailyAssignmentPanel
+                key={`${selectedDate}-${workingDentists.join(",")}`}
                 selectedDate={selectedDate}
                 assignments={selectedAssignments}
               />
