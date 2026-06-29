@@ -28,6 +28,7 @@ const REASONS = [
   { key: "pto" as const, label: "PTO", active: "bg-blue-100 border-blue-300 text-blue-700", cell: "bg-blue-200 border-blue-300 text-blue-700", letter: "P", color: "#bfdbfe" },
   { key: "leave" as const, label: "Leave", active: "bg-purple-100 border-purple-300 text-purple-700", cell: "bg-purple-200 border-purple-300 text-purple-700", letter: "L", color: "#e9d5ff" },
   { key: "other" as const, label: "Other", active: "bg-slate-200 border-slate-300 text-slate-700", cell: "bg-slate-200 border-slate-300 text-slate-600", letter: "O", color: "#e2e8f0" },
+  { key: "remote" as const, label: "Remote", active: "bg-teal-100 border-teal-300 text-teal-700", cell: "bg-teal-200 border-teal-300 text-teal-700", letter: "R", color: "#99f6e4" },
 ];
 
 function getNextState(override: StaffOverride | undefined): "halfAM" | "halfPM" | "full" | "clear" {
@@ -164,10 +165,9 @@ export default function AvailabilityPage() {
                         <tr className="bg-slate-50">
                           <th className="p-3 text-left font-semibold text-slate-500 w-36">Name</th>
                           {days.map((d) => (
-                            <th key={d.date} className="p-2 text-center font-medium text-slate-400 min-w-[44px]">
-                              <div className="text-xs">{d.weekday}</div>
-                              <div className="text-xs font-bold text-slate-600">{d.day}</div>
-                              {d.isTuesday && <div className="text-xs text-blue-400">Tue</div>}
+                            <th key={d.date} className={`p-2 text-center font-medium min-w-[44px] ${d.isTuesday ? "bg-blue-50" : ""}`}>
+                              <div className={`text-xs ${d.isTuesday ? "text-blue-400" : "text-slate-400"}`}>{d.weekday}</div>
+                              <div className={`text-xs font-bold ${d.isTuesday ? "text-blue-600" : "text-slate-600"}`}>{d.day}</div>
                             </th>
                           ))}
                         </tr>
@@ -189,6 +189,7 @@ export default function AvailabilityPage() {
                               const shouldShow = worksDefault || isTuesdayOpen;
                               const override = getOverride(emp.id, d.date);
                               const reasonStyle = REASONS.find((r) => r.key === override?.reason) ?? REASONS[1];
+                              const isRemote = override?.reason === "remote" && !override.halfDay;
 
                               const approvedHalfReq = leaveRequests.find(
                                 (r) => r.employeeId === emp.id &&
@@ -196,22 +197,28 @@ export default function AvailabilityPage() {
                                   r.isPartialDay && r.status === "approved"
                               );
 
-                              const isFullDay = override && !override.halfDay;
+                              const isFullDay = override && !override.halfDay && !isRemote;
                               const isHalfAM = override?.halfDay === "AM";
                               const isHalfPM = override?.halfDay === "PM";
                               const isHalfFromLeave = approvedHalfReq && !override;
 
-                              const tooltip = isFullDay
-                                ? `${override?.reason} — full day out. Click to clear.`
+                              const tooltip = isRemote
+                                ? "Remote — working from home. Click to clear."
+                                : isFullDay ? `${override?.reason} — full day out. Click to clear.`
                                 : isHalfAM ? `AM off (${override?.reason}). Click for PM off.`
                                 : isHalfPM ? `PM off (${override?.reason}). Click for full day.`
                                 : isHalfFromLeave ? `Half day from approved leave`
                                 : "Click: AM off → PM off → Full day → Clear";
 
                               return (
-                                <td key={d.date} className="p-1 text-center">
+                                <td key={d.date} className={`p-1 text-center ${d.isTuesday ? "bg-blue-50" : ""}`}>
                                   {!shouldShow ? (
                                     <div className="mx-auto h-8 w-8 flex items-center justify-center text-slate-200 text-xs">—</div>
+                                  ) : isRemote ? (
+                                    <button onClick={() => handleToggle(emp.id, d.date)} title={tooltip}
+                                      className="mx-auto h-8 w-8 rounded border text-xs font-bold transition hover:opacity-75 flex items-center justify-center bg-teal-200 border-teal-300 text-teal-700">
+                                      R
+                                    </button>
                                   ) : isFullDay ? (
                                     <button onClick={() => handleToggle(emp.id, d.date)} title={tooltip}
                                       className={`mx-auto h-8 w-8 rounded border text-xs font-bold transition hover:opacity-75 flex items-center justify-center ${reasonStyle.cell}`}>
