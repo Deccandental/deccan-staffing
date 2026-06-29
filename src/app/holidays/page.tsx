@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Holiday, loadHolidays, addHoliday, removeHoliday } from "@/lib/holidays";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
+import { OpenTuesday, getOpenTuesdays, addOpenTuesday, removeOpenTuesday } from "@/lib/openTuesdays";
 
 const PASSCODE = "1528";
 
@@ -26,16 +27,21 @@ export default function HolidaysPage() {
   const [passcode, setPasscode] = useState("");
   const [passcodeError, setPasscodeError] = useState(false);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [form, setForm] = useState({ date: "", name: "", type: "holiday" as Holiday["type"] });
+  const [tuesdayForm, setTuesdayForm] = useState({ date: "", halfDay: null as "AM" | "PM" | null });
   const [error, setError] = useState("");
+  const [tuesdayError, setTuesdayError] = useState("");
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
 
   useEffect(() => { if (authenticated) refresh(); }, [authenticated]);
 
-  function refresh() {
+  async function refresh() {
     setHolidays(loadHolidays().sort((a, b) => a.date.localeCompare(b.date)));
+    const ot = await getOpenTuesdays();
+    setOpenTuesdays(ot.sort((a, b) => a.date.localeCompare(b.date)));
   }
 
   function handlePasscode() {
@@ -57,7 +63,22 @@ export default function HolidaysPage() {
     refresh();
   }
 
-  const days = generateMonth(year, month);
+  async function handleAddTuesday() {
+    setTuesdayError("");
+    if (!tuesdayForm.date) { setTuesdayError("Please select a Tuesday."); return; }
+    const dow = new Date(tuesdayForm.date + "T00:00:00").getDay();
+    if (dow !== 2) { setTuesdayError("Please select a Tuesday date."); return; }
+    await addOpenTuesday(tuesdayForm.date, tuesdayForm.halfDay);
+    setTuesdayForm({ date: "", halfDay: null });
+    refresh();
+  }
+
+  async function handleRemoveTuesday(date: string) {
+    await removeOpenTuesday(date);
+    refresh();
+  }
+
+  const days = generateMonth(year, month, openTuesdays);
   const firstDow = new Date(year, month - 1, 1).getDay();
   const blanks = Array.from({ length: firstDow });
 
@@ -70,7 +91,10 @@ export default function HolidaysPage() {
             <div className="text-5xl mb-4">🔐</div>
             <h1 className="text-2xl font-bold mb-1" style={{ color: "#5a5a5a" }}>Manager Access</h1>
             <p className="text-gray-400 text-sm mb-8">Enter your passcode to manage holidays</p>
-            <input type="password" value={passcode} onChange={(e) => setPasscode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handlePasscode()} placeholder="Enter passcode" maxLength={6} className={`w-full rounded-xl border px-4 py-3 text-center text-xl tracking-widest font-bold focus:outline-none mb-3 ${passcodeError ? "border-red-300 bg-red-50" : "border-gray-200"}`} />
+            <input type="password" value={passcode} onChange={(e) => setPasscode(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handlePasscode()}
+              placeholder="Enter passcode" maxLength={6}
+              className={`w-full rounded-xl border px-4 py-3 text-center text-xl tracking-widest font-bold focus:outline-none mb-3 ${passcodeError ? "border-red-300 bg-red-50" : "border-gray-200"}`} />
             {passcodeError && <p className="text-red-500 text-sm mb-3">Incorrect passcode.</p>}
             <button onClick={handlePasscode} className="w-full rounded-xl py-3 font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Unlock</button>
           </div>
@@ -85,11 +109,13 @@ export default function HolidaysPage() {
       <div className="ml-64 p-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold" style={{ color: "#5a5a5a" }}>Holidays & Closures</h1>
-          <p className="mt-1 text-gray-400">Mark days the office is closed — they'll be blocked on the calendar and schedule</p>
+          <p className="mt-1 text-gray-400">Mark days the office is closed, or open Tuesdays when needed</p>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="space-y-4">
+
+            {/* Add Holiday */}
             <div className="rounded-2xl bg-white p-6 shadow">
               <h2 className="text-lg font-bold mb-4" style={{ color: "#5a5a5a" }}>Add Holiday or Closure</h2>
               <div className="space-y-3">
@@ -105,7 +131,8 @@ export default function HolidaysPage() {
                   <label className="block text-sm font-medium text-gray-500 mb-2">Type</label>
                   <div className="flex gap-2">
                     {(["holiday", "closure", "other"] as const).map((t) => (
-                      <button key={t} onClick={() => setForm((f) => ({ ...f, type: t }))} className="flex-1 rounded-xl border py-2 text-xs font-semibold transition" style={form.type === t ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>
+                      <button key={t} onClick={() => setForm((f) => ({ ...f, type: t }))} className="flex-1 rounded-xl border py-2 text-xs font-semibold transition"
+                        style={form.type === t ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>
                         {TYPE_LABELS[t]}
                       </button>
                     ))}
@@ -118,6 +145,58 @@ export default function HolidaysPage() {
               </div>
             </div>
 
+            {/* Open Tuesdays */}
+            <div className="rounded-2xl bg-white p-6 shadow">
+              <h2 className="text-lg font-bold mb-1" style={{ color: "#5a5a5a" }}>Open Tuesdays</h2>
+              <p className="text-xs text-gray-400 mb-4">Mark specific Tuesdays when the office is open</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-1">Select a Tuesday</label>
+                  <input type="date" value={tuesdayForm.date} onChange={(e) => setTuesdayForm((f) => ({ ...f, date: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-2">Open for</label>
+                  <div className="flex gap-2">
+                    {([
+                      { label: "Full Day", value: null },
+                      { label: "AM Only", value: "AM" as const },
+                      { label: "PM Only", value: "PM" as const },
+                    ]).map((opt) => (
+                      <button key={String(opt.value)} onClick={() => setTuesdayForm((f) => ({ ...f, halfDay: opt.value }))}
+                        className="flex-1 rounded-xl border py-2 text-xs font-semibold transition"
+                        style={tuesdayForm.halfDay === opt.value ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {tuesdayError && <p className="text-red-500 text-sm">{tuesdayError}</p>}
+                <button onClick={handleAddTuesday} className="w-full rounded-xl py-2.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#2563eb" }}>
+                  + Mark Tuesday as Open
+                </button>
+              </div>
+
+              {openTuesdays.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Scheduled Open Tuesdays</div>
+                  {openTuesdays.map((t) => (
+                    <div key={t.date} className="flex items-center justify-between rounded-xl bg-blue-50 px-4 py-2.5">
+                      <div>
+                        <div className="text-sm font-semibold" style={{ color: "#1e40af" }}>
+                          {new Date(t.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+                        </div>
+                        <div className="text-xs text-blue-400">
+                          {t.halfDay ? `${t.halfDay} only` : "Full day"}
+                        </div>
+                      </div>
+                      <button onClick={() => handleRemoveTuesday(t.date)} className="rounded-lg px-3 py-1 text-xs text-red-400 hover:bg-red-50 hover:text-red-600 transition font-medium">Remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Mini calendar */}
             <div className="rounded-2xl bg-white p-5 shadow">
               <div className="flex items-center justify-between mb-4">
                 <button onClick={() => { if (month === 1) { setYear(y => y-1); setMonth(12); } else setMonth(m => m-1); }} className="px-2 py-1 text-gray-400 hover:text-gray-700">←</button>
@@ -131,11 +210,20 @@ export default function HolidaysPage() {
                 {blanks.map((_, i) => <div key={`b${i}`} />)}
                 {days.map((day) => {
                   const holiday = holidays.find((h) => h.date === day.date);
-                  const isWeekend = !day.isOpen && !holiday;
+                  const isOpenTue = day.isOpenTuesday;
+                  const isClosedTue = day.isTuesday && !isOpenTue;
                   return (
-                    <div key={day.date} className="relative rounded-lg p-1 text-center" style={{ background: holiday ? "#fee2e2" : isWeekend ? "#fafafa" : "white", border: holiday ? "1px solid #fca5a5" : "1px solid transparent", minHeight: 36 }}>
-                      <div style={{ fontSize: 11, fontWeight: holiday ? 700 : 400, color: holiday ? "#dc2626" : isWeekend ? "#d4d4d4" : "#5a5a5a" }}>{day.day}</div>
+                    <div key={day.date} className="relative rounded-lg p-1 text-center"
+                      style={{
+                        background: holiday ? "#fee2e2" : isOpenTue ? "#dbeafe" : isClosedTue ? "#fafafa" : "white",
+                        border: holiday ? "1px solid #fca5a5" : isOpenTue ? "1px solid #93c5fd" : "1px solid transparent",
+                        minHeight: 36,
+                      }}>
+                      <div style={{ fontSize: 11, fontWeight: holiday || isOpenTue ? 700 : 400, color: holiday ? "#dc2626" : isOpenTue ? "#1d4ed8" : isClosedTue ? "#d4d4d4" : "#5a5a5a" }}>
+                        {day.day}
+                      </div>
                       {holiday && <div style={{ fontSize: 8, color: "#dc2626", lineHeight: 1, marginTop: 1 }}>{holiday.name.slice(0, 8)}</div>}
+                      {isOpenTue && <div style={{ fontSize: 8, color: "#1d4ed8", lineHeight: 1, marginTop: 1 }}>{day.tuesdayHalfDay ?? "Open"}</div>}
                     </div>
                   );
                 })}
@@ -143,32 +231,35 @@ export default function HolidaysPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl bg-white shadow overflow-hidden">
-            <div className="px-6 py-4" style={{ borderBottom: "1px solid #f5f5f5" }}>
-              <h2 className="text-lg font-bold" style={{ color: "#5a5a5a" }}>All Holidays & Closures</h2>
-              <p className="text-xs text-gray-400 mt-0.5">{holidays.length} day{holidays.length !== 1 ? "s" : ""} marked</p>
-            </div>
-            <div>
-              {holidays.length === 0 ? (
-                <div className="p-8 text-center"><p className="text-gray-300 text-sm">No holidays or closures added yet</p></div>
-              ) : holidays.map((h) => (
-                <div key={h.date} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50" style={{ borderBottom: "1px solid #f5f5f5" }}>
-                  <div className="flex items-center gap-3">
-                    <div className="text-center" style={{ minWidth: 48 }}>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: "#e8622a" }}>{new Date(h.date + "T00:00:00").getDate()}</div>
-                      <div style={{ fontSize: 10, color: "#9a9a9a", textTransform: "uppercase" }}>{new Date(h.date + "T00:00:00").toLocaleDateString("en-US", { month: "short" })}</div>
-                    </div>
-                    <div>
-                      <div className="font-semibold text-sm" style={{ color: "#5a5a5a" }}>{h.name}</div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TYPE_STYLES[h.type]}`}>{TYPE_LABELS[h.type]}</span>
-                        <span className="text-xs text-gray-400">{new Date(h.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" })}</span>
+          {/* Right column - holidays list */}
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-white shadow overflow-hidden">
+              <div className="px-6 py-4" style={{ borderBottom: "1px solid #f5f5f5" }}>
+                <h2 className="text-lg font-bold" style={{ color: "#5a5a5a" }}>All Holidays & Closures</h2>
+                <p className="text-xs text-gray-400 mt-0.5">{holidays.length} day{holidays.length !== 1 ? "s" : ""} marked</p>
+              </div>
+              <div>
+                {holidays.length === 0 ? (
+                  <div className="p-8 text-center"><p className="text-gray-300 text-sm">No holidays or closures added yet</p></div>
+                ) : holidays.map((h) => (
+                  <div key={h.date} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50" style={{ borderBottom: "1px solid #f5f5f5" }}>
+                    <div className="flex items-center gap-3">
+                      <div className="text-center" style={{ minWidth: 48 }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: "#e8622a" }}>{new Date(h.date + "T00:00:00").getDate()}</div>
+                        <div style={{ fontSize: 10, color: "#9a9a9a", textTransform: "uppercase" }}>{new Date(h.date + "T00:00:00").toLocaleDateString("en-US", { month: "short" })}</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold text-sm" style={{ color: "#5a5a5a" }}>{h.name}</div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TYPE_STYLES[h.type]}`}>{TYPE_LABELS[h.type]}</span>
+                          <span className="text-xs text-gray-400">{new Date(h.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" })}</span>
+                        </div>
                       </div>
                     </div>
+                    <button onClick={() => handleRemove(h.date)} className="rounded-lg px-3 py-1.5 text-xs text-red-400 hover:bg-red-50 hover:text-red-600 transition font-medium">Remove</button>
                   </div>
-                  <button onClick={() => handleRemove(h.date)} className="rounded-lg px-3 py-1.5 text-xs text-red-400 hover:bg-red-50 hover:text-red-600 transition font-medium">Remove</button>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         </div>
