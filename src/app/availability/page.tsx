@@ -64,8 +64,9 @@ export default function AvailabilityPage() {
   }, [year, month]);
 
   async function refresh() {
-    const o = await getOverrides();
+    const [o, ot] = await Promise.all([getOverrides(), getOpenTuesdays()]);
     setOverrides(o);
+    setOpenTuesdays(ot);
   }
 
   async function handleToggle(employeeId: number, date: string) {
