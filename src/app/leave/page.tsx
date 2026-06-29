@@ -158,10 +158,23 @@ export default function LeavePage() {
   });
 
   const summaryByEmployee = staff.map((emp) => {
-    const empAbsences = allAbsences.filter((a) => a.employeeId === emp.id);
-    const approved = empAbsences.filter((a) => a.status === "approved").reduce((s, a) => s + (a.totalDays ?? 1), 0);
-    const pending = empAbsences.filter((a) => a.status === "pending").length;
-    const manual = empAbsences.filter((a) => a.status === "manual").length;
+    const empRequests = requests.filter((r) => r.employeeId === emp.id);
+    const empOverrides = overrides.filter((o) => o.employeeId === emp.id);
+    const approved = empRequests.filter((r) => r.status === "approved").reduce((s, r) => s + (r.totalDays ?? 1), 0);
+    const pending = empRequests.filter((r) => r.status === "pending").length;
+    // Only count manual overrides that don't overlap with approved leave requests
+    const approvedDates = new Set(
+      empRequests
+        .filter((r) => r.status === "approved")
+        .flatMap((r) => {
+          const dates: string[] = [];
+          const cur = new Date(r.startDate + "T00:00:00");
+          const end = new Date(r.endDate + "T00:00:00");
+          while (cur <= end) { dates.push(cur.toISOString().split("T")[0]); cur.setDate(cur.getDate() + 1); }
+          return dates;
+        })
+    );
+    const manual = empOverrides.filter((o) => !approvedDates.has(o.date)).length;
     return { emp, approved, pending, manual, total: approved + manual };
   }).filter((s) => s.total > 0 || s.pending > 0);
 
