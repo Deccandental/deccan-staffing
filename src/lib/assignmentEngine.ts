@@ -64,6 +64,15 @@ export function buildDailyAssignments(
     (e) => e.skills.includes("Assistant") && isAvailable(e) && !assignedIds.has(e.id)
   );
 
+  // Warn early if there aren't enough assistants for the dentists scheduled
+  if (allAssistants.length < dentists.length) {
+    const shortage = dentists.length - allAssistants.length;
+    warnings.push({
+      severity: "error",
+      message: `${shortage} temp assistant${shortage !== 1 ? "s" : ""} needed — only ${allAssistants.length} of ${dentists.length} required available.`,
+    });
+  }
+
   const drHo = dentists.find((d) => d.name.startsWith("Dr. Ho"));
   const sortedDentists = drHo ? [drHo, ...dentists.filter((d) => d.id !== drHo.id)] : dentists;
   const dentistAssignments: DentistAssignment[] = [];
@@ -88,7 +97,7 @@ export function buildDailyAssignments(
     }
 
     if (!assistant) {
-      warnings.push({ severity: "warning", message: `No assistant available for ${dentist.name}.` });
+      warnings.push({ severity: "warning", message: `No assistant available for ${dentist.name} — temp needed.` });
     }
 
     dentistAssignments.push({ dentist, assistant });
