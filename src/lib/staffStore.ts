@@ -1,60 +1,28 @@
-import { Employee } from "@/types/employee";
 import { supabase } from "./supabase";
 
-export type DentistPrefs = Record<number, number[]>;
-
-function rowToEmployee(row: any): Employee {
-  return {
-    id: row.id,
-    name: row.name,
-    role: row.role,
-    specialty: row.specialty ?? undefined,
-    color: row.color,
-    skills: row.skills ?? [],
-    email: row.email ?? "",
-    defaultSchedule: row.default_schedule,
-  };
+export interface OpenTuesday {
+  date: string;
+  halfDay: "AM" | "PM" | null;
 }
 
-export async function loadStaff(): Promise<Employee[]> {
-  const { data, error } = await supabase.from("staff").select("*").order("id");
-  if (error) { console.error("loadStaff error:", error); return []; }
-  return (data ?? []).map(rowToEmployee);
+export async function getOpenTuesdays(): Promise<OpenTuesday[]> {
+  const { data, error } = await supabase.from("open_tuesdays").select("*");
+  if (error) { console.error("getOpenTuesdays error:", error); return []; }
+  return (data ?? []).map((row) => ({
+    date: row.date,
+    halfDay: row.half_day ?? null,
+  }));
 }
 
-export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee | null> {
-  const { data, error } = await supabase.from("staff").insert({
-    name: emp.name, role: emp.role, specialty: emp.specialty ?? null,
-    color: emp.color, skills: emp.skills, email: emp.email ?? "",
-    default_schedule: emp.defaultSchedule,
-  }).select().single();
-  if (error) { console.error("addEmployee error:", error); return null; }
-  return rowToEmployee(data);
+export async function addOpenTuesday(date: string, halfDay: "AM" | "PM" | null): Promise<void> {
+  const { error } = await supabase.from("open_tuesdays").upsert({ 
+    date, 
+    half_day: halfDay 
+  });
+  if (error) console.error("addOpenTuesday error:", error);
 }
 
-export async function updateEmployee(emp: Employee): Promise<void> {
-  const { error } = await supabase.from("staff").update({
-    name: emp.name, role: emp.role, specialty: emp.specialty ?? null,
-    color: emp.color, skills: emp.skills, email: emp.email ?? "",
-    default_schedule: emp.defaultSchedule,
-  }).eq("id", emp.id);
-  if (error) console.error("updateEmployee error:", error);
-}
-
-export async function removeEmployee(id: number): Promise<void> {
-  const { error } = await supabase.from("staff").delete().eq("id", id);
-  if (error) console.error("removeEmployee error:", error);
-}
-
-export async function loadPrefs(): Promise<DentistPrefs> {
-  const { data, error } = await supabase.from("dentist_prefs").select("*");
-  if (error) { console.error("loadPrefs error:", error); return {}; }
-  const prefs: DentistPrefs = {};
-  for (const row of data ?? []) { prefs[row.dentist_id] = row.assistant_ids; }
-  return prefs;
-}
-
-export async function setDentistPrefs(dentistId: number, assistantIds: number[]): Promise<void> {
-  const { error } = await supabase.from("dentist_prefs").upsert({ dentist_id: dentistId, assistant_ids: assistantIds });
-  if (error) console.error("setDentistPrefs error:", error);
+export async function removeOpenTuesday(date: string): Promise<void> {
+  const { error } = await supabase.from("open_tuesdays").delete().eq("date", date);
+  if (error) console.error("removeOpenTuesday error:", error);
 }
