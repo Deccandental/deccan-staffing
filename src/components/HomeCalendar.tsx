@@ -24,7 +24,10 @@ export default function HomeCalendar() {
   const [schedule, setSchedule] = useState<Record<string, { dentists: string[] }>>({});
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
-  useEffect(() => { setStaff(loadStaff()); setSchedule(loadSchedule()); }, []);
+  useEffect(() => {
+    loadStaff().then(setStaff);
+    setSchedule(loadSchedule());
+  }, []);
 
   const days = generateMonth(year, month);
   const firstDow = new Date(year, month - 1, 1).getDay();
@@ -73,11 +76,9 @@ export default function HomeCalendar() {
                 deccan<span style={{ color: "#e8622a" }}>|</span>dental
               </h1>
               <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, margin: "4px 0 0", letterSpacing: "0.15em", textTransform: "uppercase", fontWeight: 400 }}>Sleep Center</p>
-
               <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginTop: 12 }}>
                 {formatMonthYear(year, month)} — {completeDays} of {openDays.length} days fully staffed
               </p>
-
               <div style={{ marginTop: 10, width: 280, height: 4, background: "rgba(255,255,255,0.15)", borderRadius: 2, overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${openDays.length > 0 ? (completeDays / openDays.length) * 100 : 0}%`, background: "#e8622a", borderRadius: 2, transition: "width 0.5s" }} />
               </div>
