@@ -44,7 +44,7 @@ export function cancelLeaveRequest(id: string): boolean {
 }
 
 export function countBusinessDays(start: string, end: string): number {
-  const CLOSED = new Set([0, 2, 6]);
+  const CLOSED = new Set([0, 6]); // Tuesdays now flexible
   let count = 0;
   const cur = new Date(start + "T00:00:00");
   const endDate = new Date(end + "T00:00:00");

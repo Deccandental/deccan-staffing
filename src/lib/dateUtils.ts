@@ -25,6 +25,6 @@ export function isWeekend(date: string): boolean {
 
 export function isOfficeOpen(date: string): boolean {
   const dow = parseLocalDate(date).getDay();
-  // Closed: Sunday=0, Tuesday=2, Saturday=6
-  return dow !== 0 && dow !== 2 && dow !== 6;
+  // Closed: Sunday=0, Saturday=6 — Tuesdays now flexible
+  return dow !== 0 && dow !== 6;
 }

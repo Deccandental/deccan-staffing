@@ -17,7 +17,7 @@ import {
 const ROLES = ["Dentist", "Assistant", "Front Desk", "Hygienist"] as const;
 
 const DAY_MAP: Record<string, keyof typeof employees[0]["defaultSchedule"]> = {
-  Mon: "monday", Wed: "wednesday", Thu: "thursday", Fri: "friday",
+  Mon: "monday", Tue: "tuesday", Wed: "wednesday", Thu: "thursday", Fri: "friday",
 };
 
 const REASONS = [

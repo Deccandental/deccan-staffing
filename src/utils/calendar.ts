@@ -8,7 +8,7 @@ export interface CalendarDay {
   holidayName?: string;
 }
 
-const CLOSED_WEEKDAYS = new Set([0, 2, 6]); // Sun=0, Tue=2, Sat=6
+const CLOSED_WEEKDAYS = new Set([0, 6]); // Sun=0, Sat=6 — Tuesdays now flexible
 
 export function generateMonth(year: number, month: number): CalendarDay[] {
   let holidayMap: Record<string, string> = {};
