@@ -5,7 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { Holiday, loadHolidays, addHoliday, removeHoliday } from "@/lib/holidays";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 
-const PASSCODE = "2503";
+const PASSCODE = "1528";
 
 const TYPE_STYLES: Record<string, string> = {
   holiday: "bg-red-100 text-red-700",
