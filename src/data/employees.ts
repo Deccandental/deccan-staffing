@@ -85,4 +85,12 @@ export const employees: Employee[] = [
     skills: ["Hygienist", "Assistant"],
     defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
   },
+  {
+    id: 11,
+    name: "Yoyo",
+    role: "Assistant",
+    color: "#f59e0b",
+    skills: ["Assistant"],
+    defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
+  },
 ];
