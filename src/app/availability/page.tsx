@@ -7,11 +7,9 @@ import { Sidebar } from "@/components/Sidebar";
 import { loadStaff } from "@/lib/staffStore";
 import { Employee } from "@/types/employee";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
+import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import {
-  getOverrides,
-  setUnavailable,
-  clearUnavailable,
-  StaffOverride,
+  getOverrides, setUnavailable, clearUnavailable, StaffOverride,
 } from "@/lib/overrides";
 
 const ROLE_GROUPS = [
@@ -47,17 +45,19 @@ export default function AvailabilityPage() {
   const [selectedReason, setSelectedReason] = useState<StaffOverride["reason"]>("pto");
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [staff, setStaff] = useState<Employee[]>([]);
+  const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const days = generateMonth(year, month).filter((d) => d.isOpen);
+  const days = generateMonth(year, month, openTuesdays).filter((d) => d.isOpen);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const [o, l, s] = await Promise.all([getOverrides(), loadLeaveRequests(), loadStaff()]);
+      const [o, l, s, ot] = await Promise.all([getOverrides(), loadLeaveRequests(), loadStaff(), getOpenTuesdays()]);
       setOverrides(o);
       setLeaveRequests(l);
       setStaff(s);
+      setOpenTuesdays(ot);
       setLoading(false);
     }
     load();
@@ -102,6 +102,7 @@ export default function AvailabilityPage() {
         </div>
         <p className="mb-6 text-slate-500">
           Click once for <strong>AM off</strong>, twice for <strong>PM off</strong>, three times for <strong>full day out</strong>, four times to clear.
+          Tuesdays only appear if marked open in <a href="/holidays" className="text-blue-500 underline">Holidays & Closures</a>.
         </p>
 
         <div className="mb-6 flex flex-wrap items-center gap-4">
@@ -165,6 +166,7 @@ export default function AvailabilityPage() {
                             <th key={d.date} className="p-2 text-center font-medium text-slate-400 min-w-[44px]">
                               <div className="text-xs">{d.weekday}</div>
                               <div className="text-xs font-bold text-slate-600">{d.day}</div>
+                              {d.isTuesday && <div className="text-xs text-blue-400">Tue</div>}
                             </th>
                           ))}
                         </tr>
@@ -182,6 +184,8 @@ export default function AvailabilityPage() {
                             {days.map((d) => {
                               const schedKey = DAY_MAP[d.weekday];
                               const worksDefault = schedKey ? emp.defaultSchedule[schedKey] : false;
+                              const isTuesdayOpen = d.isTuesday && d.isOpenTuesday;
+                              const shouldShow = worksDefault || isTuesdayOpen;
                               const override = getOverride(emp.id, d.date);
                               const reasonStyle = REASONS.find((r) => r.key === override?.reason) ?? REASONS[1];
 
@@ -205,7 +209,7 @@ export default function AvailabilityPage() {
 
                               return (
                                 <td key={d.date} className="p-1 text-center">
-                                  {!worksDefault ? (
+                                  {!shouldShow ? (
                                     <div className="mx-auto h-8 w-8 flex items-center justify-center text-slate-200 text-xs">—</div>
                                   ) : isFullDay ? (
                                     <button onClick={() => handleToggle(emp.id, d.date)} title={tooltip}
