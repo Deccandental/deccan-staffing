@@ -30,7 +30,6 @@ export function buildDailyAssignments(
   }
 
   function isAvailable(emp: Employee): boolean {
-    // For open Tuesdays, skip the default schedule check
     const worksDay = isOpenTuesday ? true : (weekday ? emp.defaultSchedule[weekday] : true);
     return worksDay && !isUnavailable(emp);
   }
