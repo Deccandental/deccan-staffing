@@ -5,7 +5,7 @@ import { loadStaff } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getWeekday } from "@/lib/dateUtils";
-import { getOverrides, isUnavailable } from "@/lib/overrides";
+import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { Employee } from "@/types/employee";
 import MonthlyOverview from "./MonthlyOverview";
 import DentistSelector from "./DentistSelector";
@@ -30,21 +30,23 @@ export default function ScheduleBuilder() {
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [staff, setStaff] = useState<Employee[]>([]);
+  const [overrides, setOverrides] = useState<StaffOverride[]>([]);
   const [schedule, setSchedule] = useState<Record<string, { dentists: string[] }>>({});
   const [selectedDate, setSelectedDate] = useState("");
 
-  useEffect(() => { setStaff(loadStaff()); }, []);
+  useEffect(() => {
+    loadStaff().then(setStaff);
+    getOverrides().then(setOverrides);
+  }, []);
 
   const SCHEDULE_KEY = "deccan-schedule-v1";
 
-  // Persist schedule to localStorage so home calendar can read it
   useEffect(() => {
     if (typeof window !== "undefined" && Object.keys(schedule).length > 0) {
       localStorage.setItem(SCHEDULE_KEY, JSON.stringify(schedule));
     }
   }, [schedule]);
 
-  // Load saved schedule on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -56,7 +58,6 @@ export default function ScheduleBuilder() {
 
   const openDays = generateMonth(year, month).filter((d) => d.isOpen);
 
-  // Auto-fill all days with default dentist schedules
   function applyDefaults() {
     const filled: Record<string, { dentists: string[] }> = { ...schedule };
     for (const day of openDays) {
@@ -87,7 +88,6 @@ export default function ScheduleBuilder() {
     setSchedule((c) => ({ ...c, [selectedDate]: { dentists } }));
   }
 
-  // Compute status for each day
   const dayStatuses = useMemo(() => {
     const statuses: Record<string, "complete" | "warning" | "empty"> = {};
     for (const day of openDays) {
@@ -118,16 +118,18 @@ export default function ScheduleBuilder() {
     return buildDailyAssignments(staff, workingDentists, selectedDate);
   }, [staff, workingDentists, selectedDate, schedule]);
 
+  function isUnavailable(empId: number, date: string): boolean {
+    return overrides.some((o) => o.employeeId === empId && o.date === date && !o.halfDay);
+  }
+
   function prevMonth() {
     if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1);
-    setSchedule({});
-    setSelectedDate("");
+    setSchedule({}); setSelectedDate("");
   }
 
   function nextMonth() {
     if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1);
-    setSchedule({});
-    setSelectedDate("");
+    setSchedule({}); setSelectedDate("");
   }
 
   return (
@@ -140,11 +142,9 @@ export default function ScheduleBuilder() {
               <button
                 onClick={() => s.id <= step + 1 && setStep(s.id)}
                 className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                  step === s.id
-                    ? "bg-cyan-600 text-white shadow"
-                    : s.id < step
-                    ? "text-cyan-600 hover:bg-cyan-50"
-                    : "text-slate-300 cursor-not-allowed"
+                  step === s.id ? "bg-cyan-600 text-white shadow"
+                  : s.id < step ? "text-cyan-600 hover:bg-cyan-50"
+                  : "text-slate-300 cursor-not-allowed"
                 }`}
               >
                 <span>{s.icon}</span>
@@ -163,21 +163,15 @@ export default function ScheduleBuilder() {
         <div className="rounded-2xl bg-white p-8 shadow">
           <h2 className="text-2xl font-bold mb-2">Which month are you scheduling?</h2>
           <p className="text-slate-500 mb-8">Select the month you want to build a schedule for.</p>
-
           <div className="flex items-center gap-4 mb-8">
             <button onClick={prevMonth} className="rounded-xl border px-4 py-2 text-slate-500 hover:bg-slate-50 transition">←</button>
             <span className="text-3xl font-bold min-w-[220px] text-center">{formatMonthYear(year, month)}</span>
             <button onClick={nextMonth} className="rounded-xl border px-4 py-2 text-slate-500 hover:bg-slate-50 transition">→</button>
           </div>
-
           <div className="rounded-xl bg-slate-50 p-4 mb-8">
             <p className="text-sm text-slate-500">{totalDays} working days in {formatMonthYear(year, month)} (Mon, Wed, Thu, Fri only)</p>
           </div>
-
-          <button
-            onClick={() => { applyDefaults(); setStep(2); }}
-            className="rounded-xl bg-cyan-600 px-8 py-3 font-semibold text-white hover:bg-cyan-700 transition"
-          >
+          <button onClick={() => { applyDefaults(); setStep(2); }} className="rounded-xl bg-cyan-600 px-8 py-3 font-semibold text-white hover:bg-cyan-700 transition">
             Continue to Mark Absences →
           </button>
         </div>
@@ -187,24 +181,13 @@ export default function ScheduleBuilder() {
       {step === 2 && (
         <div className="rounded-2xl bg-white p-8 shadow">
           <h2 className="text-2xl font-bold mb-2">Mark staff absences</h2>
-          <p className="text-slate-500 mb-6">
-            Go to the <strong>Availability</strong> page to mark sick days, PTO, and leave for {formatMonthYear(year, month)}.
-            Come back here when done.
-          </p>
-
-          <a
-            href="/availability"
-            className="inline-flex items-center gap-2 rounded-xl bg-cyan-50 border border-cyan-200 px-6 py-3 text-sm font-semibold text-cyan-700 hover:bg-cyan-100 transition mb-8"
-          >
+          <p className="text-slate-500 mb-6">Go to the <strong>Availability</strong> page to mark sick days, PTO, and leave for {formatMonthYear(year, month)}. Come back here when done.</p>
+          <a href="/availability" className="inline-flex items-center gap-2 rounded-xl bg-cyan-50 border border-cyan-200 px-6 py-3 text-sm font-semibold text-cyan-700 hover:bg-cyan-100 transition mb-8">
             🏥 Go to Availability Page →
           </a>
-
           <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 mb-8">
-            <p className="text-sm text-amber-700">
-              ⚠️ Absences you mark will automatically affect assignments in the next step.
-            </p>
+            <p className="text-sm text-amber-700">⚠️ Absences you mark will automatically affect assignments in the next step.</p>
           </div>
-
           <div className="flex gap-3">
             <button onClick={() => setStep(1)} className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">← Back</button>
             <button onClick={() => setStep(3)} className="rounded-xl bg-cyan-600 px-8 py-3 font-semibold text-white hover:bg-cyan-700 transition">Continue to Build Schedule →</button>
@@ -215,7 +198,6 @@ export default function ScheduleBuilder() {
       {/* Step 3: Build Schedule */}
       {step === 3 && (
         <div className="space-y-6">
-          {/* Progress bar */}
           <div className="rounded-2xl bg-white p-5 shadow">
             <div className="flex items-center justify-between mb-3">
               <div>
@@ -226,38 +208,17 @@ export default function ScheduleBuilder() {
                 </span>
               </div>
               <div className="flex gap-2">
-                <button
-                  onClick={applyDefaults}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
-                >
-                  ↺ Re-apply Defaults
-                </button>
-                <button
-                  onClick={() => setStep(4)}
-                  className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 transition"
-                >
-                  Review & Print →
-                </button>
+                <button onClick={applyDefaults} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">↺ Re-apply Defaults</button>
+                <button onClick={() => setStep(4)} className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 transition">Review & Print →</button>
               </div>
             </div>
             <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-cyan-500 transition-all"
-                style={{ width: `${totalDays > 0 ? (completedDays / totalDays) * 100 : 0}%` }}
-              />
+              <div className="h-full rounded-full bg-cyan-500 transition-all" style={{ width: `${totalDays > 0 ? (completedDays / totalDays) * 100 : 0}%` }} />
             </div>
           </div>
 
-          {/* Monthly overview calendar */}
-          <MonthlyOverview
-            year={year}
-            month={month}
-            dayStatuses={dayStatuses}
-            selectedDate={selectedDate}
-            onSelectDate={handleSelectDate}
-          />
+          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} />
 
-          {/* Day editor */}
           {selectedDate ? (
             <div className="grid gap-6 lg:grid-cols-2">
               <div className="rounded-2xl bg-white p-6 shadow">
@@ -266,20 +227,16 @@ export default function ScheduleBuilder() {
                 </h3>
                 <p className="text-sm text-slate-400 mb-2">Select which dentists are working today</p>
                 <div className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                  👥 {workingDentists.length} dentist{workingDentists.length !== 1 ? "s" : ""} selected — {workingDentists.length} assistant{workingDentists.length !== 1 ? "s" : ""} required
+                  👥 {workingDentists.length} dentist{workingDentists.length !== 1 ? "s" : ""} selected
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {allDentists.map((name) => {
                     const checked = workingDentists.includes(name);
                     const emp = staff.find((e) => e.name === name);
-                    const unavailable = emp && selectedDate ? isUnavailable(emp.id, selectedDate) : false;
+                    const unavailable = emp ? isUnavailable(emp.id, selectedDate) : false;
                     return (
-                      <button
-                        key={name}
-                        onClick={() => {
-                          if (unavailable) return;
-                          setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name]);
-                        }}
+                      <button key={name}
+                        onClick={() => { if (unavailable) return; setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name]); }}
                         className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
                           unavailable ? "border-red-100 bg-red-50 opacity-60 cursor-not-allowed"
                           : checked ? "border-orange-400 bg-orange-50"
@@ -310,11 +267,7 @@ export default function ScheduleBuilder() {
                   ))}
                 </div>
               )}
-              <DailyAssignmentPanel
-                key={`${selectedDate}-${workingDentists.join(",")}`}
-                selectedDate={selectedDate}
-                assignments={selectedAssignments}
-              />
+              <DailyAssignmentPanel key={`${selectedDate}-${workingDentists.join(",")}`} selectedDate={selectedDate} assignments={selectedAssignments} />
             </div>
           ) : (
             <div className="rounded-2xl bg-white p-8 text-center shadow">
@@ -338,17 +291,15 @@ export default function ScheduleBuilder() {
                 <p className="text-slate-500 mt-1">{completedDays} of {totalDays} days fully staffed{warningDays > 0 ? ` · ${warningDays} days have warnings` : ""}</p>
               </div>
               <PrintSchedule year={year} month={month} schedule={schedule} />
-            <PrintIndividualSchedule year={year} month={month} schedule={schedule} />
+              <PrintIndividualSchedule year={year} month={month} schedule={schedule} />
             </div>
-
             {warningDays > 0 && (
               <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 p-4">
-                <p className="text-sm text-amber-700">⚠️ Some days have staffing warnings. Review them before printing or <button onClick={() => setStep(3)} className="underline font-semibold">go back to fix them</button>.</p>
+                <p className="text-sm text-amber-700">⚠️ Some days have staffing warnings. <button onClick={() => setStep(3)} className="underline font-semibold">Go back to fix them</button>.</p>
               </div>
             )}
           </div>
 
-          {/* Full monthly table */}
           <div className="rounded-2xl bg-white shadow overflow-hidden">
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -363,18 +314,11 @@ export default function ScheduleBuilder() {
               <tbody>
                 {openDays.map((day) => {
                   const daySched = schedule[day.date];
-                  const assignments = daySched
-                    ? buildDailyAssignments(staff, daySched.dentists, day.date)
-                    : null;
+                  const assignments = daySched ? buildDailyAssignments(staff, daySched.dentists, day.date) : null;
                   const status = dayStatuses[day.date];
                   const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-
                   return (
-                    <tr
-                      key={day.date}
-                      className="border-b hover:bg-slate-50 cursor-pointer"
-                      onClick={() => { handleSelectDate(day.date); setStep(3); }}
-                    >
+                    <tr key={day.date} className="border-b hover:bg-slate-50 cursor-pointer" onClick={() => { handleSelectDate(day.date); setStep(3); }}>
                       <td className="p-4 font-medium">{dateLabel}</td>
                       <td className="p-4">
                         {assignments?.dentists.map(({ dentist, assistant }) => (
@@ -385,12 +329,8 @@ export default function ScheduleBuilder() {
                           </div>
                         )) ?? <span className="text-slate-300 text-xs">Not configured</span>}
                       </td>
-                      <td className="p-4 text-xs text-slate-600">
-                        {assignments?.frontDesk.map((e) => e.name).join(", ") ?? "—"}
-                      </td>
-                      <td className="p-4 text-xs text-slate-600">
-                        {assignments?.hygienists.map((e) => e.name).join(", ") ?? "—"}
-                      </td>
+                      <td className="p-4 text-xs text-slate-600">{assignments?.frontDesk.map((e) => e.name).join(", ") ?? "—"}</td>
+                      <td className="p-4 text-xs text-slate-600">{assignments?.hygienists.map((e) => e.name).join(", ") ?? "—"}</td>
                       <td className="p-4">
                         {status === "complete" && <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">✓ Ready</span>}
                         {status === "warning" && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">⚠ Warning</span>}
