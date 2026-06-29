@@ -1,6 +1,7 @@
 "use client";
 
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
+import { OpenTuesday } from "@/lib/openTuesdays";
 
 const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -10,10 +11,11 @@ interface Props {
   dayStatuses: Record<string, "complete" | "warning" | "empty">;
   selectedDate: string;
   onSelectDate: (date: string) => void;
+  openTuesdays?: OpenTuesday[];
 }
 
-export default function MonthlyOverview({ year, month, dayStatuses, selectedDate, onSelectDate }: Props) {
-  const days = generateMonth(year, month);
+export default function MonthlyOverview({ year, month, dayStatuses, selectedDate, onSelectDate, openTuesdays = [] }: Props) {
+  const days = generateMonth(year, month, openTuesdays);
   const firstDow = new Date(year, month - 1, 1).getDay();
   const blanks = Array.from({ length: firstDow });
 
@@ -30,7 +32,7 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
 
       <div className="grid grid-cols-7 mb-2">
         {DAY_HEADERS.map((h) => (
-          <div key={h} className={`py-1 text-center text-xs font-semibold uppercase tracking-wide ${h === "Sun" || h === "Sat" || h === "Tue" ? "text-slate-300" : "text-slate-400"}`}>
+          <div key={h} className={`py-1 text-center text-xs font-semibold uppercase tracking-wide ${h === "Sun" || h === "Sat" ? "text-slate-300" : h === "Tue" ? "text-blue-300" : "text-slate-400"}`}>
             {h}
           </div>
         ))}
@@ -41,10 +43,12 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
         {days.map((day) => {
           const isSelected = selectedDate === day.date;
           const status = dayStatuses[day.date];
+          const isOpenTue = day.isTuesday && day.isOpenTuesday;
 
           if (!day.isOpen) {
             return (
-              <div key={day.date} className="rounded-lg p-2 text-center opacity-25 select-none">
+              <div key={day.date} className="rounded-lg p-2 text-center select-none"
+                style={{ opacity: isOpenTue ? 1 : 0.25 }}>
                 <div className="text-xs text-slate-400">{day.weekday}</div>
                 <div className="text-sm font-medium text-slate-400">{day.day}</div>
               </div>
@@ -53,18 +57,17 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
 
           const statusStyle =
             isSelected ? "border-cyan-500 bg-cyan-500 text-white shadow-md"
+            : isOpenTue && !status ? "border-blue-300 bg-blue-50 hover:bg-blue-100"
             : status === "complete" ? "border-green-300 bg-green-50 hover:bg-green-100"
             : status === "warning" ? "border-amber-300 bg-amber-50 hover:bg-amber-100"
             : "border-slate-200 bg-white hover:bg-slate-50";
 
           return (
-            <button
-              key={day.date}
-              onClick={() => onSelectDate(day.date)}
-              className={`rounded-lg border p-2 text-center transition ${statusStyle}`}
-            >
-              <div className={`text-xs ${isSelected ? "text-cyan-100" : "text-slate-400"}`}>{day.weekday}</div>
+            <button key={day.date} onClick={() => onSelectDate(day.date)}
+              className={`rounded-lg border p-2 text-center transition ${statusStyle}`}>
+              <div className={`text-xs ${isSelected ? "text-cyan-100" : isOpenTue ? "text-blue-400" : "text-slate-400"}`}>{day.weekday}</div>
               <div className="text-sm font-semibold mt-0.5">{day.day}</div>
+              {isOpenTue && !isSelected && !status && <div className="mt-0.5 text-xs text-blue-400">Open</div>}
               {!isSelected && status === "complete" && <div className="mt-0.5 text-xs text-green-500">✓</div>}
               {!isSelected && status === "warning" && <div className="mt-0.5 text-xs text-amber-500">⚠</div>}
             </button>
