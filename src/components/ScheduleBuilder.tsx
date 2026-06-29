@@ -5,7 +5,7 @@ import { loadStaff } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getWeekday } from "@/lib/dateUtils";
-import { getOverrides } from "@/lib/overrides";
+import { getOverrides, isUnavailable } from "@/lib/overrides";
 import { Employee } from "@/types/employee";
 import MonthlyOverview from "./MonthlyOverview";
 import DentistSelector from "./DentistSelector";
