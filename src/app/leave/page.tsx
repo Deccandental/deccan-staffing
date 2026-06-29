@@ -129,7 +129,7 @@ export default function LeavePage() {
         status: "manual",
       };
     }),
-  ].sort((a, b) => (b.startDate ?? b.date ?? "").localeCompare(a.startDate ?? a.date ?? ""));
+  ].sort((a, b) => ((b as any).startDate ?? (b as any).date ?? "").localeCompare((a as any).startDate ?? (a as any).date ?? ""));
 
   const filteredAbsences = allAbsences.filter((a) => {
     if (filterEmployee && a.employeeId !== Number(filterEmployee)) return false;
