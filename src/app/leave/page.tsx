@@ -48,8 +48,7 @@ export default function LeavePage() {
     if (!form.employeeEmail) { setError("Please enter your email."); return; }
     if (!form.startDate || !form.endDate) { setError("Please select start and end dates."); return; }
     if (form.endDate < form.startDate) { setError("End date must be after start date."); return; }
-    const noticeError = validateNoticePeriod(form.startDate, totalDays);
-    if (noticeError) { setError(noticeError); return; }
+    // Notice period is advisory only — no hard block
 
     const req = addLeaveRequest({
       employeeId: Number(form.employeeId), employeeName: selectedEmployee?.name ?? "",
@@ -124,7 +123,17 @@ export default function LeavePage() {
                 </div>
 
                 {totalDays > 0 && <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-500">📅 <strong>{totalDays} working day{totalDays !== 1 ? "s" : ""}</strong> selected {totalDays > 3 && <span className="text-gray-400">(requires {totalDays > 14 ? "8" : totalDays > 7 ? "6" : "4"} weeks notice)</span>}</div>}
-                {noticeWarning && <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">⚠️ {noticeWarning}</div>}
+                {/* Advisory notice */}
+                <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-700">
+                  <p className="font-semibold mb-1">📋 Advance Notice Guidelines</p>
+                  <ul className="space-y-0.5 text-xs text-blue-600">
+                    <li>• More than 3 days off → 4 weeks notice recommended</li>
+                    <li>• More than 7 days off → 6 weeks notice recommended</li>
+                    <li>• More than 14 days off → 8 weeks notice recommended</li>
+                  </ul>
+                  <p className="text-xs text-blue-500 mt-2 italic">Leave may not be approved if sufficient notice is not given.</p>
+                  {noticeWarning && <p className="text-xs text-amber-600 mt-2 font-medium">⚠️ {noticeWarning}</p>}
+                </div>
 
                 <div>
                   <label className="flex items-center gap-3 cursor-pointer">
