@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { loadStaff } from "@/lib/staffStore";
@@ -15,7 +15,11 @@ interface Props {
 export default function PrintIndividualSchedule({ year, month, schedule }: Props) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"print" | "email">("print");
-  const staff = loadStaff();
+  const [staff, setStaff] = useState<Employee[]>([]);
+
+  useEffect(() => {
+    loadStaff().then(setStaff);
+  }, []);
 
   function getRows(emp: Employee) {
     const days = generateMonth(year, month).filter((d) => d.isOpen);
@@ -32,30 +36,17 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
 
       if (emp.role === "Dentist") {
         const pair = assignments.dentists.find((d) => d.dentist.id === emp.id);
-        if (pair) {
-          working = true;
-          role = "Dentist";
-          detail = pair.assistant ? `Assistant: ${pair.assistant.name}` : "No assistant assigned";
-        }
+        if (pair) { working = true; role = "Dentist"; detail = pair.assistant ? `Assistant: ${pair.assistant.name}` : "No assistant assigned"; }
       } else if (emp.skills.includes("Assistant") || emp.role === "RDA") {
         const pair = assignments.dentists.find((d) => d.assistant?.id === emp.id);
         const onFD = assignments.frontDesk.find((e) => e.id === emp.id);
-        if (pair) {
-          working = true;
-          role = emp.role;
-          detail = `With: ${pair.dentist.name}`;
-        } else if (onFD) {
-          working = true;
-          role = "Front Desk";
-          detail = "Front desk coverage";
-        }
+        if (pair) { working = true; role = emp.role; detail = `With: ${pair.dentist.name}`; }
+        else if (onFD) { working = true; role = "Front Desk"; detail = "Front desk coverage"; }
       } else if (emp.role === "Front Desk") {
         const onFD = assignments.frontDesk.find((e) => e.id === emp.id);
         if (onFD) { working = true; role = "Front Desk"; detail = ""; }
       } else if (emp.role === "Hygienist") {
-        working = true;
-        role = "Hygienist";
-        detail = "";
+        working = true; role = "Hygienist"; detail = "";
       }
 
       if (!working) return null;
@@ -107,7 +98,6 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
     const rows = getRows(emp);
     const monthLabel = formatMonthYear(year, month);
     const subject = encodeURIComponent(`Your Schedule — ${monthLabel} | Deccan Dental`);
-
     const bodyLines = [
       `Hi ${emp.name.split(" ")[0]},`,
       ``,
@@ -123,19 +113,10 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
       ``,
       `Deccan Dental Sleep Center`,
     ];
-
     const body = encodeURIComponent(bodyLines.join("\n"));
     const to = encodeURIComponent(emp.email ?? "");
     window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
   }
-
-  const ROLE_COLORS: Record<string, string> = {
-    Dentist: "bg-blue-100 text-blue-700",
-    RDA: "bg-purple-100 text-purple-700",
-    Assistant: "bg-pink-100 text-pink-700",
-    "Front Desk": "bg-sky-100 text-sky-700",
-    Hygienist: "bg-emerald-100 text-emerald-700",
-  };
 
   const roleGroups = [
     { label: "Dentists", roles: ["Dentist"] },
@@ -156,7 +137,6 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
 
       {open && (
         <div className="absolute right-0 top-12 z-50 w-72 rounded-2xl bg-white shadow-xl border border-slate-100 overflow-hidden">
-          {/* Mode toggle */}
           <div className="flex border-b">
             <button onClick={() => setMode("print")}
               className={`flex-1 py-2.5 text-sm font-semibold transition ${mode === "print" ? "bg-slate-800 text-white" : "text-slate-500 hover:bg-slate-50"}`}>
@@ -170,7 +150,7 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
 
           {mode === "email" && (
             <div className="px-4 py-2 bg-blue-50 border-b border-blue-100">
-              <p className="text-xs text-blue-600">Opens your email app with the schedule pre-filled. Make sure each staff member's email is set in their Staff profile.</p>
+              <p className="text-xs text-blue-600">Opens your email app with the schedule pre-filled.</p>
             </div>
           )}
 
@@ -196,7 +176,7 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium">{emp.name}</div>
                         {mode === "email" && (
-                          <div className="text-xs text-slate-400 truncate">{(emp as any).email || "No email on file"}</div>
+                          <div className="text-xs text-slate-400 truncate">{emp.email || "No email on file"}</div>
                         )}
                       </div>
                     </button>
