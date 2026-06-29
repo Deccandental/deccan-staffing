@@ -68,6 +68,11 @@ export default function LeavePage() {
     setOverrides(getOverrides());
   }
 
+  // Refresh data whenever the view changes so approved leaves appear immediately
+  useEffect(() => {
+    refresh();
+  }, [view]);
+
   const selectedEmployee = staff.find((e) => e.id === Number(form.employeeId));
   const totalDays = form.startDate && form.endDate ? countBusinessDays(form.startDate, form.endDate) : 0;
 
