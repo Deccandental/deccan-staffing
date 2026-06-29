@@ -15,9 +15,10 @@ export interface Employee {
   id: number;
   name: string;
   role: EmployeeRole;
-  specialty?: DentistSpecialty;  // only for Dentists
+  specialty?: DentistSpecialty;
   color: string;
   skills: string[];
+  email?: string;
   defaultSchedule: {
     monday: boolean;
     tuesday: boolean;
