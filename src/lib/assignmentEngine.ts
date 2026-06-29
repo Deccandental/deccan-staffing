@@ -18,7 +18,8 @@ export function buildDailyAssignments(
   workingDentistNames: string[],
   date?: string,
   prefs: DentistPrefs = {},
-  overrides: StaffOverride[] = []
+  overrides: StaffOverride[] = [],
+  isOpenTuesday: boolean = false
 ): DailyAssignmentsResult {
   const weekday = date ? getWeekday(date) : null;
   const warnings: AssignmentWarning[] = [];
@@ -29,7 +30,8 @@ export function buildDailyAssignments(
   }
 
   function isAvailable(emp: Employee): boolean {
-    const worksDay = weekday ? emp.defaultSchedule[weekday] : true;
+    // For open Tuesdays, skip the default schedule check
+    const worksDay = isOpenTuesday ? true : (weekday ? emp.defaultSchedule[weekday] : true);
     return worksDay && !isUnavailable(emp);
   }
 
