@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
-
-const STORAGE_KEY = "deccan-temps-v1";
+import { supabase } from "@/lib/supabase";
 
 const ROLES = ["Dentist", "RDA", "Assistant", "Front Desk", "Hygienist", "Other"] as const;
 type TempRole = typeof ROLES[number];
@@ -11,12 +10,8 @@ type TempRole = typeof ROLES[number];
 const SKILLS = ["Dentist", "RDA", "Assistant", "Front Desk", "Hygienist", "X-Ray", "Billing", "Scheduling", "Other"];
 
 const ROLE_COLORS: Record<TempRole, string> = {
-  Dentist: "#2563eb",
-  RDA: "#dc2626",
-  Assistant: "#db2777",
-  "Front Desk": "#0284c7",
-  Hygienist: "#059669",
-  Other: "#6b7280",
+  Dentist: "#2563eb", RDA: "#dc2626", Assistant: "#db2777",
+  "Front Desk": "#0284c7", Hygienist: "#059669", Other: "#6b7280",
 };
 
 export interface TempStaff {
@@ -31,15 +26,31 @@ export interface TempStaff {
   addedAt: string;
 }
 
-function loadTemps(): TempStaff[] {
-  if (typeof window === "undefined") return [];
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]"); }
-  catch { return []; }
+function rowToTemp(row: any): TempStaff {
+  return {
+    id: row.id, name: row.name, phone: row.phone ?? "", email: row.email ?? "",
+    role: row.role, skills: row.skills ?? [], rating: row.rating ?? 0,
+    notes: row.notes ?? "", addedAt: row.added_at,
+  };
 }
 
-function saveTemps(temps: TempStaff[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(temps));
+async function loadTemps(): Promise<TempStaff[]> {
+  const { data, error } = await supabase.from("temps").select("*").order("added_at", { ascending: false });
+  if (error) { console.error("loadTemps error:", error); return []; }
+  return (data ?? []).map(rowToTemp);
+}
+
+async function saveTemp(temp: Omit<TempStaff, "addedAt">): Promise<void> {
+  const { error } = await supabase.from("temps").upsert({
+    id: temp.id, name: temp.name, phone: temp.phone, email: temp.email,
+    role: temp.role, skills: temp.skills, rating: temp.rating, notes: temp.notes,
+  });
+  if (error) console.error("saveTemp error:", error);
+}
+
+async function deleteTemp(id: string): Promise<void> {
+  const { error } = await supabase.from("temps").delete().eq("id", id);
+  if (error) console.error("deleteTemp error:", error);
 }
 
 function StarRating({ value, onChange, readonly }: { value: number; onChange?: (v: number) => void; readonly?: boolean }) {
@@ -47,16 +58,12 @@ function StarRating({ value, onChange, readonly }: { value: number; onChange?: (
   return (
     <div className="flex gap-1">
       {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          type="button"
-          disabled={readonly}
+        <button key={star} type="button" disabled={readonly}
           onClick={() => onChange?.(star)}
           onMouseEnter={() => !readonly && setHovered(star)}
           onMouseLeave={() => !readonly && setHovered(0)}
           className={`text-2xl transition ${readonly ? "cursor-default" : "cursor-pointer hover:scale-110"}`}
-          style={{ color: star <= (hovered || value) ? "#f59e0b" : "#d1d5db", lineHeight: 1 }}
-        >
+          style={{ color: star <= (hovered || value) ? "#f59e0b" : "#d1d5db", lineHeight: 1 }}>
           ★
         </button>
       ))}
@@ -71,6 +78,7 @@ const EMPTY_FORM = {
 
 export default function TempsPage() {
   const [temps, setTemps] = useState<TempStaff[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -81,9 +89,14 @@ export default function TempsPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  useEffect(() => { setTemps(loadTemps()); }, []);
+  useEffect(() => { refresh(); }, []);
 
-  function refresh() { setTemps(loadTemps()); }
+  async function refresh() {
+    setLoading(true);
+    const data = await loadTemps();
+    setTemps(data);
+    setLoading(false);
+  }
 
   function handleSkillToggle(skill: string) {
     setForm((f) => ({
@@ -92,24 +105,14 @@ export default function TempsPage() {
     }));
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.name.trim()) return;
-    const all = loadTemps();
-    if (editId) {
-      const updated = all.map((t) => t.id === editId ? { ...t, ...form } : t);
-      saveTemps(updated);
-    } else {
-      const newTemp: TempStaff = {
-        ...form,
-        id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        addedAt: new Date().toISOString(),
-      };
-      saveTemps([...all, newTemp]);
-    }
+    const id = editId ?? `temp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    await saveTemp({ ...form, id });
     setForm({ ...EMPTY_FORM });
     setEditId(null);
     setShowForm(false);
-    refresh();
+    await refresh();
   }
 
   function handleEdit(temp: TempStaff) {
@@ -120,10 +123,10 @@ export default function TempsPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function handleDelete(id: string) {
-    saveTemps(loadTemps().filter((t) => t.id !== id));
+  async function handleDelete(id: string) {
+    await deleteTemp(id);
     setDeleteConfirm(null);
-    refresh();
+    await refresh();
   }
 
   function handleCancel() {
@@ -146,8 +149,6 @@ export default function TempsPage() {
 
   return (
     <div className="min-h-screen" style={{ background: "#f5f5f5" }}>
-
-      {/* Mobile header */}
       <div className="lg:hidden flex items-center justify-between px-4 py-3 bg-white shadow-sm sticky top-0 z-50">
         <div>
           <div style={{ fontWeight: 700, color: "#5a5a5a", fontSize: 16 }}>deccan<span style={{ color: "#e8622a" }}>|</span>dental</div>
@@ -156,13 +157,11 @@ export default function TempsPage() {
         <button onClick={() => setMenuOpen(!menuOpen)} style={{ fontSize: 22, color: "#5a5a5a" }}>☰</button>
       </div>
 
-      {/* Mobile menu */}
       {menuOpen && (
         <div className="lg:hidden fixed inset-0 z-40 bg-black bg-opacity-40" onClick={() => setMenuOpen(false)}>
           <div className="bg-white w-64 h-full p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-6">
               <div style={{ fontWeight: 700, fontSize: 18, color: "#5a5a5a" }}>deccan<span style={{ color: "#e8622a" }}>|</span>dental</div>
-              <div style={{ fontSize: 11, color: "#9a9a9a" }}>Sleep Center</div>
             </div>
             {[
               { label: "📅 Calendar", href: "/" },
@@ -186,8 +185,6 @@ export default function TempsPage() {
       <div className="hidden lg:block"><Sidebar /></div>
 
       <div className="lg:ml-64 p-4 lg:p-8">
-
-        {/* Header */}
         <div className="flex items-start justify-between mb-6">
           <div>
             <h1 className="text-2xl lg:text-3xl font-bold" style={{ color: "#5a5a5a" }}>Temp Staff</h1>
@@ -200,7 +197,6 @@ export default function TempsPage() {
           )}
         </div>
 
-        {/* Role summary pills */}
         {temps.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-6">
             {ROLES.filter((r) => roleCounts[r] > 0).map((r) => (
@@ -211,23 +207,15 @@ export default function TempsPage() {
           </div>
         )}
 
-        {/* Add / Edit Form */}
         {showForm && (
           <div className="rounded-2xl bg-white p-5 lg:p-8 shadow mb-8 max-w-2xl">
-            <h2 className="text-lg font-bold mb-5" style={{ color: "#5a5a5a" }}>
-              {editId ? "Edit Temp" : "Add New Temp"}
-            </h2>
-
+            <h2 className="text-lg font-bold mb-5" style={{ color: "#5a5a5a" }}>{editId ? "Edit Temp" : "Add New Temp"}</h2>
             <div className="space-y-4">
-
-              {/* Name */}
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-1">Full Name <span className="text-red-400">*</span></label>
                 <input type="text" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   placeholder="e.g. Jane Smith" className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
               </div>
-
-              {/* Contact */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Phone Number</label>
@@ -240,8 +228,6 @@ export default function TempsPage() {
                     placeholder="jane@example.com" className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
                 </div>
               </div>
-
-              {/* Primary Role */}
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-2">Primary Role</label>
                 <div className="flex flex-wrap gap-2">
@@ -254,8 +240,6 @@ export default function TempsPage() {
                   ))}
                 </div>
               </div>
-
-              {/* Skills */}
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-2">Skills / Can Also Cover</label>
                 <div className="flex flex-wrap gap-2">
@@ -268,42 +252,29 @@ export default function TempsPage() {
                   ))}
                 </div>
               </div>
-
-              {/* Rating */}
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-2">Rating</label>
                 <StarRating value={form.rating} onChange={(v) => setForm((f) => ({ ...f, rating: v }))} />
-                {form.rating > 0 && (
-                  <button type="button" onClick={() => setForm((f) => ({ ...f, rating: 0 }))} className="mt-1 text-xs text-gray-400 hover:text-gray-600">Clear rating</button>
-                )}
+                {form.rating > 0 && <button type="button" onClick={() => setForm((f) => ({ ...f, rating: 0 }))} className="mt-1 text-xs text-gray-400 hover:text-gray-600">Clear rating</button>}
               </div>
-
-              {/* Notes */}
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-1">Notes</label>
                 <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                  rows={3} placeholder="e.g. Very reliable, prefers morning shifts, has own equipment..."
+                  rows={3} placeholder="e.g. Very reliable, prefers morning shifts..."
                   className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none resize-none" style={{ fontSize: 16 }} />
               </div>
-
-              {!form.name.trim() && (
-                <p className="text-xs text-red-400">Name is required.</p>
-              )}
-
+              {!form.name.trim() && <p className="text-xs text-red-400">Name is required.</p>}
               <div className="flex gap-3 pt-2">
                 <button onClick={handleSave} disabled={!form.name.trim()}
                   className="flex-1 rounded-xl py-3 font-semibold text-white hover:opacity-90 transition disabled:opacity-40" style={{ backgroundColor: "#e8622a" }}>
                   {editId ? "Save Changes" : "Add to Roster"}
                 </button>
-                <button onClick={handleCancel} className="rounded-xl border border-gray-200 px-6 py-3 text-sm font-semibold text-gray-500 hover:bg-gray-50">
-                  Cancel
-                </button>
+                <button onClick={handleCancel} className="rounded-xl border border-gray-200 px-6 py-3 text-sm font-semibold text-gray-500 hover:bg-gray-50">Cancel</button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Filters */}
         {temps.length > 0 && (
           <div className="flex flex-wrap gap-3 mb-5">
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
@@ -317,14 +288,15 @@ export default function TempsPage() {
               className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none bg-white shadow" style={{ fontSize: 16 }}>
               <option value={0}>All Ratings</option>
               <option value={5}>★★★★★ only</option>
-              <option value={4}>★★★★+ </option>
+              <option value={4}>★★★★+</option>
               <option value={3}>★★★+</option>
             </select>
           </div>
         )}
 
-        {/* Temp Cards */}
-        {temps.length === 0 ? (
+        {loading ? (
+          <div className="text-center py-20 text-gray-400">Loading temp staff...</div>
+        ) : temps.length === 0 ? (
           <div className="rounded-2xl bg-white p-12 text-center shadow">
             <div className="text-5xl mb-4">🔄</div>
             <h2 className="text-xl font-bold mb-2" style={{ color: "#5a5a5a" }}>No Temp Staff Yet</h2>
@@ -345,28 +317,20 @@ export default function TempsPage() {
               const isExpanded = expandedId === temp.id;
               return (
                 <div key={temp.id} className="rounded-2xl bg-white shadow overflow-hidden">
-                  {/* Color bar */}
                   <div style={{ height: 4, backgroundColor: roleColor }} />
-
                   <div className="p-5">
-                    {/* Top row */}
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
-                        <div className="h-11 w-11 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
-                          style={{ backgroundColor: roleColor }}>
+                        <div className="h-11 w-11 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0" style={{ backgroundColor: roleColor }}>
                           {temp.name.charAt(0)}
                         </div>
                         <div>
                           <div className="font-bold text-base" style={{ color: "#5a5a5a" }}>{temp.name}</div>
-                          <span className="inline-block rounded-full px-2 py-0.5 text-xs font-semibold text-white mt-0.5" style={{ backgroundColor: roleColor }}>
-                            {temp.role}
-                          </span>
+                          <span className="inline-block rounded-full px-2 py-0.5 text-xs font-semibold text-white mt-0.5" style={{ backgroundColor: roleColor }}>{temp.role}</span>
                         </div>
                       </div>
                       <StarRating value={temp.rating} readonly />
                     </div>
-
-                    {/* Contact */}
                     <div className="space-y-1 mb-3">
                       {temp.phone && (
                         <a href={`tel:${temp.phone}`} className="flex items-center gap-2 text-sm text-gray-500 hover:text-orange-500 transition">
@@ -379,8 +343,6 @@ export default function TempsPage() {
                         </a>
                       )}
                     </div>
-
-                    {/* Skills */}
                     {temp.skills.length > 0 && (
                       <div className="flex flex-wrap gap-1 mb-3">
                         {temp.skills.map((s) => (
@@ -388,8 +350,6 @@ export default function TempsPage() {
                         ))}
                       </div>
                     )}
-
-                    {/* Notes — expandable */}
                     {temp.notes && (
                       <div className="mb-3">
                         <p className={`text-sm text-gray-400 italic ${isExpanded ? "" : "line-clamp-2"}`}>"{temp.notes}"</p>
@@ -400,25 +360,17 @@ export default function TempsPage() {
                         )}
                       </div>
                     )}
-
-                    {/* Actions */}
                     <div className="flex gap-2 pt-2 border-t border-gray-100 mt-2">
                       <button onClick={() => handleEdit(temp)} className="flex-1 rounded-xl border border-gray-200 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 transition">
                         ✏️ Edit
                       </button>
                       {deleteConfirm === temp.id ? (
                         <div className="flex gap-1 flex-1">
-                          <button onClick={() => handleDelete(temp.id)} className="flex-1 rounded-xl bg-red-500 py-2 text-sm font-medium text-white hover:bg-red-600 transition">
-                            Confirm
-                          </button>
-                          <button onClick={() => setDeleteConfirm(null)} className="flex-1 rounded-xl border border-gray-200 py-2 text-sm font-medium text-gray-400 hover:bg-gray-50 transition">
-                            Cancel
-                          </button>
+                          <button onClick={() => handleDelete(temp.id)} className="flex-1 rounded-xl bg-red-500 py-2 text-sm font-medium text-white hover:bg-red-600 transition">Confirm</button>
+                          <button onClick={() => setDeleteConfirm(null)} className="flex-1 rounded-xl border border-gray-200 py-2 text-sm font-medium text-gray-400 hover:bg-gray-50 transition">Cancel</button>
                         </div>
                       ) : (
-                        <button onClick={() => setDeleteConfirm(temp.id)} className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-red-400 hover:bg-red-50 hover:border-red-200 transition">
-                          🗑️
-                        </button>
+                        <button onClick={() => setDeleteConfirm(temp.id)} className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-red-400 hover:bg-red-50 hover:border-red-200 transition">🗑️</button>
                       )}
                     </div>
                   </div>
