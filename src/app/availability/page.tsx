@@ -48,7 +48,7 @@ export default function AvailabilityPage() {
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const days = generateMonth(year, month, openTuesdays).filter((d) => d.isOpen);
+  const days = loading ? [] : generateMonth(year, month, openTuesdays).filter((d) => d.isOpen);
 
   useEffect(() => {
     async function load() {
