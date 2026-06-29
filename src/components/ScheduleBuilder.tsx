@@ -36,7 +36,7 @@ export default function ScheduleBuilder() {
   const [schedule, setSchedule] = useState<Record<string, { dentists: string[] }>>({});
   const [selectedDate, setSelectedDate] = useState("");
 
-  useEffect(() => {
+useEffect(() => {
     async function load() {
       const [s, o, p, ot] = await Promise.all([loadStaff(), getOverrides(), loadPrefs(), getOpenTuesdays()]);
       setStaff(s);
@@ -45,6 +45,17 @@ export default function ScheduleBuilder() {
       setOpenTuesdays(ot);
     }
     load();
+
+    // Reload overrides and open Tuesdays whenever user comes back to this tab
+    async function handleVisibility() {
+      if (document.visibilityState === "visible") {
+        const [o, ot] = await Promise.all([getOverrides(), getOpenTuesdays()]);
+        setOverrides(o);
+        setOpenTuesdays(ot);
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
   const SCHEDULE_KEY = "deccan-schedule-v1";
