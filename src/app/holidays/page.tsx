@@ -76,7 +76,7 @@ function HolidaysPageBody() {
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
       <Sidebar />
-      <div className="ml-64 p-8">
+      <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold" style={{ color: "#5a5a5a" }}>Holidays & Closures</h1>
           <p className="mt-1 text-gray-400">Mark days the office is closed, or open Tuesdays when needed</p>
@@ -85,7 +85,6 @@ function HolidaysPageBody() {
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="space-y-4">
 
-            {/* Add Holiday */}
             <div className="rounded-2xl bg-white p-6 shadow">
               <h2 className="text-lg font-bold mb-4" style={{ color: "#5a5a5a" }}>Add Holiday or Closure</h2>
               <div className="space-y-3">
@@ -119,7 +118,6 @@ function HolidaysPageBody() {
               </div>
             </div>
 
-            {/* Open Tuesdays */}
             <div className="rounded-2xl bg-white p-6 shadow">
               <h2 className="text-lg font-bold mb-1" style={{ color: "#5a5a5a" }}>Open Tuesdays</h2>
               <p className="text-xs text-gray-400 mb-4">Mark specific Tuesdays when the office is open</p>
@@ -169,7 +167,6 @@ function HolidaysPageBody() {
               )}
             </div>
 
-            {/* Mini calendar */}
             <div className="rounded-2xl bg-white p-5 shadow">
               <div className="flex items-center justify-between mb-4">
                 <button onClick={() => { if (month === 1) { setYear(y => y-1); setMonth(12); } else setMonth(m => m-1); }} className="px-2 py-1 text-gray-400 hover:text-gray-700">←</button>
@@ -204,7 +201,6 @@ function HolidaysPageBody() {
             </div>
           </div>
 
-          {/* Right column */}
           <div className="space-y-4">
             <div className="rounded-2xl bg-white shadow overflow-hidden">
               <div className="px-6 py-4" style={{ borderBottom: "1px solid #f5f5f5" }}>
