@@ -8,12 +8,14 @@ import { loadStaff } from "@/lib/staffStore";
 interface Props {
   selectedDate: string;
   assignments?: DailyAssignmentsResult;
+  assistantOverrides?: Record<number, number | null>;
+  onOverrideChange?: (overrides: Record<number, number | null>) => void;
 }
 
 const EMPTY: DailyAssignmentsResult = { dentists: [], frontDesk: [], hygienists: [], warnings: [] };
 
-export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY }: Props) {
-  const [overrides, setOverrides] = useState<Record<number, number | null>>({});
+export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY, assistantOverrides = {}, onOverrideChange }: Props) {
+  const [overrides, setOverrides] = useState<Record<number, number | null>>(assistantOverrides);
   const [swapping, setSwapping] = useState<number | null>(null);
   const [staff, setStaff] = useState<Employee[]>([]);
 
@@ -21,7 +23,13 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
     loadStaff().then(setStaff);
   }, []);
 
-  const availableAssistants = staff.filter((e) => e.skills.includes("Assistant") || e.skills.includes("RDA"));
+  // Sync overrides when prop changes (e.g. switching days)
+  useEffect(() => {
+    setOverrides(assistantOverrides);
+    setSwapping(null);
+  }, [selectedDate, JSON.stringify(assistantOverrides)]);
+
+  const availableAssistants = staff.filter((e) => e.skills.includes("Assistant"));
 
   const dateLabel = selectedDate
     ? new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
@@ -32,14 +40,23 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
   function getAssistant(dentistId: number, defaultAssistant: Employee | null): Employee | null {
     if (dentistId in overrides) {
       const ovId = overrides[dentistId];
-      return ovId ? staff.find((e) => e.id === ovId) ?? null : null;
+      return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
     }
     return defaultAssistant;
   }
 
   function handleOverride(dentistId: number, value: string) {
-    setOverrides((o) => ({ ...o, [dentistId]: value ? Number(value) : null }));
+    const newOverrides = { ...overrides, [dentistId]: value ? Number(value) : null };
+    setOverrides(newOverrides);
     setSwapping(null);
+    onOverrideChange?.(newOverrides);
+  }
+
+  function handleClearOverride(dentistId: number) {
+    const newOverrides = { ...overrides };
+    delete newOverrides[dentistId];
+    setOverrides(newOverrides);
+    onOverrideChange?.(newOverrides);
   }
 
   return (
@@ -97,7 +114,11 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
                               <>
                                 <span className="h-2 w-2 rounded-full" style={{ backgroundColor: resolvedAssistant.color }} />
                                 {resolvedAssistant.name}
-                                {isOverridden && <span className="text-xs text-cyan-500 ml-1">(manual)</span>}
+                                {isOverridden && (
+                                  <button onClick={() => handleClearOverride(dentist.id)} className="text-xs text-cyan-500 ml-1 hover:text-red-400" title="Clear manual override">
+                                    (manual ✕)
+                                  </button>
+                                )}
                               </>
                             ) : "No Assistant"}
                           </span>
