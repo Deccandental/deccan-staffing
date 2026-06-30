@@ -40,6 +40,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
   const [tempAssignments, setTempAssignments] = useState<TempAssignment[]>([]);
   const [assigningRole, setAssigningRole] = useState<string | null>(null);
   const [selectedTempId, setSelectedTempId] = useState("");
+  const [selectedDentistId, setSelectedDentistId] = useState<number | null>(null);
 
   useEffect(() => {
     loadStaff().then(setStaff);
@@ -50,6 +51,8 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
     setOverrides(assistantOverrides);
     setSwapping(null);
     setAssigningRole(null);
+    setSelectedTempId("");
+    setSelectedDentistId(null);
     if (selectedDate) {
       getTempAssignments(selectedDate).then(setTempAssignments);
     }
@@ -87,11 +90,17 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
 
   async function handleAssignTemp() {
     if (!selectedTempId || !assigningRole) return;
-    await addTempAssignment({ date: selectedDate, tempId: selectedTempId, role: assigningRole, notes: "" });
+    // For assistants, require a dentist selection
+    if (assigningRole === "Assistant" && !selectedDentistId) return;
+    const notes = assigningRole === "Assistant" && selectedDentistId
+      ? `dentist:${selectedDentistId}`
+      : "";
+    await addTempAssignment({ date: selectedDate, tempId: selectedTempId, role: assigningRole, notes });
     const updated = await getTempAssignments(selectedDate);
     setTempAssignments(updated);
     setAssigningRole(null);
     setSelectedTempId("");
+    setSelectedDentistId(null);
   }
 
   async function handleRemoveTemp(id: string) {
@@ -102,6 +111,16 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
 
   function getTempsForRole(role: string): TempStaff[] {
     return temps.filter((t) => t.role === role || t.skills.includes(role));
+  }
+
+  // Working dentists from assignments
+  const workingDentists = assignments.dentists.map((d) => d.dentist);
+
+  // Get dentist name for a temp assistant
+  function getTempDentistName(notes: string): string {
+    if (!notes.startsWith("dentist:")) return "";
+    const dentistId = Number(notes.replace("dentist:", ""));
+    return staff.find((e) => e.id === dentistId)?.name ?? "";
   }
 
   // Group temp assignments by role
@@ -121,7 +140,6 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
       {assignments.warnings.length > 0 && (
         <div className="mb-4 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4">
           {assignments.warnings.map((w, i) => {
-            // Determine what role needs a temp
             let tempRole: string | null = null;
             if (w.message.includes("assistant")) tempRole = "Assistant";
             else if (w.message.includes("front desk")) tempRole = "Front Desk";
@@ -133,7 +151,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
                   {w.severity === "error" ? "🔴" : "⚠️"} {w.message}
                 </p>
                 {tempRole && (
-                  <button onClick={() => { setAssigningRole(tempRole); setSelectedTempId(""); }}
+                  <button onClick={() => { setAssigningRole(tempRole); setSelectedTempId(""); setSelectedDentistId(null); }}
                     className="flex-shrink-0 rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90 transition"
                     style={{ backgroundColor: ROLE_COLORS[tempRole] ?? "#6b7280" }}>
                     + Assign Temp
@@ -150,17 +168,45 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
         <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm font-semibold text-blue-700">Assign Temp {assigningRole}</p>
-            <button onClick={() => setAssigningRole(null)} className="text-xs text-blue-400 hover:text-blue-600">✕ Cancel</button>
+            <button onClick={() => { setAssigningRole(null); setSelectedTempId(""); setSelectedDentistId(null); }}
+              className="text-xs text-blue-400 hover:text-blue-600">✕ Cancel</button>
           </div>
+
+          {/* Dentist selector for assistant role */}
+          {assigningRole === "Assistant" && workingDentists.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs font-semibold text-blue-600 mb-2">Which dentist are they assisting?</p>
+              <div className="grid gap-1.5">
+                {workingDentists.map((dentist) => (
+                  <button key={dentist.id}
+                    onClick={() => setSelectedDentistId(dentist.id)}
+                    className="flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition"
+                    style={selectedDentistId === dentist.id
+                      ? { borderColor: dentist.color, backgroundColor: "#f0f9ff" }
+                      : { borderColor: "#e5e7eb", background: "white" }}>
+                    <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: dentist.color }} />
+                    <span className="text-sm font-medium text-slate-700">{dentist.name}</span>
+                    {selectedDentistId === dentist.id && (
+                      <span className="ml-auto text-xs font-bold" style={{ color: dentist.color }}>✓</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {getTempsForRole(assigningRole).length === 0 ? (
             <p className="text-sm text-blue-400">No temps available for this role. <a href="/temps" className="underline">Add to roster →</a></p>
           ) : (
             <div className="space-y-2">
+              <p className="text-xs font-semibold text-blue-600 mb-2">Select a temp:</p>
               <div className="grid gap-2">
                 {getTempsForRole(assigningRole).map((temp) => (
                   <button key={temp.id} onClick={() => setSelectedTempId(temp.id)}
                     className="flex items-center gap-3 rounded-xl border p-3 text-left transition"
-                    style={selectedTempId === temp.id ? { borderColor: ROLE_COLORS[assigningRole] ?? "#6b7280", backgroundColor: "#f0f9ff" } : { borderColor: "#e5e7eb", background: "white" }}>
+                    style={selectedTempId === temp.id
+                      ? { borderColor: ROLE_COLORS[assigningRole] ?? "#6b7280", backgroundColor: "#f0f9ff" }
+                      : { borderColor: "#e5e7eb", background: "white" }}>
                     <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
                       style={{ backgroundColor: ROLE_COLORS[temp.role] ?? "#6b7280" }}>
                       {temp.name.charAt(0)}
@@ -176,10 +222,11 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
                   </button>
                 ))}
               </div>
-              <button onClick={handleAssignTemp} disabled={!selectedTempId}
+              <button onClick={handleAssignTemp}
+                disabled={!selectedTempId || (assigningRole === "Assistant" && !selectedDentistId)}
                 className="w-full rounded-xl py-2.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-40"
                 style={{ backgroundColor: ROLE_COLORS[assigningRole] ?? "#6b7280" }}>
-                Confirm Assignment
+                {assigningRole === "Assistant" && !selectedDentistId ? "Select a dentist first" : "Confirm Assignment"}
               </button>
             </div>
           )}
@@ -193,6 +240,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
           <div className="space-y-2">
             {tempAssignments.map((ta) => {
               const temp = temps.find((t) => t.id === ta.tempId);
+              const dentistName = ta.role === "Assistant" ? getTempDentistName(ta.notes) : "";
               return (
                 <div key={ta.id} className="flex items-center justify-between rounded-xl bg-white border border-teal-100 px-3 py-2">
                   <div className="flex items-center gap-2">
@@ -202,7 +250,9 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-slate-700">{temp?.name ?? "Unknown"}</div>
-                      <div className="text-xs text-slate-400">{ta.role} · Temp</div>
+                      <div className="text-xs text-slate-400">
+                        {ta.role}{dentistName ? ` → ${dentistName}` : ""}
+                      </div>
                     </div>
                   </div>
                   <button onClick={() => handleRemoveTemp(ta.id)}
@@ -225,6 +275,13 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
             {assignments.dentists.map(({ dentist, assistant }) => {
               const resolvedAssistant = getAssistant(dentist.id, assistant);
               const isOverridden = dentist.id in overrides;
+
+              // Check if a temp is assigned to this dentist
+              const tempForDentist = tempAssignments.find(
+                (ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`
+              );
+              const tempName = tempForDentist ? temps.find((t) => t.id === tempForDentist.tempId)?.name : null;
+
               return (
                 <div key={dentist.id} className="rounded-lg bg-slate-50 px-3 py-2">
                   <div className="flex items-center justify-between">
@@ -247,23 +304,30 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
                         </div>
                       ) : (
                         <>
-                          <span className={`text-sm flex items-center gap-1.5 ${resolvedAssistant ? "text-slate-600" : "text-amber-500"}`}>
-                            {resolvedAssistant ? (
+                          <span className={`text-sm flex items-center gap-1.5 ${resolvedAssistant || tempName ? "text-slate-600" : "text-amber-500"}`}>
+                            {tempName ? (
+                              <>
+                                <span className="h-2 w-2 rounded-full bg-teal-400" />
+                                {tempName} <span className="text-xs text-teal-500">(temp)</span>
+                              </>
+                            ) : resolvedAssistant ? (
                               <>
                                 <span className="h-2 w-2 rounded-full" style={{ backgroundColor: resolvedAssistant.color }} />
                                 {resolvedAssistant.name}
                                 {isOverridden && (
-                                  <button onClick={() => handleClearOverride(dentist.id)} className="text-xs text-cyan-500 ml-1 hover:text-red-400" title="Clear manual override">
+                                  <button onClick={() => handleClearOverride(dentist.id)} className="text-xs text-cyan-500 ml-1 hover:text-red-400">
                                     (manual ✕)
                                   </button>
                                 )}
                               </>
                             ) : "No Assistant"}
                           </span>
-                          <button onClick={() => setSwapping(dentist.id)}
-                            className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
-                            swap
-                          </button>
+                          {!tempName && (
+                            <button onClick={() => setSwapping(dentist.id)}
+                              className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
+                              swap
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -277,7 +341,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
 
       <section className="mb-4 rounded-xl border p-4">
         <h3 className="mb-3 font-semibold text-slate-700">Front Desk</h3>
-        {assignments.frontDesk.length === 0 && !tempsByRole["Front Desk"] ? (
+        {assignments.frontDesk.length === 0 && !(tempsByRole["Front Desk"]?.length) ? (
           <p className="text-sm text-slate-400">None available</p>
         ) : (
           <div className="space-y-1">
@@ -299,7 +363,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
 
       <section className="mb-4 rounded-xl border p-4">
         <h3 className="mb-3 font-semibold text-slate-700">Hygienist/Assisted Hygiene</h3>
-        {assignments.hygienists.length === 0 && !tempsByRole["Hygienist"] ? (
+        {assignments.hygienists.length === 0 && !(tempsByRole["Hygienist"]?.length) ? (
           <p className="text-sm text-slate-400">None available</p>
         ) : (
           <div className="space-y-1">
@@ -319,17 +383,21 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
         )}
       </section>
 
-      {/* Assistant temps */}
       {(tempsByRole["Assistant"] ?? []).length > 0 && (
         <section className="rounded-xl border p-4">
           <h3 className="mb-3 font-semibold text-slate-700">Temp Assistants</h3>
           <div className="space-y-1">
-            {(tempsByRole["Assistant"] ?? []).map(({ assignment, temp }) => (
-              <div key={assignment.id} className="flex items-center gap-2 rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
-                <span className="h-2 w-2 rounded-full bg-teal-400" />
-                {temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
-              </div>
-            ))}
+            {(tempsByRole["Assistant"] ?? []).map(({ assignment, temp }) => {
+              const dentistName = getTempDentistName(assignment.notes);
+              return (
+                <div key={assignment.id} className="flex items-center gap-2 rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
+                  <span className="h-2 w-2 rounded-full bg-teal-400" />
+                  {temp?.name ?? "Unknown"}
+                  {dentistName && <span className="text-xs text-slate-400 ml-1">→ {dentistName}</span>}
+                  <span className="text-xs text-teal-500 ml-1">(temp)</span>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
