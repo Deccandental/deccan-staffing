@@ -95,7 +95,7 @@ function AvailabilityPageBody() {
   return (
     <main className="min-h-screen bg-slate-100">
       <Sidebar />
-      <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8"
+      <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
         <div className="flex items-center justify-between mb-1">
           <h1 className="text-3xl font-bold">Staff Availability</h1>
           <div className="flex gap-2">
@@ -138,11 +138,8 @@ function AvailabilityPageBody() {
                 <span style={{ position: "absolute", right: 0, top: 0, width: "50%", height: "100%", background: "#bfdbfe" }} />
               </span> PM off
             </span>
-            {REASONS.map((r) => (
-              <span key={r.key} className="flex items-center gap-1">
-                <span className={`inline-block h-4 w-4 rounded ${r.cell}`} /> {r.label}
-              </span>
-            ))}
+            <span className="flex items-center gap-1"><span className="inline-block h-4 w-4 rounded bg-blue-200 border border-blue-300" /> Full day off</span>
+            <span className="flex items-center gap-1"><span className="inline-block h-4 w-4 rounded bg-teal-200 border border-teal-300 text-teal-700 text-center font-bold" style={{fontSize:8}}>R</span> Remote</span>
           </div>
         </div>
 
