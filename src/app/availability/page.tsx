@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { loadLeaveRequests } from "@/lib/leaveStore";
 import { LeaveRequest } from "@/types/leave";
 import { Sidebar } from "@/components/Sidebar";
+import PasscodeGate from "@/components/PasscodeGate";
 import { loadStaff } from "@/lib/staffStore";
 import { Employee } from "@/types/employee";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -38,7 +39,7 @@ function getNextState(override: StaffOverride | undefined): "halfAM" | "halfPM" 
   return "clear";
 }
 
-export default function AvailabilityPage() {
+function AvailabilityPageBody() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
@@ -98,8 +99,7 @@ export default function AvailabilityPage() {
         <div className="flex items-center justify-between mb-1">
           <h1 className="text-3xl font-bold">Staff Availability</h1>
           <div className="flex gap-2">
-            <a href="/?step=2" className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">← Back to Absences</a>
-            <a href="/?step=3" className="rounded-xl bg-cyan-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700 transition">✓ Done — Build Schedule →</a>
+            <a href="/schedule-builder" className="rounded-xl bg-cyan-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700 transition">✓ Done — Back to Schedule Builder →</a>
           </div>
         </div>
         <p className="mb-6 text-slate-500">
@@ -269,5 +269,13 @@ export default function AvailabilityPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function AvailabilityPage() {
+  return (
+    <PasscodeGate group="admin" subtitle="Enter your passcode to manage staff availability">
+      <AvailabilityPageBody />
+    </PasscodeGate>
   );
 }
