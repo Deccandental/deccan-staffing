@@ -1,7 +1,8 @@
 import { Sidebar } from "@/components/Sidebar";
 import ScheduleBuilder from "@/components/ScheduleBuilder";
+import PasscodeGate from "@/components/PasscodeGate";
 
-export default function ScheduleBuilderPage() {
+function ScheduleBuilderPageInner() {
   return (
     <main className="min-h-screen bg-slate-100">
       <Sidebar />
@@ -13,5 +14,13 @@ export default function ScheduleBuilderPage() {
         <ScheduleBuilder />
       </div>
     </main>
+  );
+}
+
+export default function ScheduleBuilderPage() {
+  return (
+    <PasscodeGate group="admin" subtitle="Enter your passcode to access the schedule builder">
+      <ScheduleBuilderPageInner />
+    </PasscodeGate>
   );
 }
