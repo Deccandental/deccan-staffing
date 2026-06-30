@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -59,7 +59,6 @@ export default function ScheduleBuilder() {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
-  // Load schedule from Supabase when month/year changes
   useEffect(() => {
     async function load() {
       const saved = await loadSchedule(year, month);
@@ -72,20 +71,20 @@ export default function ScheduleBuilder() {
 
   async function applyDefaults() {
     const filled: MonthSchedule = { ...schedule };
-    const toSave: { date: string; dentists: string[] }[] = [];
+    const toSave: { date: string; dentists: string[]; frontDeskRequired: number }[] = [];
     for (const day of openDays) {
       if (!filled[day.date]) {
         const dowKey = getWeekday(day.date);
         const dentists = staff
           .filter((e) => e.role === "Dentist" && (day.isOpenTuesday || e.defaultSchedule[dowKey]))
           .map((e) => e.name);
-        filled[day.date] = { dentists };
-        toSave.push({ date: day.date, dentists });
+        filled[day.date] = { dentists, frontDeskRequired: 2 };
+        toSave.push({ date: day.date, dentists, frontDeskRequired: 2 });
       }
     }
     setSchedule(filled);
     setSaving(true);
-    await Promise.all(toSave.map(({ date, dentists }) => saveDaySchedule(date, dentists)));
+    await Promise.all(toSave.map(({ date, dentists, frontDeskRequired }) => saveDaySchedule(date, dentists, frontDeskRequired)));
     setSaving(false);
   }
 
@@ -97,16 +96,26 @@ export default function ScheduleBuilder() {
       const dentists = staff
         .filter((e) => e.role === "Dentist" && (day?.isOpenTuesday || e.defaultSchedule[dowKey]))
         .map((e) => e.name);
-      setSchedule((c) => ({ ...c, [date]: { dentists } }));
-      await saveDaySchedule(date, dentists);
+      setSchedule((c) => ({ ...c, [date]: { dentists, frontDeskRequired: 2 } }));
+      await saveDaySchedule(date, dentists, 2);
     }
   }
 
   async function setWorkingDentists(dentists: string[]) {
     if (!selectedDate) return;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists } }));
+    const frontDeskRequired = schedule[selectedDate]?.frontDeskRequired ?? 2;
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists);
+    await saveDaySchedule(selectedDate, dentists, frontDeskRequired);
+    setSaving(false);
+  }
+
+  async function setFrontDeskRequired(required: number) {
+    if (!selectedDate) return;
+    const dentists = schedule[selectedDate]?.dentists ?? [];
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: required } }));
+    setSaving(true);
+    await saveDaySchedule(selectedDate, dentists, required);
     setSaving(false);
   }
 
@@ -116,7 +125,9 @@ export default function ScheduleBuilder() {
       const daySched = schedule[day.date];
       if (!daySched) { statuses[day.date] = "empty"; continue; }
       const assignments = buildDailyAssignments(
-        staff, daySched.dentists, day.date, prefs, overrides, day.isTuesday && day.isOpenTuesday
+        staff, daySched.dentists, day.date, prefs, overrides,
+        day.isTuesday && day.isOpenTuesday,
+        daySched.frontDeskRequired ?? 2
       );
       if (assignments.warnings.some((w) => w.severity === "error")) {
         statuses[day.date] = "warning";
@@ -137,12 +148,14 @@ export default function ScheduleBuilder() {
 
   const allDentists = staff.filter((e) => e.role === "Dentist").map((e) => e.name);
   const workingDentists = selectedDate && schedule[selectedDate] ? schedule[selectedDate].dentists : [];
+  const frontDeskRequired = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].frontDeskRequired ?? 2) : 2;
 
   const selectedAssignments = useMemo(() => {
     if (!selectedDate) return undefined;
     const day = openDays.find((d) => d.date === selectedDate);
     const isOpenTuesday = day?.isTuesday && day?.isOpenTuesday ? true : false;
-    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday);
+    const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
+    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday, fdr);
   }, [staff, workingDentists, selectedDate, schedule, prefs, overrides, openDays]);
 
   function prevMonth() {
@@ -181,7 +194,7 @@ export default function ScheduleBuilder() {
         </div>
       </div>
 
-      {/* Step 1: Pick Month */}
+      {/* Step 1 */}
       {step === 1 && (
         <div className="rounded-2xl bg-white p-8 shadow">
           <h2 className="text-2xl font-bold mb-2">Which month are you scheduling?</h2>
@@ -200,7 +213,7 @@ export default function ScheduleBuilder() {
         </div>
       )}
 
-      {/* Step 2: Mark Absences */}
+      {/* Step 2 */}
       {step === 2 && (
         <div className="rounded-2xl bg-white p-8 shadow">
           <h2 className="text-2xl font-bold mb-2">Mark staff absences</h2>
@@ -218,7 +231,7 @@ export default function ScheduleBuilder() {
         </div>
       )}
 
-      {/* Step 3: Build Schedule */}
+      {/* Step 3 */}
       {step === 3 && (
         <div className="space-y-6">
           <div className="rounded-2xl bg-white p-5 shadow">
@@ -236,154 +249,4 @@ export default function ScheduleBuilder() {
                 <button onClick={() => setStep(4)} className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 transition">Review & Print →</button>
               </div>
             </div>
-            <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-              <div className="h-full rounded-full bg-cyan-500 transition-all" style={{ width: `${totalDays > 0 ? (completedDays / totalDays) * 100 : 0}%` }} />
-            </div>
-          </div>
-
-          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} />
-
-          {selectedDate ? (
-            <div className="grid gap-6 lg:grid-cols-2">
-              <div className="rounded-2xl bg-white p-6 shadow">
-                <h3 className="text-lg font-bold mb-1">
-                  {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-                </h3>
-                <p className="text-sm text-slate-400 mb-2">Select which dentists are working today</p>
-                <div className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                  👥 {workingDentists.length} dentist{workingDentists.length !== 1 ? "s" : ""} selected
-                  {saving && <span className="ml-2 text-cyan-500">💾 Saving...</span>}
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {allDentists.map((name) => {
-                    const checked = workingDentists.includes(name);
-                    const emp = staff.find((e) => e.name === name);
-                    const dowKey = selectedDate ? getWeekday(selectedDate) : null;
-                    const day = openDays.find((d) => d.date === selectedDate);
-                    const worksToday = emp && dowKey ? (day?.isOpenTuesday ? true : emp.defaultSchedule[dowKey]) : true;
-                    const hasOverride = emp ? overrides.some((o) => o.employeeId === emp.id && o.date === selectedDate && !o.halfDay && o.reason !== "remote") : false;
-                    const unavailable = !worksToday || hasOverride;
-                    return (
-                      <button key={name}
-                        onClick={() => { if (unavailable) return; setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name]); }}
-                        className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
-                          unavailable ? "border-red-100 bg-red-50 opacity-60 cursor-not-allowed"
-                          : checked ? "border-orange-400 bg-orange-50"
-                          : "border-slate-200 hover:bg-slate-50"
-                        }`}
-                      >
-                        <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }} />
-                        <span className="text-sm font-medium">{name}</span>
-                        {unavailable ? (
-                          <span className="ml-auto text-xs text-red-400 font-medium">Unavailable</span>
-                        ) : (
-                          <span className={`ml-auto h-4 w-4 rounded border flex items-center justify-center text-xs ${checked ? "text-white" : "border-slate-300"}`} style={checked ? { backgroundColor: "#e8622a", borderColor: "#e8622a" } : {}}>
-                            {checked ? "✓" : ""}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {selectedAssignments && selectedAssignments.warnings.length > 0 && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-1">
-                  {selectedAssignments.warnings.map((w, i) => (
-                    <p key={i} className={`text-sm font-medium ${w.severity === "error" ? "text-red-600" : "text-amber-600"}`}>
-                      {w.severity === "error" ? "🔴" : "⚠️"} {w.message}
-                    </p>
-                  ))}
-                </div>
-              )}
-              <DailyAssignmentPanel key={`${selectedDate}-${workingDentists.join(",")}`} selectedDate={selectedDate} assignments={selectedAssignments} />
-            </div>
-          ) : (
-            <div className="rounded-2xl bg-white p-8 text-center shadow">
-              <p className="text-slate-400">← Select a day from the calendar above to edit staffing</p>
-            </div>
-          )}
-
-          <div className="flex gap-3">
-            <button onClick={() => setStep(2)} className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">← Back</button>
-          </div>
-        </div>
-      )}
-
-      {/* Step 4: Review & Print */}
-      {step === 4 && (
-        <div className="space-y-6">
-          <div className="rounded-2xl bg-white p-6 shadow">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <h2 className="text-2xl font-bold">{formatMonthYear(year, month)} — Schedule Review</h2>
-                <p className="text-slate-500 mt-1">{completedDays} of {totalDays} days fully staffed{warningDays > 0 ? ` · ${warningDays} days have warnings` : ""}</p>
-              </div>
-              <PrintSchedule year={year} month={month} schedule={schedule} />
-              <PrintIndividualSchedule year={year} month={month} schedule={schedule} />
-            </div>
-            {warningDays > 0 && (
-              <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 p-4">
-                <p className="text-sm text-amber-700">⚠️ Some days have staffing warnings. <button onClick={() => setStep(3)} className="underline font-semibold">Go back to fix them</button>.</p>
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-2xl bg-white shadow overflow-hidden">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="bg-slate-50 border-b">
-                  <th className="p-4 text-left font-semibold text-slate-500 w-40">Date</th>
-                  <th className="p-4 text-left font-semibold text-slate-500">Dentist / Assistant</th>
-                  <th className="p-4 text-left font-semibold text-slate-500 w-36">Front Desk</th>
-                  <th className="p-4 text-left font-semibold text-slate-500 w-32">Hygienist</th>
-                  <th className="p-4 text-left font-semibold text-slate-500 w-24">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {openDays.map((day) => {
-                  const daySched = schedule[day.date];
-                  const assignments = daySched ? buildDailyAssignments(
-                    staff, daySched.dentists, day.date, prefs, overrides, day.isTuesday && day.isOpenTuesday
-                  ) : null;
-                  const status = dayStatuses[day.date];
-                  const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-                  return (
-                    <tr key={day.date} className="border-b hover:bg-slate-50 cursor-pointer" onClick={() => { handleSelectDate(day.date); setStep(3); }}>
-                      <td className="p-4 font-medium">
-                        {dateLabel}
-                        {day.isTuesday && <span className="ml-2 rounded-full bg-blue-100 text-blue-600 text-xs px-1.5 py-0.5">Tue</span>}
-                      </td>
-                      <td className="p-4">
-                        {assignments?.dentists.map(({ dentist, assistant }) => (
-                          <div key={dentist.id} className="flex items-center gap-1.5 text-xs mb-0.5">
-                            <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: dentist.color }} />
-                            <span className="font-medium">{dentist.name}</span>
-                            <span className="text-slate-400">/ {assistant?.name ?? "No Assistant"}</span>
-                          </div>
-                        )) ?? <span className="text-slate-300 text-xs">Not configured</span>}
-                      </td>
-                      <td className="p-4 text-xs text-slate-600">{assignments?.frontDesk.map((e) => e.name).join(", ") ?? "—"}</td>
-                      <td className="p-4 text-xs text-slate-600">{assignments?.hygienists.map((e) => e.name).join(", ") ?? "—"}</td>
-                      <td className="p-4">
-                        {status === "complete" && <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">✓ Ready</span>}
-                        {status === "warning" && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">⚠ Warning</span>}
-                        {status === "empty" && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-400">Not set</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="flex gap-3">
-            <button onClick={() => setStep(3)} className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">← Back to Edit</button>
-            <PrintSchedule year={year} month={month} schedule={schedule} />
-            <PrintIndividualSchedule year={year} month={month} schedule={schedule} />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+            <div
