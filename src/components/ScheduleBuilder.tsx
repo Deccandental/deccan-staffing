@@ -368,15 +368,7 @@ export default function ScheduleBuilder() {
                 </div>
               </div>
 
-              {selectedAssignments && selectedAssignments.warnings.length > 0 && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-1">
-                  {selectedAssignments.warnings.map((w, i) => (
-                    <p key={i} className={`text-sm font-medium ${w.severity === "error" ? "text-red-600" : "text-amber-600"}`}>
-                      {w.severity === "error" ? "🔴" : "⚠️"} {w.message}
-                    </p>
-                  ))}
-                </div>
-              )}
+            
 
               <DailyAssignmentPanel
                 key={selectedDate}
