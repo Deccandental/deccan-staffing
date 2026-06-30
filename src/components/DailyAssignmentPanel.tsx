@@ -13,6 +13,9 @@ interface Props {
   assignments?: DailyAssignmentsResult;
   assistantOverrides?: Record<number, number | null>;
   onOverrideChange?: (overrides: Record<number, number | null>) => void;
+  hygienistsRequired?: number;
+  hygienistOverrides?: Record<number, number | null>;
+  onHygienistOverrideChange?: (overrides: Record<number, number | null>) => void;
   onTempAssignmentsChange?: (date: string, assignments: TempAssignment[]) => void;
 }
 
@@ -33,9 +36,15 @@ async function loadTemps(): Promise<TempStaff[]> {
   }));
 }
 
-export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY, assistantOverrides = {}, onOverrideChange, onTempAssignmentsChange }: Props) {
+export default function DailyAssignmentPanel({
+  selectedDate, assignments = EMPTY, assistantOverrides = {}, onOverrideChange,
+  hygienistsRequired, hygienistOverrides = {}, onHygienistOverrideChange,
+  onTempAssignmentsChange,
+}: Props) {
   const [overrides, setOverrides] = useState<Record<number, number | null>>(assistantOverrides);
+  const [hygOverrides, setHygOverrides] = useState<Record<number, number | null>>(hygienistOverrides);
   const [swapping, setSwapping] = useState<number | null>(null);
+  const [hygSwapping, setHygSwapping] = useState<number | null>(null);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [temps, setTemps] = useState<TempStaff[]>([]);
   const [tempAssignments, setTempAssignments] = useState<TempAssignment[]>([]);
@@ -50,14 +59,16 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
 
   useEffect(() => {
     setOverrides(assistantOverrides);
+    setHygOverrides(hygienistOverrides);
     setSwapping(null);
+    setHygSwapping(null);
     setAssigningRole(null);
     setSelectedTempId("");
     setSelectedDentistId(null);
     if (selectedDate) {
       getTempAssignments(selectedDate).then(setTempAssignments);
     }
-  }, [selectedDate, JSON.stringify(assistantOverrides)]);
+  }, [selectedDate, JSON.stringify(assistantOverrides), JSON.stringify(hygienistOverrides)]);
 
   const dateLabel = selectedDate
     ? new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
@@ -79,7 +90,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
   // shown — picking one triggers a true swap (see handleOverride) instead of
   // creating a duplicate.
   function getAvailableAssistantsFor(dentistId: number): Employee[] {
-    const hygienistIds = new Set(assignments.hygienists.map((h) => h.id));
+    const hygienistIds = new Set(resolvedHygienists.map((h) => h.id));
     return staff.filter((e) => e.skills.includes("Assistant") && !hygienistIds.has(e.id));
   }
 
@@ -90,6 +101,70 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
       return getAssistant(dentist.id, assistant)?.id === assistantId;
     });
     return match ? match.dentist : null;
+  }
+
+  // Hygienist slots: independent "seats" (0-indexed, up to hygienistsRequired)
+  // rather than one slot per person, since hygienist need isn't tied to a
+  // specific dentist. Slot N defaults to assignments.hygienists[N] (the
+  // engine's priority pick — e.g. Cindy stays first choice) unless overridden.
+  const hygSlotCount = hygienistsRequired ?? assignments.hygienists.length;
+  const hygSlotsAuto: (Employee | null)[] = Array.from({ length: hygSlotCount }, (_, i) => assignments.hygienists[i] ?? null);
+
+  function getHygienist(slotIndex: number): Employee | null {
+    if (slotIndex in hygOverrides) {
+      const ovId = hygOverrides[slotIndex];
+      return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
+    }
+    return hygSlotsAuto[slotIndex] ?? null;
+  }
+
+  const resolvedHygienists = Array.from({ length: hygSlotCount }, (_, i) => getHygienist(i)).filter(Boolean) as Employee[];
+
+  // Available hygienists for a slot. Exclude people currently working as an
+  // assistant today (cross-role conflict, no auto swap). People already in
+  // ANOTHER hygienist slot are still shown — picking one triggers a true
+  // swap (see handleHygOverride) instead of creating a duplicate.
+  function getAvailableHygienistsFor(slotIndex: number): Employee[] {
+    const assistantIds = new Set<number>();
+    assignments.dentists.forEach(({ dentist, assistant }) => {
+      const resolved = getAssistant(dentist.id, assistant);
+      if (resolved) assistantIds.add(resolved.id);
+    });
+    return staff.filter((e) => (e.role === "Hygienist" || e.skills.includes("Hygienist")) && !assistantIds.has(e.id));
+  }
+
+  // For showing "(swap with slot N's person)" hints in the hygienist dropdown.
+  function getCurrentHygSlotFor(employeeId: number, excludingSlot: number): number | null {
+    for (let i = 0; i < hygSlotCount; i++) {
+      if (i === excludingSlot) continue;
+      if (getHygienist(i)?.id === employeeId) return i;
+    }
+    return null;
+  }
+
+  function handleHygOverride(slotIndex: number, value: string) {
+    const newId = value ? Number(value) : null;
+    const newHygOverrides = { ...hygOverrides };
+
+    if (newId !== null) {
+      const currentAtSlot = getHygienist(slotIndex);
+      const conflictingSlot = getCurrentHygSlotFor(newId, slotIndex);
+      if (conflictingSlot !== null) {
+        newHygOverrides[conflictingSlot] = currentAtSlot ? currentAtSlot.id : null;
+      }
+    }
+
+    newHygOverrides[slotIndex] = newId;
+    setHygOverrides(newHygOverrides);
+    setHygSwapping(null);
+    onHygienistOverrideChange?.(newHygOverrides);
+  }
+
+  function handleClearHygOverride(slotIndex: number) {
+    const newHygOverrides = { ...hygOverrides };
+    delete newHygOverrides[slotIndex];
+    setHygOverrides(newHygOverrides);
+    onHygienistOverrideChange?.(newHygOverrides);
   }
 
   function handleOverride(dentistId: number, value: string) {
@@ -169,7 +244,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
     return !d.assistant && !hasOverride && !hasTemp;
   });
 
-  const hygienistStillNeeded = assignments.hygienists.length === 0 && (tempsByRole["Hygienist"]?.length ?? 0) === 0 && assignments.dentists.length > 0;
+  const hygienistStillNeeded = resolvedHygienists.length === 0 && hygSlotCount > 0 && (tempsByRole["Hygienist"]?.length ?? 0) === 0 && assignments.dentists.length > 0;
   const frontDeskStillShort = assignments.warnings.some((w) => w.message.includes("front desk")) && (tempsByRole["Front Desk"]?.length ?? 0) === 0;
 
   // Filter warnings to hide ones already resolved by temps
@@ -446,16 +521,61 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
 
       <section className="mb-4 rounded-xl border p-4">
         <h3 className="mb-3 font-semibold text-slate-700">Hygienist/Assisted Hygiene</h3>
-        {assignments.hygienists.length === 0 && !(tempsByRole["Hygienist"]?.length) ? (
-          <p className="text-sm text-slate-400">None available</p>
+        {hygSlotCount === 0 && !(tempsByRole["Hygienist"]?.length) ? (
+          <p className="text-sm text-slate-400">None needed today</p>
         ) : (
-          <div className="space-y-1">
-            {assignments.hygienists.map((e) => (
-              <div key={e.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: e.color }} />
-                {e.name}
-              </div>
-            ))}
+          <div className="space-y-2">
+            {Array.from({ length: hygSlotCount }, (_, slotIndex) => {
+              const resolved = getHygienist(slotIndex);
+              const isOverridden = slotIndex in hygOverrides;
+              return (
+                <div key={slotIndex} className="rounded-lg bg-slate-50 px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-400">Hygienist {hygSlotCount > 1 ? slotIndex + 1 : ""}</span>
+                    <div className="flex items-center gap-2">
+                      {hygSwapping === slotIndex ? (
+                        <div className="flex items-center gap-1">
+                          <select className="rounded border border-slate-200 px-2 py-1 text-xs"
+                            defaultValue={resolved?.id ?? ""}
+                            onChange={(e) => handleHygOverride(slotIndex, e.target.value)}>
+                            <option value="">No Hygienist</option>
+                            {getAvailableHygienistsFor(slotIndex).map((h) => {
+                              const currentlyAtSlot = getCurrentHygSlotFor(h.id, slotIndex);
+                              return (
+                                <option key={h.id} value={h.id}>
+                                  {h.name}{currentlyAtSlot !== null && hygSlotCount > 1 ? ` (swap with #${currentlyAtSlot + 1})` : ""}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          <button onClick={() => setHygSwapping(null)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className={`text-sm flex items-center gap-1.5 ${resolved ? "text-slate-600" : "text-amber-500"}`}>
+                            {resolved ? (
+                              <>
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: resolved.color }} />
+                                {resolved.name}
+                                {isOverridden && (
+                                  <button onClick={() => handleClearHygOverride(slotIndex)} className="text-xs text-cyan-500 ml-1 hover:text-red-400">
+                                    (manual ✕)
+                                  </button>
+                                )}
+                              </>
+                            ) : "No Hygienist"}
+                          </span>
+                          <button onClick={() => setHygSwapping(slotIndex)}
+                            className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
+                            swap
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
             {(tempsByRole["Hygienist"] ?? []).map(({ assignment, temp }) => (
               <div key={assignment.id} className="flex items-center justify-between rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
                 <span className="flex items-center gap-2">
