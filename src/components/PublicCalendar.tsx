@@ -142,6 +142,15 @@ export default function PublicCalendar() {
           : { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: "???", assistantId: null };
       });
 
+      const ho = daySched.hygienistOverrides ?? {};
+      const resolvedHygienists = Array.from({ length: hygienistsRequired }, (_, i) => {
+        if (i in ho) {
+          const ovId = ho[i];
+          return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
+        }
+        return assignments.hygienists[i] ?? null;
+      }).filter(Boolean) as Employee[];
+
       const frontDesk: PersonChip[] = [
         ...assignments.frontDesk.map((e) => ({ id: e.id, name: firstName(e.name) })),
         ...tempsForDay.filter((ta) => ta.role === "Front Desk").map((ta) => ({ id: null, name: `${tempName(ta.tempId)} (temp)` })),
@@ -149,7 +158,7 @@ export default function PublicCalendar() {
       if (frontDesk.length === 0 && frontDeskRequired > 0) frontDesk.push({ id: null, name: "???" });
 
       const hygienists: PersonChip[] = [
-        ...assignments.hygienists.map((e) => ({ id: e.id, name: firstName(e.name) })),
+        ...resolvedHygienists.map((e) => ({ id: e.id, name: firstName(e.name) })),
         ...tempsForDay.filter((ta) => ta.role === "Hygienist").map((ta) => ({ id: null, name: `${tempName(ta.tempId)} (temp)` })),
       ];
       if (hygienists.length === 0 && hygienistsRequired > 0) hygienists.push({ id: null, name: "???" });
