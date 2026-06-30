@@ -18,12 +18,7 @@ import DailyAssignmentPanel from "./DailyAssignmentPanel";
 import PrintSchedule from "./PrintSchedule";
 import PrintIndividualSchedule from "./PrintIndividualSchedule";
 
-const STEPS = [
-  { id: 1, label: "Pick Month", icon: "📅" },
-  { id: 2, label: "Mark Absences", icon: "🏥" },
-  { id: 3, label: "Build Schedule", icon: "📋" },
-  { id: 4, label: "Review & Print", icon: "🖨️" },
-];
+type View = "build" | "review";
 
 async function loadTemps(): Promise<TempStaff[]> {
   const { data, error } = await supabase.from("temps").select("*");
@@ -37,10 +32,10 @@ async function loadTemps(): Promise<TempStaff[]> {
 
 export default function ScheduleBuilder() {
   const today = new Date();
-  const [step, setStep] = useState(() => {
-    if (typeof window === "undefined") return 1;
+  const [view, setView] = useState<View>(() => {
+    if (typeof window === "undefined") return "build";
     const params = new URLSearchParams(window.location.search);
-    return Number(params.get("step") ?? "1");
+    return params.get("view") === "review" ? "review" : "build";
   });
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
@@ -116,6 +111,19 @@ export default function ScheduleBuilder() {
     ));
     setSaving(false);
   }
+
+  // Auto-fill default assignments for any open day in the current month that
+  // doesn't have a schedule entry yet — replaces the old "Pick Month" /
+  // "Mark Absences" intro steps, since this now runs automatically as soon as
+  // staff + month data are ready, and again whenever the month changes.
+  useEffect(() => {
+    if (openDays.length === 0 || staff.length === 0) return;
+    const hasMissingDay = openDays.some((d) => !schedule[d.date]);
+    if (hasMissingDay) {
+      applyDefaults();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openDays, staff, schedule]);
 
   async function handleSelectDate(date: string) {
     setSelectedDate(date);
@@ -277,80 +285,39 @@ export default function ScheduleBuilder() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl bg-white p-4 shadow">
-        <div className="flex items-center">
-          {STEPS.map((s, i) => (
-            <div key={s.id} className="flex items-center flex-1">
-              <button
-                onClick={() => s.id <= step + 1 && setStep(s.id)}
-                className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                  step === s.id ? "bg-cyan-600 text-white shadow"
-                  : s.id < step ? "text-cyan-600 hover:bg-cyan-50"
-                  : "text-slate-300 cursor-not-allowed"
-                }`}
-              >
-                <span>{s.icon}</span>
-                <span>{s.label}</span>
-              </button>
-              {i < STEPS.length - 1 && (
-                <div className={`flex-1 h-0.5 mx-2 rounded ${s.id < step ? "bg-cyan-400" : "bg-slate-200"}`} />
-              )}
-            </div>
-          ))}
+      <div className="rounded-2xl bg-white p-4 shadow flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <button onClick={prevMonth} className="rounded-xl border px-3 py-1.5 text-slate-500 hover:bg-slate-50 transition">←</button>
+          <span className="text-xl font-bold min-w-[180px] text-center">{formatMonthYear(year, month)}</span>
+          <button onClick={nextMonth} className="rounded-xl border px-3 py-1.5 text-slate-500 hover:bg-slate-50 transition">→</button>
+        </div>
+        <div className="flex items-center gap-2">
+          <a href="/availability" className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">
+            🏥 Mark Absences
+          </a>
+          <button onClick={() => setView("build")}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${view === "build" ? "bg-cyan-600 text-white shadow" : "text-cyan-600 hover:bg-cyan-50"}`}>
+            📋 Build Schedule
+          </button>
+          <button onClick={() => setView("review")}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${view === "review" ? "bg-cyan-600 text-white shadow" : "text-cyan-600 hover:bg-cyan-50"}`}>
+            🖨️ Review & Print
+          </button>
         </div>
       </div>
 
-      {step === 1 && (
-        <div className="rounded-2xl bg-white p-8 shadow">
-          <h2 className="text-2xl font-bold mb-2">Which month are you scheduling?</h2>
-          <p className="text-slate-500 mb-8">Select the month you want to build a schedule for.</p>
-          <div className="flex items-center gap-4 mb-8">
-            <button onClick={prevMonth} className="rounded-xl border px-4 py-2 text-slate-500 hover:bg-slate-50 transition">←</button>
-            <span className="text-3xl font-bold min-w-[220px] text-center">{formatMonthYear(year, month)}</span>
-            <button onClick={nextMonth} className="rounded-xl border px-4 py-2 text-slate-500 hover:bg-slate-50 transition">→</button>
-          </div>
-          <div className="rounded-xl bg-slate-50 p-4 mb-8">
-            <p className="text-sm text-slate-500">{totalDays} working days in {formatMonthYear(year, month)}</p>
-          </div>
-          <button onClick={() => { applyDefaults(); setStep(2); }} className="rounded-xl bg-cyan-600 px-8 py-3 font-semibold text-white hover:bg-cyan-700 transition">
-            Continue to Mark Absences →
-          </button>
-        </div>
-      )}
-
-      {step === 2 && (
-        <div className="rounded-2xl bg-white p-8 shadow">
-          <h2 className="text-2xl font-bold mb-2">Mark staff absences</h2>
-          <p className="text-slate-500 mb-6">Go to the <strong>Availability</strong> page to mark sick days, PTO, and leave for {formatMonthYear(year, month)}. Come back here when done.</p>
-          <a href="/availability" className="inline-flex items-center gap-2 rounded-xl bg-cyan-50 border border-cyan-200 px-6 py-3 text-sm font-semibold text-cyan-700 hover:bg-cyan-100 transition mb-8">
-            🏥 Go to Availability Page →
-          </a>
-          <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 mb-8">
-            <p className="text-sm text-amber-700">⚠️ Absences you mark will automatically affect assignments in the next step.</p>
-          </div>
-          <div className="flex gap-3">
-            <button onClick={() => setStep(1)} className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">← Back</button>
-            <button onClick={() => setStep(3)} className="rounded-xl bg-cyan-600 px-8 py-3 font-semibold text-white hover:bg-cyan-700 transition">Continue to Build Schedule →</button>
-          </div>
-        </div>
-      )}
-
-      {step === 3 && (
+      {view === "build" && (
         <div className="space-y-6">
           <div className="rounded-2xl bg-white p-5 shadow">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <span className="font-bold text-slate-700">{formatMonthYear(year, month)}</span>
-                <span className="ml-3 text-sm text-slate-400">
+                <span className="text-sm text-slate-400">
                   {completedDays} of {totalDays} days complete
                   {warningDays > 0 && <span className="ml-2 text-amber-500">· {warningDays} with warnings</span>}
                 </span>
                 {saving && <span className="ml-3 text-xs text-cyan-500">💾 Saving...</span>}
               </div>
-              <div className="flex gap-2">
-                <button onClick={applyDefaults} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">↺ Re-apply Defaults</button>
-                <button onClick={() => setStep(4)} className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 transition">Review & Print →</button>
-              </div>
+              <button onClick={applyDefaults} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">↺ Re-apply Defaults</button>
             </div>
             <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
               <div className="h-full rounded-full bg-cyan-500 transition-all" style={{ width: `${totalDays > 0 ? (completedDays / totalDays) * 100 : 0}%` }} />
@@ -437,8 +404,6 @@ export default function ScheduleBuilder() {
                 </div>
               </div>
 
-            
-
               <DailyAssignmentPanel
                 key={selectedDate}
                 selectedDate={selectedDate}
@@ -453,14 +418,10 @@ export default function ScheduleBuilder() {
               <p className="text-slate-400">← Select a day from the calendar above to edit staffing</p>
             </div>
           )}
-
-          <div className="flex gap-3">
-            <button onClick={() => setStep(2)} className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">← Back</button>
-          </div>
         </div>
       )}
 
-      {step === 4 && (
+      {view === "review" && (
         <div className="space-y-6">
           <div className="rounded-2xl bg-white p-6 shadow">
             <div className="flex items-center justify-between mb-2">
@@ -473,7 +434,7 @@ export default function ScheduleBuilder() {
             </div>
             {warningDays > 0 && (
               <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 p-4">
-                <p className="text-sm text-amber-700">⚠️ Some days have staffing warnings. <button onClick={() => setStep(3)} className="underline font-semibold">Go back to fix them</button>.</p>
+                <p className="text-sm text-amber-700">⚠️ Some days have staffing warnings. <button onClick={() => setView("build")} className="underline font-semibold">Go back to fix them</button>.</p>
               </div>
             )}
           </div>
@@ -483,7 +444,7 @@ export default function ScheduleBuilder() {
             month={month}
             dayStatuses={dayStatuses}
             selectedDate={selectedDate}
-            onSelectDate={(date) => { handleSelectDate(date); setStep(3); }}
+            onSelectDate={(date) => { handleSelectDate(date); setView("build"); }}
             openTuesdays={openTuesdays}
             holidays={holidays}
             dayAssignments={monthAssignments}
@@ -523,7 +484,7 @@ export default function ScheduleBuilder() {
                   const status = dayStatuses[day.date];
                   const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
                   return (
-                    <tr key={day.date} className="border-b hover:bg-slate-50 cursor-pointer" onClick={() => { handleSelectDate(day.date); setStep(3); }}>
+                    <tr key={day.date} className="border-b hover:bg-slate-50 cursor-pointer" onClick={() => { handleSelectDate(day.date); setView("build"); }}>
                       <td className="p-4 font-medium">
                         {dateLabel}
                         {day.isTuesday && <span className="ml-2 rounded-full bg-blue-100 text-blue-600 text-xs px-1.5 py-0.5">Tue</span>}
@@ -561,7 +522,7 @@ export default function ScheduleBuilder() {
           </div>
 
           <div className="flex gap-3">
-            <button onClick={() => setStep(3)} className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">← Back to Edit</button>
+            <button onClick={() => setView("build")} className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">← Back to Edit</button>
             <PrintSchedule year={year} month={month} schedule={schedule} />
             <PrintIndividualSchedule year={year} month={month} schedule={schedule} />
           </div>
