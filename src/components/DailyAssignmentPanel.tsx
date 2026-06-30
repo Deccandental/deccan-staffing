@@ -13,6 +13,7 @@ interface Props {
   assignments?: DailyAssignmentsResult;
   assistantOverrides?: Record<number, number | null>;
   onOverrideChange?: (overrides: Record<number, number | null>) => void;
+  onTempAssignmentsChange?: (date: string, assignments: TempAssignment[]) => void;
 }
 
 const EMPTY: DailyAssignmentsResult = { dentists: [], frontDesk: [], hygienists: [], warnings: [] };
@@ -32,7 +33,7 @@ async function loadTemps(): Promise<TempStaff[]> {
   }));
 }
 
-export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY, assistantOverrides = {}, onOverrideChange }: Props) {
+export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY, assistantOverrides = {}, onOverrideChange, onTempAssignmentsChange }: Props) {
   const [overrides, setOverrides] = useState<Record<number, number | null>>(assistantOverrides);
   const [swapping, setSwapping] = useState<number | null>(null);
   const [staff, setStaff] = useState<Employee[]>([]);
@@ -112,6 +113,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
     await addTempAssignment({ date: selectedDate, tempId: selectedTempId, role: assigningRole, notes });
     const updated = await getTempAssignments(selectedDate);
     setTempAssignments(updated);
+    onTempAssignmentsChange?.(selectedDate, updated);
     setAssigningRole(null);
     setSelectedTempId("");
     setSelectedDentistId(null);
@@ -121,6 +123,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
     await removeTempAssignment(id);
     const updated = await getTempAssignments(selectedDate);
     setTempAssignments(updated);
+    onTempAssignmentsChange?.(selectedDate, updated);
   }
 
   function getTempsForRole(role: string): TempStaff[] {
