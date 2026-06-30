@@ -122,10 +122,17 @@ export function buildDailyAssignments(
   const orderedAssignments = dentists.map((d) => dentistAssignments.find((a) => a.dentist.id === d.id)!);
 
   // Hygienists — respect hygienistsRequired
+  // Exclude anyone already used as front desk or as a dentist's assistant today,
+  // so a dual-role staffer (e.g. has both "Assistant" and "Hygienist" skills)
+  // can't be double-booked.
   const availableHygienists = employees.filter(
-    (e) => (e.role === "Hygienist" || e.skills.includes("Hygienist")) && isAvailable(e)
+    (e) =>
+      (e.role === "Hygienist" || e.skills.includes("Hygienist")) &&
+      isAvailable(e) &&
+      !assignedIds.has(e.id)
   );
   const hygienists = availableHygienists.slice(0, hygienistsRequired);
+  hygienists.forEach((h) => assignedIds.add(h.id));
 
   if (hygienists.length < hygienistsRequired && dentists.length > 0) {
     const shortage = hygienistsRequired - hygienists.length;
