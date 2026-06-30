@@ -126,6 +126,34 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
     tempsByRole[ta.role].push({ assignment: ta, temp: temps.find((t) => t.id === ta.tempId) });
   }
 
+  // Determine which dentists still need an assistant (no override, no temp)
+  const dentistsStillNeedingAssistant = assignments.dentists.filter((d) => {
+    const hasOverride = d.dentist.id in overrides;
+    const hasTemp = tempAssignments.some((ta) => ta.role === "Assistant" && ta.notes === `dentist:${d.dentist.id}`);
+    return !d.assistant && !hasOverride && !hasTemp;
+  });
+
+  const hygienistStillNeeded = assignments.hygienists.length === 0 && (tempsByRole["Hygienist"]?.length ?? 0) === 0 && assignments.dentists.length > 0;
+  const frontDeskStillShort = assignments.warnings.some((w) => w.message.includes("front desk")) && (tempsByRole["Front Desk"]?.length ?? 0) === 0;
+
+  // Filter warnings to hide ones already resolved by temps
+  const visibleWarnings = assignments.warnings.filter((w) => {
+    if (w.message.includes("hygienist")) return hygienistStillNeeded;
+    if (w.message.includes("front desk")) return frontDeskStillShort;
+    if (w.message.includes("assistant")) {
+      // Check if this is a dentist-specific warning
+      const dentistMatch = assignments.dentists.find((d) => w.message.includes(d.dentist.name));
+      if (dentistMatch) {
+        const hasTemp = tempAssignments.some((ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentistMatch.dentist.id}`);
+        const hasOverride = dentistMatch.dentist.id in overrides;
+        return !hasTemp && !hasOverride;
+      }
+      // General assistant shortage warning
+      return dentistsStillNeedingAssistant.length > 0;
+    }
+    return true;
+  });
+
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
       <div className="mb-5">
@@ -133,9 +161,9 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
         <p className="mt-1 text-slate-500">{dateLabel || "Select a day"}</p>
       </div>
 
-      {assignments.warnings.length > 0 && (
+      {visibleWarnings.length > 0 && (
         <div className="mb-4 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          {assignments.warnings.map((w, i) => {
+          {visibleWarnings.map((w, i) => {
             let tempRole: string | null = null;
             if (w.message.includes("assistant")) tempRole = "Assistant";
             else if (w.message.includes("front desk")) tempRole = "Front Desk";
@@ -171,20 +199,25 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
             <div className="mb-3">
               <p className="text-xs font-semibold text-blue-600 mb-2">Which dentist are they assisting?</p>
               <div className="grid gap-1.5">
-                {workingDentists.map((dentist) => (
-                  <button key={dentist.id}
-                    onClick={() => setSelectedDentistId(dentist.id)}
-                    className="flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition"
-                    style={selectedDentistId === dentist.id
-                      ? { borderColor: dentist.color, backgroundColor: "#f0f9ff" }
-                      : { borderColor: "#e5e7eb", background: "white" }}>
-                    <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: dentist.color }} />
-                    <span className="text-sm font-medium text-slate-700">{dentist.name}</span>
-                    {selectedDentistId === dentist.id && (
-                      <span className="ml-auto text-xs font-bold" style={{ color: dentist.color }}>✓</span>
-                    )}
-                  </button>
-                ))}
+                {workingDentists.map((dentist) => {
+                  const alreadyHasTemp = tempAssignments.some((ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`);
+                  return (
+                    <button key={dentist.id}
+                      disabled={alreadyHasTemp}
+                      onClick={() => setSelectedDentistId(dentist.id)}
+                      className="flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition disabled:opacity-40 disabled:cursor-not-allowed"
+                      style={selectedDentistId === dentist.id
+                        ? { borderColor: dentist.color, backgroundColor: "#f0f9ff" }
+                        : { borderColor: "#e5e7eb", background: "white" }}>
+                      <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: dentist.color }} />
+                      <span className="text-sm font-medium text-slate-700">{dentist.name}</span>
+                      {alreadyHasTemp && <span className="ml-auto text-xs text-slate-400">Already has temp</span>}
+                      {selectedDentistId === dentist.id && (
+                        <span className="ml-auto text-xs font-bold" style={{ color: dentist.color }}>✓</span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -358,9 +391,12 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
               </div>
             ))}
             {(tempsByRole["Front Desk"] ?? []).map(({ assignment, temp }) => (
-              <div key={assignment.id} className="flex items-center gap-2 rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
-                <span className="h-2 w-2 rounded-full bg-teal-400" />
-                {temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
+              <div key={assignment.id} className="flex items-center justify-between rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
+                <span className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-teal-400" />
+                  {temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
+                </span>
+                <button onClick={() => handleRemoveTemp(assignment.id)} className="text-xs text-red-400 hover:text-red-600">Remove</button>
               </div>
             ))}
           </div>
@@ -380,9 +416,12 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
               </div>
             ))}
             {(tempsByRole["Hygienist"] ?? []).map(({ assignment, temp }) => (
-              <div key={assignment.id} className="flex items-center gap-2 rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
-                <span className="h-2 w-2 rounded-full bg-teal-400" />
-                {temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
+              <div key={assignment.id} className="flex items-center justify-between rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
+                <span className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-teal-400" />
+                  {temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
+                </span>
+                <button onClick={() => handleRemoveTemp(assignment.id)} className="text-xs text-red-400 hover:text-red-600">Remove</button>
               </div>
             ))}
           </div>
