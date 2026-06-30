@@ -19,7 +19,8 @@ export function buildDailyAssignments(
   date?: string,
   prefs: DentistPrefs = {},
   overrides: StaffOverride[] = [],
-  isOpenTuesday: boolean = false
+  isOpenTuesday: boolean = false,
+  frontDeskRequired: number = 2
 ): DailyAssignmentsResult {
   const weekday = date ? getWeekday(date) : null;
   const warnings: AssignmentWarning[] = [];
@@ -40,24 +41,35 @@ export function buildDailyAssignments(
   let frontDesk: Employee[] = [];
   let karlaOnFrontDesk = false;
 
-  if (regularFrontDesk.length >= 2) {
-    frontDesk = regularFrontDesk.slice(0, 2);
-  } else if (regularFrontDesk.length === 1) {
-    if (karla && isAvailable(karla)) {
-      frontDesk = [regularFrontDesk[0], karla];
-      karlaOnFrontDesk = true;
-    } else {
-      frontDesk = regularFrontDesk;
-      warnings.push({ severity: "warning", message: "Only 1 front desk available — temp front desk needed." });
-    }
-  } else {
-    if (karla && isAvailable(karla)) {
-      frontDesk = [karla];
-      karlaOnFrontDesk = true;
-      warnings.push({ severity: "error", message: "Both front desk staff out — temp front desk needed." });
+  if (frontDeskRequired === 1) {
+    // Only need 1 front desk — take the first available, leave Karla as assistant
+    if (regularFrontDesk.length >= 1) {
+      frontDesk = [regularFrontDesk[0]];
     } else {
       frontDesk = [];
       warnings.push({ severity: "error", message: "No front desk available — temp front desk needed." });
+    }
+  } else {
+    // Need 2 front desk (default)
+    if (regularFrontDesk.length >= 2) {
+      frontDesk = regularFrontDesk.slice(0, 2);
+    } else if (regularFrontDesk.length === 1) {
+      if (karla && isAvailable(karla)) {
+        frontDesk = [regularFrontDesk[0], karla];
+        karlaOnFrontDesk = true;
+      } else {
+        frontDesk = regularFrontDesk;
+        warnings.push({ severity: "warning", message: "Only 1 front desk available — temp front desk needed." });
+      }
+    } else {
+      if (karla && isAvailable(karla)) {
+        frontDesk = [karla];
+        karlaOnFrontDesk = true;
+        warnings.push({ severity: "error", message: "Both front desk staff out — temp front desk needed." });
+      } else {
+        frontDesk = [];
+        warnings.push({ severity: "error", message: "No front desk available — temp front desk needed." });
+      }
     }
   }
 
@@ -109,7 +121,9 @@ export function buildDailyAssignments(
   }
 
   const orderedAssignments = dentists.map((d) => dentistAssignments.find((a) => a.dentist.id === d.id)!);
- const hygienists = employees.filter((e) => (e.role === "Hygienist" || e.skills.includes("Hygienist")) && isAvailable(e)).slice(0, 1);
+  const hygienists = employees.filter(
+    (e) => (e.role === "Hygienist" || e.skills.includes("Hygienist")) && isAvailable(e)
+  ).slice(0, 1);
 
   if (hygienists.length === 0 && dentists.length > 0) {
     warnings.push({ severity: "warning", message: "No hygienist available." });
