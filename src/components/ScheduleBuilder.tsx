@@ -8,6 +8,7 @@ import { getWeekday } from "@/lib/dateUtils";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { loadSchedule, saveDaySchedule, MonthSchedule } from "@/lib/scheduleStore";
+import { loadHolidays, Holiday } from "@/lib/holidays";
 import { Employee } from "@/types/employee";
 import MonthlyOverview from "./MonthlyOverview";
 import DailyAssignmentPanel from "./DailyAssignmentPanel";
@@ -34,25 +35,30 @@ export default function ScheduleBuilder() {
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [schedule, setSchedule] = useState<MonthSchedule>({});
   const [selectedDate, setSelectedDate] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     async function load() {
-      const [s, o, p, ot] = await Promise.all([loadStaff(), getOverrides(), loadPrefs(), getOpenTuesdays()]);
+      const [s, o, p, ot, h] = await Promise.all([
+        loadStaff(), getOverrides(), loadPrefs(), getOpenTuesdays(), loadHolidays()
+      ]);
       setStaff(s);
       setOverrides(o);
       setPrefs(p);
       setOpenTuesdays(ot);
+      setHolidays(h);
     }
     load();
 
     async function handleVisibility() {
       if (document.visibilityState === "visible") {
-        const [o, ot] = await Promise.all([getOverrides(), getOpenTuesdays()]);
+        const [o, ot, h] = await Promise.all([getOverrides(), getOpenTuesdays(), loadHolidays()]);
         setOverrides(o);
         setOpenTuesdays(ot);
+        setHolidays(h);
       }
     }
     document.addEventListener("visibilitychange", handleVisibility);
@@ -67,7 +73,7 @@ export default function ScheduleBuilder() {
     load();
   }, [year, month]);
 
-  const openDays = generateMonth(year, month, openTuesdays).filter((d) => d.isOpen);
+  const openDays = generateMonth(year, month, openTuesdays, holidays).filter((d) => d.isOpen);
 
   async function applyDefaults() {
     const filled: MonthSchedule = { ...schedule };
@@ -277,7 +283,6 @@ export default function ScheduleBuilder() {
                 </h3>
                 <p className="text-sm text-slate-400 mb-4">Select which dentists are working today</p>
 
-                {/* Front Desk Toggle */}
                 <div className="mb-3 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
                   <div>
                     <div className="text-sm font-semibold text-slate-600">Front Desk Required</div>
@@ -294,7 +299,6 @@ export default function ScheduleBuilder() {
                   </div>
                 </div>
 
-                {/* Hygienists Toggle */}
                 <div className="mb-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
                   <div>
                     <div className="text-sm font-semibold text-slate-600">Hygienists Required</div>
@@ -417,6 +421,7 @@ export default function ScheduleBuilder() {
                       <td className="p-4 font-medium">
                         {dateLabel}
                         {day.isTuesday && <span className="ml-2 rounded-full bg-blue-100 text-blue-600 text-xs px-1.5 py-0.5">Tue</span>}
+                        {day.isHoliday && <span className="ml-2 rounded-full bg-red-100 text-red-600 text-xs px-1.5 py-0.5">{day.holidayName}</span>}
                       </td>
                       <td className="p-4">
                         {assignments?.dentists.map(({ dentist, assistant }) => (
