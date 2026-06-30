@@ -89,7 +89,6 @@ function LeaveManagePageBody() {
 
   async function handleCancel(req: LeaveRequest) {
     setProcessing(req.id);
-    // If approved, remove from availability first
     if (req.status === "approved") {
       await removeFromAvailability(req);
     }
@@ -106,26 +105,18 @@ function LeaveManagePageBody() {
   async function handleSaveEdit(req: LeaveRequest) {
     setProcessing(req.id);
     const totalDays = countBusinessDays(editForm.startDate, editForm.endDate);
-
-    // If was approved, remove old availability overrides and add new ones
     if (req.status === "approved") {
       await removeFromAvailability(req);
     }
-
-    // Update the leave request in Supabase
     const { error } = await supabase.from("leave_requests").update({
       start_date: editForm.startDate,
       end_date: editForm.endDate,
       total_days: totalDays,
     }).eq("id", req.id);
-
     if (error) console.error("handleSaveEdit error:", error);
-
-    // If was approved, apply new availability overrides
     if (req.status === "approved") {
       await applyToAvailability({ ...req, startDate: editForm.startDate, endDate: editForm.endDate });
     }
-
     setEditing(null);
     setProcessing(null);
     await refresh();
@@ -139,7 +130,7 @@ function LeaveManagePageBody() {
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
       <Sidebar />
-      <div className="ml-64 p-8">
+      <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold" style={{ color: "#5a5a5a" }}>Leave Management</h1>
@@ -180,7 +171,6 @@ function LeaveManagePageBody() {
                 </span>
               </div>
 
-              {/* Edit form */}
               {editing === req.id ? (
                 <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 mb-4 space-y-3">
                   <p className="text-sm font-semibold text-blue-700">Edit Dates</p>
@@ -199,9 +189,7 @@ function LeaveManagePageBody() {
                     </div>
                   </div>
                   {editForm.startDate && editForm.endDate && (
-                    <p className="text-xs text-gray-500">
-                      📅 {countBusinessDays(editForm.startDate, editForm.endDate)} working days
-                    </p>
+                    <p className="text-xs text-gray-500">📅 {countBusinessDays(editForm.startDate, editForm.endDate)} working days</p>
                   )}
                   <div className="flex gap-2">
                     <button onClick={() => handleSaveEdit(req)} disabled={processing === req.id}
@@ -239,7 +227,6 @@ function LeaveManagePageBody() {
 
               {req.notes && <div className="mb-4 rounded-xl border border-gray-100 px-4 py-3 text-sm text-gray-500 italic">"{req.notes}"</div>}
 
-              {/* Actions */}
               {req.status === "pending" && editing !== req.id && (
                 <div className="space-y-3">
                   <textarea value={reviewNote[req.id] ?? ""} onChange={(e) => setReviewNote((n) => ({ ...n, [req.id]: e.target.value }))}
@@ -263,7 +250,6 @@ function LeaveManagePageBody() {
                 </div>
               )}
 
-              {/* Approved/Denied — can edit dates or cancel */}
               {(req.status === "approved" || req.status === "denied") && editing !== req.id && (
                 <div className="flex gap-2 mt-2">
                   <button onClick={() => startEdit(req)} disabled={processing === req.id}
