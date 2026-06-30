@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, CSSProperties } from "react";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -12,11 +12,36 @@ import { Employee } from "@/types/employee";
 import { TempAssignment, getTempAssignmentsForMonth } from "@/lib/tempAssignments";
 import { TempStaff } from "@/app/temps/page";
 import { supabase } from "@/lib/supabase";
-import { DayAssignmentSummary } from "./MonthlyOverview";
 import PrintSchedule from "./PrintSchedule";
 import PrintIndividualScheduleCalendar from "./PrintIndividualScheduleCalendar";
 
 const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const ROLE_GROUPS = [
+  { label: "Dentists", roles: ["Dentist"] },
+  { label: "Assistants & RDAs", roles: ["Assistant", "RDA"] },
+  { label: "Front Desk", roles: ["Front Desk"] },
+  { label: "Hygienists", roles: ["Hygienist"] },
+] as const;
+
+interface DentistInfo {
+  id: number;
+  name: string;
+  color: string;
+  assistantName: string;
+  assistantId: number | null;
+}
+
+interface PersonChip {
+  id: number | null; // null for temp staff (they're never the highlight target)
+  name: string;
+}
+
+interface DayInfo {
+  dentists: DentistInfo[];
+  frontDesk: PersonChip[];
+  hygienists: PersonChip[];
+}
 
 async function loadTemps(): Promise<TempStaff[]> {
   const { data, error } = await supabase.from("temps").select("*");
@@ -42,8 +67,7 @@ export default function PublicCalendar() {
   const [temps, setTemps] = useState<TempStaff[]>([]);
   const [monthTempAssignments, setMonthTempAssignments] = useState<TempAssignment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"all" | "individual">("all");
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
+  const [highlightId, setHighlightId] = useState<number | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -79,7 +103,7 @@ export default function PublicCalendar() {
   const blanks = Array.from({ length: firstDow });
 
   const monthAssignments = useMemo(() => {
-    const result: Record<string, DayAssignmentSummary> = {};
+    const result: Record<string, DayInfo> = {};
     const firstName = (name: string) => name.split(" ")[0];
 
     for (const day of days) {
@@ -101,106 +125,39 @@ export default function PublicCalendar() {
       const tempName = (tempId: string) => firstName(temps.find((t) => t.id === tempId)?.name ?? "Temp");
 
       const ao = daySched.assistantOverrides ?? {};
-      const dentists = assignments.dentists.map(({ dentist, assistant }) => {
+      const dentists: DentistInfo[] = assignments.dentists.map(({ dentist, assistant }) => {
         const tempForDentist = tempsForDay.find(
           (ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`
         );
         if (tempForDentist) {
-          return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: `${tempName(tempForDentist.tempId)} (temp)` };
+          return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: `${tempName(tempForDentist.tempId)} (temp)`, assistantId: null };
         }
         let resolvedAssistant = assistant;
         if (dentist.id in ao) {
           const ovId = ao[dentist.id];
           resolvedAssistant = ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
         }
-        return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: resolvedAssistant ? firstName(resolvedAssistant.name) : "???" };
+        return resolvedAssistant
+          ? { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: firstName(resolvedAssistant.name), assistantId: resolvedAssistant.id }
+          : { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: "???", assistantId: null };
       });
 
-      const tempFrontDesk = tempsForDay.filter((ta) => ta.role === "Front Desk").map((ta) => `${tempName(ta.tempId)} (temp)`);
-      const tempHygienists = tempsForDay.filter((ta) => ta.role === "Hygienist").map((ta) => `${tempName(ta.tempId)} (temp)`);
+      const frontDesk: PersonChip[] = [
+        ...assignments.frontDesk.map((e) => ({ id: e.id, name: firstName(e.name) })),
+        ...tempsForDay.filter((ta) => ta.role === "Front Desk").map((ta) => ({ id: null, name: `${tempName(ta.tempId)} (temp)` })),
+      ];
+      if (frontDesk.length === 0 && frontDeskRequired > 0) frontDesk.push({ id: null, name: "???" });
 
-      const frontDesk = [...assignments.frontDesk.map((e) => firstName(e.name)), ...tempFrontDesk];
-      const hygienists = [...assignments.hygienists.map((e) => firstName(e.name)), ...tempHygienists];
+      const hygienists: PersonChip[] = [
+        ...assignments.hygienists.map((e) => ({ id: e.id, name: firstName(e.name) })),
+        ...tempsForDay.filter((ta) => ta.role === "Hygienist").map((ta) => ({ id: null, name: `${tempName(ta.tempId)} (temp)` })),
+      ];
+      if (hygienists.length === 0 && hygienistsRequired > 0) hygienists.push({ id: null, name: "???" });
 
-      result[day.date] = {
-        dentists,
-        frontDesk: frontDesk.length > 0 ? frontDesk : frontDeskRequired > 0 ? ["???"] : [],
-        hygienists: hygienists.length > 0 ? hygienists : hygienistsRequired > 0 ? ["???"] : [],
-      };
+      result[day.date] = { dentists, frontDesk, hygienists };
     }
     return result;
   }, [days, schedule, staff, prefs, overrides, monthTempAssignments, temps]);
-
-  const ROLE_GROUPS = [
-    { label: "Dentists", roles: ["Dentist"] },
-    { label: "Assistants & RDAs", roles: ["Assistant", "RDA"] },
-    { label: "Front Desk", roles: ["Front Desk"] },
-    { label: "Hygienists", roles: ["Hygienist"] },
-  ] as const;
-
-  const individualAssignments = useMemo(() => {
-    const result: Record<string, { role: string; detail: string } | null> = {};
-    if (!selectedEmployeeId) return result;
-    const emp = staff.find((e) => e.id === selectedEmployeeId);
-    if (!emp) return result;
-    const firstName = (name: string) => name.split(" ")[0];
-
-    for (const day of days) {
-      if (!day.isOpen) continue;
-      const daySched = schedule[day.date];
-      if (!daySched) { result[day.date] = null; continue; }
-
-      const assignments = buildDailyAssignments(
-        staff, daySched.dentists, day.date, prefs, overrides,
-        day.isTuesday && day.isOpenTuesday,
-        daySched.frontDeskRequired ?? 2,
-        daySched.hygienistsRequired ?? 1
-      );
-      const ao = daySched.assistantOverrides ?? {};
-      const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);
-      const tempName = (tempId: string) => firstName(temps.find((t) => t.id === tempId)?.name ?? "Temp");
-
-      let info: { role: string; detail: string } | null = null;
-
-      if (emp.role === "Dentist") {
-        const pair = assignments.dentists.find((d) => d.dentist.id === emp.id);
-        if (pair) {
-          let assistantName = pair.assistant?.name ? firstName(pair.assistant.name) : null;
-          if (pair.dentist.id in ao) {
-            const ovId = ao[pair.dentist.id];
-            assistantName = ovId != null ? staff.find((e) => e.id === ovId)?.name ?? null : null;
-            if (assistantName) assistantName = firstName(assistantName);
-          }
-          const tempForDentist = tempsForDay.find((ta) => ta.role === "Assistant" && ta.notes === `dentist:${pair.dentist.id}`);
-          if (tempForDentist) assistantName = `${tempName(tempForDentist.tempId)} (temp)`;
-          info = { role: "Dentist", detail: assistantName ? `w/ ${assistantName}` : "No assistant" };
-        }
-      }
-
-      if (!info && (emp.skills.includes("Assistant") || emp.role === "RDA")) {
-        const directPair = assignments.dentists.find((d) => {
-          if (d.dentist.id in ao) {
-            const ovId = ao[d.dentist.id];
-            return ovId === emp.id;
-          }
-          return d.assistant?.id === emp.id;
-        });
-        if (directPair) info = { role: "Assistant", detail: `w/ ${directPair.dentist.name}` };
-        else if (assignments.frontDesk.find((e) => e.id === emp.id)) info = { role: "Front Desk", detail: "" };
-      }
-
-      if (!info && emp.role === "Front Desk" && assignments.frontDesk.find((e) => e.id === emp.id)) {
-        info = { role: "Front Desk", detail: "" };
-      }
-
-      if (!info && (emp.role === "Hygienist" || emp.skills.includes("Hygienist")) && assignments.hygienists.find((e) => e.id === emp.id)) {
-        info = { role: "Hygienist", detail: "" };
-      }
-
-      result[day.date] = info;
-    }
-    return result;
-  }, [selectedEmployeeId, days, schedule, staff, prefs, overrides, monthTempAssignments, temps]);
 
   function prevMonth() {
     if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1);
@@ -208,6 +165,17 @@ export default function PublicCalendar() {
 
   function nextMonth() {
     if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1);
+  }
+
+  // Opacity for a name given whether it matches the highlighted person.
+  // No highlight active -> everything full strength.
+  function dimStyle(isMatch: boolean): CSSProperties {
+    if (highlightId === null) return {};
+    return isMatch ? {} : { opacity: 0.25 };
+  }
+  function chipClass(isMatch: boolean, base: string) {
+    if (highlightId === null) return base;
+    return isMatch ? `${base} bg-cyan-100 text-cyan-800 rounded px-1` : base;
   }
 
   return (
@@ -225,33 +193,27 @@ export default function PublicCalendar() {
       </div>
 
       <div className="rounded-2xl bg-white p-4 shadow flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <button onClick={() => setViewMode("all")}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${viewMode === "all" ? "bg-cyan-600 text-white shadow" : "text-cyan-600 hover:bg-cyan-50"}`}>
-            👥 All Staff
+        <span className="text-sm font-semibold text-slate-500">Highlight:</span>
+        <select
+          value={highlightId ?? ""}
+          onChange={(e) => setHighlightId(e.target.value ? Number(e.target.value) : null)}
+          className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium focus:outline-none"
+        >
+          <option value="">None — show everyone</option>
+          {ROLE_GROUPS.map(({ label, roles }) => {
+            const members = staff.filter((e) => (roles as readonly string[]).includes(e.role));
+            if (members.length === 0) return null;
+            return (
+              <optgroup key={label} label={label}>
+                {members.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </optgroup>
+            );
+          })}
+        </select>
+        {highlightId !== null && (
+          <button onClick={() => setHighlightId(null)} className="text-sm text-slate-400 hover:text-slate-600 underline">
+            Clear
           </button>
-          <button onClick={() => setViewMode("individual")}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${viewMode === "individual" ? "bg-cyan-600 text-white shadow" : "text-cyan-600 hover:bg-cyan-50"}`}>
-            👤 By Person
-          </button>
-        </div>
-        {viewMode === "individual" && (
-          <select
-            value={selectedEmployeeId ?? ""}
-            onChange={(e) => setSelectedEmployeeId(e.target.value ? Number(e.target.value) : null)}
-            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium focus:outline-none"
-          >
-            <option value="">Select a staff member…</option>
-            {ROLE_GROUPS.map(({ label, roles }) => {
-              const members = staff.filter((e) => (roles as readonly string[]).includes(e.role));
-              if (members.length === 0) return null;
-              return (
-                <optgroup key={label} label={label}>
-                  {members.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </optgroup>
-              );
-            })}
-          </select>
         )}
       </div>
 
@@ -272,12 +234,10 @@ export default function PublicCalendar() {
             const isToday = day.date === todayStr;
             const isOpenTue = day.isTuesday && day.isOpenTuesday;
             const info = monthAssignments[day.date];
-            const indInfo = viewMode === "individual" ? individualAssignments[day.date] : undefined;
-            const selectedEmployee = staff.find((e) => e.id === selectedEmployeeId) ?? null;
 
             if (!day.isOpen) {
               return (
-                <div key={day.date} className="rounded-xl p-3 text-center select-none min-h-[110px] sm:min-h-[140px] flex flex-col"
+                <div key={day.date} className="rounded-xl p-3 text-center select-none min-h-[100px] sm:min-h-[130px] flex flex-col"
                   style={{ opacity: day.isHoliday ? 1 : 0.3, background: day.isHoliday ? "#fef2f2" : "transparent" }}>
                   <div className={`text-sm ${day.isHoliday ? "text-red-400" : "text-slate-400"}`}>{day.weekday}</div>
                   <div className={`text-xl font-bold ${day.isHoliday ? "text-red-500" : "text-slate-400"}`}>{day.day}</div>
@@ -291,57 +251,65 @@ export default function PublicCalendar() {
 
             return (
               <div key={day.date}
-                className={`rounded-xl border-2 p-3 text-left min-h-[110px] sm:min-h-[140px] flex flex-col ${borderColor} ${bgColor}`}>
+                className={`rounded-xl border-2 p-3 text-left min-h-[100px] sm:min-h-[130px] flex flex-col ${borderColor} ${bgColor}`}>
                 <div className="flex items-center justify-between mb-1.5">
                   <span className={`text-sm font-medium ${isToday ? "text-cyan-600" : isOpenTue ? "text-blue-400" : "text-slate-400"}`}>{day.weekday}</span>
                   <span className={`text-xl font-bold ${isToday ? "text-cyan-600" : "text-slate-700"}`}>{day.day}</span>
                 </div>
 
-                {viewMode === "individual" ? (
-                  !selectedEmployee ? (
-                    <div className="flex-1 flex items-center">
-                      <span className="text-sm text-slate-300">Select a staff member</span>
-                    </div>
-                  ) : indInfo ? (
-                    <div className="flex-1 flex flex-col justify-center items-center text-center gap-1">
-                      <span className="rounded-lg px-2 py-1 text-sm font-bold" style={{ backgroundColor: `${selectedEmployee.color}22`, color: selectedEmployee.color }}>
-                        {indInfo.role}
-                      </span>
-                      {indInfo.detail && <span className="text-sm font-semibold text-slate-600">{indInfo.detail}</span>}
-                    </div>
-                  ) : (
-                    <div className="flex-1 flex items-center justify-center">
-                      <span className="text-sm font-medium text-slate-300">Off</span>
-                    </div>
-                  )
-                ) : info ? (
+                {info ? (
                   <div className="space-y-1 overflow-hidden">
-                    {info.dentists.map((d) => (
-                      <div key={d.id} className="text-sm leading-snug">
-                        <span className="font-bold" style={{ color: d.color }}>{d.name}</span>
-                        <span className={d.assistantName === "???" ? "text-amber-600 font-bold" : "text-slate-600 font-medium"}>/{d.assistantName}</span>
-                      </div>
-                    ))}
-                    {info.frontDesk.length > 0 && (
-                      <div className="text-sm leading-snug">
-                        <span className="font-bold text-sky-600">Front:</span>{" "}
-                        {info.frontDesk.map((name, i) => (
-                          <span key={i}>
-                            {i > 0 && <span className="text-slate-400">/</span>}
-                            <span className={name === "???" ? "text-amber-600 font-bold" : "text-slate-600 font-medium"}>{name}</span>
+                    {info.dentists.map((d) => {
+                      const dentistMatch = d.id === highlightId;
+                      const assistantMatch = d.assistantId === highlightId;
+                      return (
+                        <div key={d.id} className="text-sm leading-snug truncate" title={`${d.name} / ${d.assistantName}`}>
+                          <span className="font-bold" style={{ color: d.color, ...dimStyle(dentistMatch) }}>{d.name}</span>
+                          <span
+                            className={d.assistantName === "???" ? chipClass(assistantMatch, "text-amber-600 font-bold") : chipClass(assistantMatch, "text-slate-600 font-medium")}
+                            style={dimStyle(assistantMatch)}
+                          >
+                            /{d.assistantName}
                           </span>
-                        ))}
+                        </div>
+                      );
+                    })}
+                    {info.frontDesk.length > 0 && (
+                      <div className="text-sm leading-snug truncate" title={`Front: ${info.frontDesk.map((c) => c.name).join("/")}`}>
+                        <span className="font-bold text-sky-600">Front:</span>{" "}
+                        {info.frontDesk.map((c, i) => {
+                          const isMatch = c.id === highlightId;
+                          return (
+                            <span key={i}>
+                              {i > 0 && <span className="text-slate-400">/</span>}
+                              <span
+                                className={c.name === "???" ? chipClass(isMatch, "text-amber-600 font-bold") : chipClass(isMatch, "text-slate-600 font-medium")}
+                                style={dimStyle(isMatch)}
+                              >
+                                {c.name}
+                              </span>
+                            </span>
+                          );
+                        })}
                       </div>
                     )}
                     {info.hygienists.length > 0 && (
-                      <div className="text-sm leading-snug">
+                      <div className="text-sm leading-snug truncate" title={`Hyg: ${info.hygienists.map((c) => c.name).join("/")}`}>
                         <span className="font-bold text-emerald-600">Hyg:</span>{" "}
-                        {info.hygienists.map((name, i) => (
-                          <span key={i}>
-                            {i > 0 && <span className="text-slate-400">/</span>}
-                            <span className={name === "???" ? "text-amber-600 font-bold" : "text-slate-600 font-medium"}>{name}</span>
-                          </span>
-                        ))}
+                        {info.hygienists.map((c, i) => {
+                          const isMatch = c.id === highlightId;
+                          return (
+                            <span key={i}>
+                              {i > 0 && <span className="text-slate-400">/</span>}
+                              <span
+                                className={c.name === "???" ? chipClass(isMatch, "text-amber-600 font-bold") : chipClass(isMatch, "text-slate-600 font-medium")}
+                                style={dimStyle(isMatch)}
+                              >
+                                {c.name}
+                              </span>
+                            </span>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
