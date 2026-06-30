@@ -1,6 +1,11 @@
 import { supabase } from "./supabase";
 
-export type DaySchedule = { dentists: string[]; frontDeskRequired?: number; hygienistsRequired?: number };
+export type DaySchedule = {
+  dentists: string[];
+  frontDeskRequired?: number;
+  hygienistsRequired?: number;
+  assistantOverrides?: Record<number, number | null>;
+};
 export type MonthSchedule = Record<string, DaySchedule>;
 
 function monthKey(year: number, month: number): string {
@@ -11,7 +16,7 @@ export async function loadSchedule(year: number, month: number): Promise<MonthSc
   const key = monthKey(year, month);
   const { data, error } = await supabase
     .from("schedules")
-    .select("date, dentists, front_desk_required, hygienists_required")
+    .select("date, dentists, front_desk_required, hygienists_required, assistant_overrides")
     .like("date", `${key}-%`);
   if (error) { console.error("loadSchedule error:", error); return {}; }
   const schedule: MonthSchedule = {};
@@ -20,6 +25,7 @@ export async function loadSchedule(year: number, month: number): Promise<MonthSc
       dentists: row.dentists ?? [],
       frontDeskRequired: row.front_desk_required ?? 2,
       hygienistsRequired: row.hygienists_required ?? 1,
+      assistantOverrides: row.assistant_overrides ?? {},
     };
   }
   return schedule;
@@ -29,10 +35,11 @@ export async function saveDaySchedule(
   date: string,
   dentists: string[],
   frontDeskRequired: number = 2,
-  hygienistsRequired: number = 1
+  hygienistsRequired: number = 1,
+  assistantOverrides: Record<number, number | null> = {}
 ): Promise<void> {
   const { error } = await supabase.from("schedules").upsert(
-    { date, dentists, front_desk_required: frontDeskRequired, hygienists_required: hygienistsRequired },
+    { date, dentists, front_desk_required: frontDeskRequired, hygienists_required: hygienistsRequired, assistant_overrides: assistantOverrides },
     { onConflict: "date" }
   );
   if (error) console.error("saveDaySchedule error:", error);
