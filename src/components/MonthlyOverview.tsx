@@ -2,6 +2,7 @@
 
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { OpenTuesday } from "@/lib/openTuesdays";
+import { Holiday } from "@/lib/holidays";
 
 const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -12,10 +13,11 @@ interface Props {
   selectedDate: string;
   onSelectDate: (date: string) => void;
   openTuesdays?: OpenTuesday[];
+  holidays?: Holiday[];
 }
 
-export default function MonthlyOverview({ year, month, dayStatuses, selectedDate, onSelectDate, openTuesdays = [] }: Props) {
-  const days = generateMonth(year, month, openTuesdays);
+export default function MonthlyOverview({ year, month, dayStatuses, selectedDate, onSelectDate, openTuesdays = [], holidays = [] }: Props) {
+  const days = generateMonth(year, month, openTuesdays, holidays);
   const firstDow = new Date(year, month - 1, 1).getDay();
   const blanks = Array.from({ length: firstDow });
 
@@ -27,6 +29,7 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-green-400" /> Ready</span>
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-amber-400" /> Warning</span>
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-slate-200" /> Not set</span>
+          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-red-200" /> Holiday</span>
         </div>
       </div>
 
@@ -50,9 +53,10 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
           if (!day.isOpen) {
             return (
               <div key={day.date} className="rounded-lg p-2 text-center select-none"
-                style={{ opacity: 0.25 }}>
-                <div className="text-xs text-slate-400">{day.weekday}</div>
-                <div className="text-sm font-medium text-slate-400">{day.day}</div>
+                style={{ opacity: day.isHoliday ? 1 : 0.25 }}>
+                <div className={`text-xs ${day.isHoliday ? "text-red-400" : "text-slate-400"}`}>{day.weekday}</div>
+                <div className={`text-sm font-medium ${day.isHoliday ? "text-red-500" : "text-slate-400"}`}>{day.day}</div>
+                {day.isHoliday && <div className="text-xs text-red-400 truncate" style={{ fontSize: 8 }}>{day.holidayName?.slice(0, 8)}</div>}
               </div>
             );
           }
