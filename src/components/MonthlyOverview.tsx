@@ -6,6 +6,12 @@ import { Holiday } from "@/lib/holidays";
 
 const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+export interface DayAssignmentSummary {
+  dentists: { id: number; name: string; color: string; assistantName: string | null }[];
+  frontDesk: string[];
+  hygienists: string[];
+}
+
 interface Props {
   year: number;
   month: number;
@@ -14,9 +20,10 @@ interface Props {
   onSelectDate: (date: string) => void;
   openTuesdays?: OpenTuesday[];
   holidays?: Holiday[];
+  dayAssignments?: Record<string, DayAssignmentSummary>;
 }
 
-export default function MonthlyOverview({ year, month, dayStatuses, selectedDate, onSelectDate, openTuesdays = [], holidays = [] }: Props) {
+export default function MonthlyOverview({ year, month, dayStatuses, selectedDate, onSelectDate, openTuesdays = [], holidays = [], dayAssignments }: Props) {
   const days = generateMonth(year, month, openTuesdays, holidays);
   const firstDow = new Date(year, month - 1, 1).getDay();
   const blanks = Array.from({ length: firstDow });
@@ -49,10 +56,11 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
           const isSelected = selectedDate === day.date;
           const status = dayStatuses[day.date];
           const isOpenTue = day.isTuesday && day.isOpenTuesday;
+          const info = dayAssignments?.[day.date];
 
           if (!day.isOpen) {
             return (
-              <div key={day.date} className="rounded-lg p-2 text-center select-none"
+              <div key={day.date} className="rounded-lg p-2 text-center select-none min-h-[60px]"
                 style={{ opacity: day.isHoliday ? 1 : 0.25 }}>
                 <div className={`text-xs ${day.isHoliday ? "text-red-400" : "text-slate-400"}`}>{day.weekday}</div>
                 <div className={`text-sm font-medium ${day.isHoliday ? "text-red-500" : "text-slate-400"}`}>{day.day}</div>
@@ -70,12 +78,42 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
 
           return (
             <button key={day.date} onClick={() => onSelectDate(day.date)}
-              className={`rounded-lg border p-2 text-center transition ${statusStyle}`}>
-              <div className={`text-xs ${isSelected ? "text-cyan-100" : isOpenTue ? "text-blue-400" : "text-slate-400"}`}>{day.weekday}</div>
-              <div className="text-sm font-semibold mt-0.5">{day.day}</div>
-              {isOpenTue && !isSelected && !status && <div className="mt-0.5 text-xs text-blue-400">Open</div>}
-              {!isSelected && status === "complete" && <div className="mt-0.5 text-xs text-green-500">✓</div>}
-              {!isSelected && status === "warning" && <div className="mt-0.5 text-xs text-amber-500">⚠</div>}
+              className={`rounded-lg border p-1.5 text-left transition flex flex-col min-h-[60px] ${info ? "min-h-[92px]" : ""} ${statusStyle}`}>
+              <div className="flex items-center justify-between gap-1">
+                <span className={`text-xs ${isSelected ? "text-cyan-100" : isOpenTue ? "text-blue-400" : "text-slate-400"}`}>{day.weekday}</span>
+                <span className="text-sm font-semibold">{day.day}</span>
+              </div>
+              {!isSelected && status === "complete" && !info && <div className="mt-0.5 text-xs text-green-500 text-center">✓</div>}
+              {!isSelected && status === "warning" && !info && <div className="mt-0.5 text-xs text-amber-500 text-center">⚠</div>}
+              {isOpenTue && !status && !info && <div className="mt-0.5 text-xs text-blue-400 text-center">Open</div>}
+
+              {info && (
+                <div className="mt-1 space-y-0.5 overflow-hidden">
+                  {info.dentists.map((d) => (
+                    <div key={d.id} className="truncate text-[9px] leading-tight"
+                      title={`${d.name} / ${d.assistantName ?? "No Assistant"}`}>
+                      <span className="font-semibold" style={!isSelected ? { color: d.color } : undefined}>
+                        {d.name}
+                      </span>
+                      <span className={isSelected ? "text-cyan-100" : "text-slate-400"}>
+                        /{d.assistantName ?? "—"}
+                      </span>
+                    </div>
+                  ))}
+                  {info.frontDesk.length > 0 && (
+                    <div className="truncate text-[9px] leading-tight">
+                      <span className={`font-semibold ${isSelected ? "text-cyan-100" : "text-sky-600"}`}>Front:</span>{" "}
+                      <span className={isSelected ? "text-cyan-50" : "text-slate-500"}>{info.frontDesk.join("/")}</span>
+                    </div>
+                  )}
+                  {info.hygienists.length > 0 && (
+                    <div className="truncate text-[9px] leading-tight">
+                      <span className={`font-semibold ${isSelected ? "text-cyan-100" : "text-emerald-600"}`}>Hyg:</span>{" "}
+                      <span className={isSelected ? "text-cyan-50" : "text-slate-500"}>{info.hygienists.join("/")}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </button>
           );
         })}
