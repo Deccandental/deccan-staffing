@@ -6,31 +6,26 @@ import { usePathname } from "next/navigation";
 
 const navGroups = [
   {
-    label: "Scheduling",
+    label: "Open Access",
     items: [
       { label: "Calendar", href: "/", icon: "📅" },
+      { label: "Leave Request", href: "/leave", icon: "📝" },
+    ],
+  },
+  {
+    label: "Admin 🔒",
+    items: [
       { label: "Schedule Builder", href: "/schedule-builder", icon: "✏️" },
       { label: "Availability", href: "/availability", icon: "🏥" },
-    ],
-  },
-  {
-    label: "Team",
-    items: [
       { label: "Staff", href: "/staff", icon: "👥" },
       { label: "Temp Staff", href: "/temps", icon: "🔄" },
-    ],
-  },
-  {
-    label: "Leave",
-    items: [
-      { label: "Leave Request", href: "/leave", icon: "📝" },
-      { label: "Manage Leave", href: "/leave/manage", icon: "🔐" },
-    ],
-  },
-  {
-    label: "Office",
-    items: [
       { label: "Holidays & Closures", href: "/holidays", icon: "🏖️" },
+    ],
+  },
+  {
+    label: "Leave Management 🔒",
+    items: [
+      { label: "Manage Leave", href: "/leave/manage", icon: "🔐" },
     ],
   },
 ];
