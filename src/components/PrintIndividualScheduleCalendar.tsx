@@ -75,7 +75,16 @@ export default function PrintIndividualScheduleCalendar({ year, month, schedule 
     }
 
     if (emp.role === "Hygienist" || emp.skills.includes("Hygienist")) {
-      const onHyg = assignments.hygienists.find((e) => e.id === emp.id);
+      const ho = daySched.hygienistOverrides ?? {};
+      const hygSlotCount = daySched.hygienistsRequired ?? 1;
+      const resolvedHygienists = Array.from({ length: hygSlotCount }, (_, i) => {
+        if (i in ho) {
+          const ovId = ho[i];
+          return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
+        }
+        return assignments.hygienists[i] ?? null;
+      });
+      const onHyg = resolvedHygienists.find((e) => e?.id === emp.id);
       if (onHyg) return { label: "Hygienist", detail: "" };
     }
 
