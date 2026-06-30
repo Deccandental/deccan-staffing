@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, CSSProperties } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -167,17 +167,6 @@ export default function PublicCalendar() {
     if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1);
   }
 
-  // Opacity for a name given whether it matches the highlighted person.
-  // No highlight active -> everything full strength.
-  function dimStyle(isMatch: boolean): CSSProperties {
-    if (highlightId === null) return {};
-    return isMatch ? {} : { opacity: 0.25 };
-  }
-  function chipClass(isMatch: boolean, base: string) {
-    if (highlightId === null) return base;
-    return isMatch ? `${base} bg-cyan-100 text-cyan-800 rounded px-1` : base;
-  }
-
   return (
     <div className="space-y-6">
       <div className="rounded-2xl bg-white p-5 shadow flex items-center justify-between flex-wrap gap-4">
@@ -192,14 +181,14 @@ export default function PublicCalendar() {
         </div>
       </div>
 
-      <div className="rounded-2xl bg-white p-4 shadow flex items-center gap-3 flex-wrap">
-        <span className="text-sm font-semibold text-slate-500">Highlight:</span>
+      <div className="rounded-2xl border-2 border-cyan-200 bg-cyan-50 p-4 shadow flex items-center gap-3 flex-wrap">
+        <span className="text-base font-bold text-cyan-700 flex items-center gap-1.5">🔦 Spotlight a Person:</span>
         <select
           value={highlightId ?? ""}
           onChange={(e) => setHighlightId(e.target.value ? Number(e.target.value) : null)}
-          className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium focus:outline-none"
+          className="rounded-xl border-2 border-cyan-300 bg-white px-4 py-2.5 text-sm font-bold text-cyan-700 focus:outline-none focus:border-cyan-500"
         >
-          <option value="">None — show everyone</option>
+          <option value="">— None, show everyone —</option>
           {ROLE_GROUPS.map(({ label, roles }) => {
             const members = staff.filter((e) => (roles as readonly string[]).includes(e.role));
             if (members.length === 0) return null;
@@ -211,8 +200,8 @@ export default function PublicCalendar() {
           })}
         </select>
         {highlightId !== null && (
-          <button onClick={() => setHighlightId(null)} className="text-sm text-slate-400 hover:text-slate-600 underline">
-            Clear
+          <button onClick={() => setHighlightId(null)} className="rounded-xl border-2 border-cyan-300 bg-white px-4 py-2.5 text-sm font-bold text-cyan-700 hover:bg-cyan-100 transition">
+            ✕ Clear
           </button>
         )}
       </div>
@@ -262,56 +251,57 @@ export default function PublicCalendar() {
                     {info.dentists.map((d) => {
                       const dentistMatch = d.id === highlightId;
                       const assistantMatch = d.assistantId === highlightId;
+                      const rowMatch = dentistMatch || assistantMatch;
+                      const rowDim = highlightId !== null && !rowMatch;
                       return (
-                        <div key={d.id} className="text-sm leading-snug truncate" title={`${d.name} / ${d.assistantName}`}>
-                          <span className="font-bold" style={{ color: d.color, ...dimStyle(dentistMatch) }}>{d.name}</span>
-                          <span
-                            className={d.assistantName === "???" ? chipClass(assistantMatch, "text-amber-600 font-bold") : chipClass(assistantMatch, "text-slate-600 font-medium")}
-                            style={dimStyle(assistantMatch)}
-                          >
+                        <div key={d.id} className="text-sm leading-snug truncate" style={{ opacity: rowDim ? 0.25 : 1 }} title={`${d.name} / ${d.assistantName}`}>
+                          <span className={dentistMatch ? "font-bold bg-cyan-100 rounded px-1" : "font-bold"} style={{ color: d.color }}>{d.name}</span>
+                          <span className={`${d.assistantName === "???" ? "text-amber-600 font-bold" : "text-slate-600 font-medium"} ${assistantMatch ? "bg-cyan-100 text-cyan-800 rounded px-1" : ""}`}>
                             /{d.assistantName}
                           </span>
                         </div>
                       );
                     })}
-                    {info.frontDesk.length > 0 && (
-                      <div className="text-sm leading-snug truncate" title={`Front: ${info.frontDesk.map((c) => c.name).join("/")}`}>
-                        <span className="font-bold text-sky-600">Front:</span>{" "}
-                        {info.frontDesk.map((c, i) => {
-                          const isMatch = c.id === highlightId;
-                          return (
-                            <span key={i}>
-                              {i > 0 && <span className="text-slate-400">/</span>}
-                              <span
-                                className={c.name === "???" ? chipClass(isMatch, "text-amber-600 font-bold") : chipClass(isMatch, "text-slate-600 font-medium")}
-                                style={dimStyle(isMatch)}
-                              >
-                                {c.name}
+                    {info.frontDesk.length > 0 && (() => {
+                      const rowMatch = info.frontDesk.some((c) => c.id === highlightId);
+                      const rowDim = highlightId !== null && !rowMatch;
+                      return (
+                        <div className="text-sm leading-snug truncate" style={{ opacity: rowDim ? 0.25 : 1 }} title={`Front: ${info.frontDesk.map((c) => c.name).join("/")}`}>
+                          <span className="font-bold text-sky-600">Front:</span>{" "}
+                          {info.frontDesk.map((c, i) => {
+                            const isMatch = c.id === highlightId;
+                            return (
+                              <span key={i}>
+                                {i > 0 && <span className="text-slate-400">/</span>}
+                                <span className={`${c.name === "???" ? "text-amber-600 font-bold" : "text-slate-600 font-medium"} ${isMatch ? "bg-cyan-100 text-cyan-800 rounded px-1" : ""}`}>
+                                  {c.name}
+                                </span>
                               </span>
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {info.hygienists.length > 0 && (
-                      <div className="text-sm leading-snug truncate" title={`Hyg: ${info.hygienists.map((c) => c.name).join("/")}`}>
-                        <span className="font-bold text-emerald-600">Hyg:</span>{" "}
-                        {info.hygienists.map((c, i) => {
-                          const isMatch = c.id === highlightId;
-                          return (
-                            <span key={i}>
-                              {i > 0 && <span className="text-slate-400">/</span>}
-                              <span
-                                className={c.name === "???" ? chipClass(isMatch, "text-amber-600 font-bold") : chipClass(isMatch, "text-slate-600 font-medium")}
-                                style={dimStyle(isMatch)}
-                              >
-                                {c.name}
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                    {info.hygienists.length > 0 && (() => {
+                      const rowMatch = info.hygienists.some((c) => c.id === highlightId);
+                      const rowDim = highlightId !== null && !rowMatch;
+                      return (
+                        <div className="text-sm leading-snug truncate" style={{ opacity: rowDim ? 0.25 : 1 }} title={`Hyg: ${info.hygienists.map((c) => c.name).join("/")}`}>
+                          <span className="font-bold text-emerald-600">Hyg:</span>{" "}
+                          {info.hygienists.map((c, i) => {
+                            const isMatch = c.id === highlightId;
+                            return (
+                              <span key={i}>
+                                {i > 0 && <span className="text-slate-400">/</span>}
+                                <span className={`${c.name === "???" ? "text-amber-600 font-bold" : "text-slate-600 font-medium"} ${isMatch ? "bg-cyan-100 text-cyan-800 rounded px-1" : ""}`}>
+                                  {c.name}
+                                </span>
                               </span>
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 ) : (
                   !loading && (
