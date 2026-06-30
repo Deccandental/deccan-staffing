@@ -273,7 +273,7 @@ export default function ScheduleBuilder() {
             </div>
           </div>
 
-          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} />
+          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} />
 
           {selectedDate ? (
             <div className="grid gap-6 lg:grid-cols-2">
