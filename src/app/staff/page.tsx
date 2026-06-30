@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
+import PasscodeGate from "@/components/PasscodeGate";
 import { Employee, EmployeeRole, DentistSpecialty } from "@/types/employee";
 import {
   loadStaff, addEmployee, updateEmployee, removeEmployee,
@@ -36,7 +37,7 @@ const ROLE_COLORS: Record<string, string> = {
   Hygienist: "bg-emerald-100 text-emerald-700",
 };
 
-export default function StaffPage() {
+function StaffPageBody() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [editing, setEditing] = useState<Employee | null>(null);
@@ -388,5 +389,13 @@ export default function StaffPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function StaffPage() {
+  return (
+    <PasscodeGate group="admin" subtitle="Enter your passcode to manage staff">
+      <StaffPageBody />
+    </PasscodeGate>
   );
 }
