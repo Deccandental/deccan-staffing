@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
+import PasscodeGate from "@/components/PasscodeGate";
 import { supabase } from "@/lib/supabase";
 
 const ROLES = ["Dentist", "RDA", "Assistant", "Front Desk", "Hygienist", "Other"] as const;
@@ -76,7 +77,7 @@ const EMPTY_FORM = {
   skills: [] as string[], rating: 0, notes: "",
 };
 
-export default function TempsPage() {
+function TempsPageBody() {
   const [temps, setTemps] = useState<TempStaff[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -381,5 +382,13 @@ export default function TempsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function TempsPage() {
+  return (
+    <PasscodeGate group="admin" subtitle="Enter your passcode to manage temp staff">
+      <TempsPageBody />
+    </PasscodeGate>
   );
 }
