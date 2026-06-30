@@ -58,8 +58,6 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
     }
   }, [selectedDate, JSON.stringify(assistantOverrides)]);
 
-  const availableAssistants = staff.filter((e) => e.skills.includes("Assistant"));
-
   const dateLabel = selectedDate
     ? new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric",
@@ -72,6 +70,23 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
       return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
     }
     return defaultAssistant;
+  }
+
+  // Assistants currently in use elsewhere today: as another dentist's assistant,
+  // or as a hygienist. A dual-role staffer (skills include both "Assistant" and
+  // "Hygienist") must not show up as available once they're already booked.
+  function getAvailableAssistantsFor(dentistId: number): Employee[] {
+    const takenIds = new Set<number>();
+
+    assignments.dentists.forEach(({ dentist, assistant }) => {
+      if (dentist.id === dentistId) return; // exclude the dentist we're swapping for
+      const resolved = getAssistant(dentist.id, assistant);
+      if (resolved) takenIds.add(resolved.id);
+    });
+
+    assignments.hygienists.forEach((h) => takenIds.add(h.id));
+
+    return staff.filter((e) => e.skills.includes("Assistant") && !takenIds.has(e.id));
   }
 
   function handleOverride(dentistId: number, value: string) {
@@ -321,7 +336,7 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
                             defaultValue={resolvedAssistant?.id ?? ""}
                             onChange={(e) => handleOverride(dentist.id, e.target.value)}>
                             <option value="">No Assistant</option>
-                            {availableAssistants.map((a) => (
+                            {getAvailableAssistantsFor(dentist.id).map((a) => (
                               <option key={a.id} value={a.id}>{a.name}</option>
                             ))}
                           </select>
