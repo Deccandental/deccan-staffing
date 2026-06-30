@@ -45,6 +45,7 @@ export default function ScheduleBuilder() {
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [schedule, setSchedule] = useState<MonthSchedule>({});
+  const [loadedYearMonth, setLoadedYearMonth] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [temps, setTemps] = useState<TempStaff[]>([]);
@@ -85,11 +86,17 @@ export default function ScheduleBuilder() {
       ]);
       setSchedule(saved);
       setMonthTempAssignments(ta);
+      setLoadedYearMonth(`${year}-${month}`);
     }
     load();
   }, [year, month]);
 
   const openDays = generateMonth(year, month, openTuesdays, holidays).filter((d) => d.isOpen);
+  // True only once the schedule actually loaded from the DB matches the
+  // year/month currently being viewed. Computed at render time (not set
+  // inside an effect) so it can't be one render-cycle stale relative to a
+  // sibling effect that also reads it in the same commit.
+  const scheduleLoaded = loadedYearMonth === `${year}-${month}`;
 
   async function applyDefaults() {
     const filled: MonthSchedule = { ...schedule };
@@ -113,17 +120,18 @@ export default function ScheduleBuilder() {
   }
 
   // Auto-fill default assignments for any open day in the current month that
-  // doesn't have a schedule entry yet — replaces the old "Pick Month" /
-  // "Mark Absences" intro steps, since this now runs automatically as soon as
-  // staff + month data are ready, and again whenever the month changes.
+  // genuinely has no saved schedule entry — replaces the old "Pick Month" /
+  // "Mark Absences" intro steps. Gated on scheduleLoaded (the real DB load
+  // for this exact year/month having finished) so this never mistakes "not
+  // loaded yet" for "never configured" and overwrites saved selections.
   useEffect(() => {
-    if (openDays.length === 0 || staff.length === 0) return;
+    if (!scheduleLoaded || openDays.length === 0 || staff.length === 0) return;
     const hasMissingDay = openDays.some((d) => !schedule[d.date]);
     if (hasMissingDay) {
       applyDefaults();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openDays, staff, schedule]);
+  }, [scheduleLoaded, openDays, staff, schedule]);
 
   async function handleSelectDate(date: string) {
     setSelectedDate(date);
