@@ -71,20 +71,22 @@ export default function ScheduleBuilder() {
 
   async function applyDefaults() {
     const filled: MonthSchedule = { ...schedule };
-    const toSave: { date: string; dentists: string[]; frontDeskRequired: number }[] = [];
+    const toSave: { date: string; dentists: string[]; frontDeskRequired: number; hygienistsRequired: number }[] = [];
     for (const day of openDays) {
       if (!filled[day.date]) {
         const dowKey = getWeekday(day.date);
         const dentists = staff
           .filter((e) => e.role === "Dentist" && (day.isOpenTuesday || e.defaultSchedule[dowKey]))
           .map((e) => e.name);
-        filled[day.date] = { dentists, frontDeskRequired: 2 };
-        toSave.push({ date: day.date, dentists, frontDeskRequired: 2 });
+        filled[day.date] = { dentists, frontDeskRequired: 2, hygienistsRequired: 1 };
+        toSave.push({ date: day.date, dentists, frontDeskRequired: 2, hygienistsRequired: 1 });
       }
     }
     setSchedule(filled);
     setSaving(true);
-    await Promise.all(toSave.map(({ date, dentists, frontDeskRequired }) => saveDaySchedule(date, dentists, frontDeskRequired)));
+    await Promise.all(toSave.map(({ date, dentists, frontDeskRequired, hygienistsRequired }) =>
+      saveDaySchedule(date, dentists, frontDeskRequired, hygienistsRequired)
+    ));
     setSaving(false);
   }
 
@@ -96,26 +98,38 @@ export default function ScheduleBuilder() {
       const dentists = staff
         .filter((e) => e.role === "Dentist" && (day?.isOpenTuesday || e.defaultSchedule[dowKey]))
         .map((e) => e.name);
-      setSchedule((c) => ({ ...c, [date]: { dentists, frontDeskRequired: 2 } }));
-      await saveDaySchedule(date, dentists, 2);
+      setSchedule((c) => ({ ...c, [date]: { dentists, frontDeskRequired: 2, hygienistsRequired: 1 } }));
+      await saveDaySchedule(date, dentists, 2, 1);
     }
   }
 
   async function setWorkingDentists(dentists: string[]) {
     if (!selectedDate) return;
-    const frontDeskRequired = schedule[selectedDate]?.frontDeskRequired ?? 2;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired } }));
+    const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
+    const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists, frontDeskRequired);
+    await saveDaySchedule(selectedDate, dentists, fdr, hr);
     setSaving(false);
   }
 
   async function setFrontDeskRequired(required: number) {
     if (!selectedDate) return;
     const dentists = schedule[selectedDate]?.dentists ?? [];
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: required } }));
+    const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: required, hygienistsRequired: hr } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists, required);
+    await saveDaySchedule(selectedDate, dentists, required, hr);
+    setSaving(false);
+  }
+
+  async function setHygienistsRequired(required: number) {
+    if (!selectedDate) return;
+    const dentists = schedule[selectedDate]?.dentists ?? [];
+    const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: required } }));
+    setSaving(true);
+    await saveDaySchedule(selectedDate, dentists, fdr, required);
     setSaving(false);
   }
 
@@ -127,7 +141,8 @@ export default function ScheduleBuilder() {
       const assignments = buildDailyAssignments(
         staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday,
-        daySched.frontDeskRequired ?? 2
+        daySched.frontDeskRequired ?? 2,
+        daySched.hygienistsRequired ?? 1
       );
       if (assignments.warnings.some((w) => w.severity === "error")) {
         statuses[day.date] = "warning";
@@ -149,13 +164,15 @@ export default function ScheduleBuilder() {
   const allDentists = staff.filter((e) => e.role === "Dentist").map((e) => e.name);
   const workingDentists = selectedDate && schedule[selectedDate] ? schedule[selectedDate].dentists : [];
   const frontDeskRequired = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].frontDeskRequired ?? 2) : 2;
+  const hygienistsRequired = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].hygienistsRequired ?? 1) : 1;
 
   const selectedAssignments = useMemo(() => {
     if (!selectedDate) return undefined;
     const day = openDays.find((d) => d.date === selectedDate);
     const isOpenTuesday = day?.isTuesday && day?.isOpenTuesday ? true : false;
     const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
-    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday, fdr);
+    const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
+    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday, fdr, hr);
   }, [staff, workingDentists, selectedDate, schedule, prefs, overrides, openDays]);
 
   function prevMonth() {
@@ -170,7 +187,6 @@ export default function ScheduleBuilder() {
 
   return (
     <div className="space-y-6">
-      {/* Stepper */}
       <div className="rounded-2xl bg-white p-4 shadow">
         <div className="flex items-center">
           {STEPS.map((s, i) => (
@@ -194,7 +210,6 @@ export default function ScheduleBuilder() {
         </div>
       </div>
 
-      {/* Step 1 */}
       {step === 1 && (
         <div className="rounded-2xl bg-white p-8 shadow">
           <h2 className="text-2xl font-bold mb-2">Which month are you scheduling?</h2>
@@ -213,7 +228,6 @@ export default function ScheduleBuilder() {
         </div>
       )}
 
-      {/* Step 2 */}
       {step === 2 && (
         <div className="rounded-2xl bg-white p-8 shadow">
           <h2 className="text-2xl font-bold mb-2">Mark staff absences</h2>
@@ -231,7 +245,6 @@ export default function ScheduleBuilder() {
         </div>
       )}
 
-      {/* Step 3 */}
       {step === 3 && (
         <div className="space-y-6">
           <div className="rounded-2xl bg-white p-5 shadow">
@@ -265,22 +278,36 @@ export default function ScheduleBuilder() {
                 <p className="text-sm text-slate-400 mb-4">Select which dentists are working today</p>
 
                 {/* Front Desk Toggle */}
-                <div className="mb-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
+                <div className="mb-3 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
                   <div>
                     <div className="text-sm font-semibold text-slate-600">Front Desk Required</div>
                     <div className="text-xs text-slate-400">How many front desk staff needed today</div>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => setFrontDeskRequired(1)}
-                      className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
-                      style={frontDeskRequired === 1 ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
-                      1
-                    </button>
-                    <button onClick={() => setFrontDeskRequired(2)}
-                      className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
-                      style={frontDeskRequired === 2 ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
-                      2
-                    </button>
+                    {[1, 2].map((n) => (
+                      <button key={n} onClick={() => setFrontDeskRequired(n)}
+                        className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
+                        style={frontDeskRequired === n ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Hygienists Toggle */}
+                <div className="mb-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-600">Hygienists Required</div>
+                    <div className="text-xs text-slate-400">How many hygienists needed today</div>
+                  </div>
+                  <div className="flex gap-2">
+                    {[0, 1, 2].map((n) => (
+                      <button key={n} onClick={() => setHygienistsRequired(n)}
+                        className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
+                        style={hygienistsRequired === n ? { backgroundColor: "#059669", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
+                        {n}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
@@ -331,7 +358,7 @@ export default function ScheduleBuilder() {
                   ))}
                 </div>
               )}
-              <DailyAssignmentPanel key={`${selectedDate}-${workingDentists.join(",")}-${frontDeskRequired}`} selectedDate={selectedDate} assignments={selectedAssignments} />
+              <DailyAssignmentPanel key={`${selectedDate}-${workingDentists.join(",")}-${frontDeskRequired}-${hygienistsRequired}`} selectedDate={selectedDate} assignments={selectedAssignments} />
             </div>
           ) : (
             <div className="rounded-2xl bg-white p-8 text-center shadow">
@@ -345,7 +372,6 @@ export default function ScheduleBuilder() {
         </div>
       )}
 
-      {/* Step 4 */}
       {step === 4 && (
         <div className="space-y-6">
           <div className="rounded-2xl bg-white p-6 shadow">
@@ -381,7 +407,8 @@ export default function ScheduleBuilder() {
                   const assignments = daySched ? buildDailyAssignments(
                     staff, daySched.dentists, day.date, prefs, overrides,
                     day.isTuesday && day.isOpenTuesday,
-                    daySched.frontDeskRequired ?? 2
+                    daySched.frontDeskRequired ?? 2,
+                    daySched.hygienistsRequired ?? 1
                   ) : null;
                   const status = dayStatuses[day.date];
                   const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -404,7 +431,11 @@ export default function ScheduleBuilder() {
                         {assignments?.frontDesk.map((e) => e.name).join(", ") ?? "—"}
                         {daySched?.frontDeskRequired === 1 && <span className="ml-1 text-orange-400">(1 req.)</span>}
                       </td>
-                      <td className="p-4 text-xs text-slate-600">{assignments?.hygienists.map((e) => e.name).join(", ") ?? "—"}</td>
+                      <td className="p-4 text-xs text-slate-600">
+                        {assignments?.hygienists.map((e) => e.name).join(", ") ?? "—"}
+                        {daySched?.hygienistsRequired === 0 && <span className="ml-1 text-slate-400">(none req.)</span>}
+                        {daySched?.hygienistsRequired === 2 && <span className="ml-1 text-emerald-500">(2 req.)</span>}
+                      </td>
                       <td className="p-4">
                         {status === "complete" && <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">✓ Ready</span>}
                         {status === "warning" && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">⚠ Warning</span>}
