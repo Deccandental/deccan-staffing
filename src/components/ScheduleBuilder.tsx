@@ -10,7 +10,10 @@ import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { loadSchedule, saveDaySchedule, MonthSchedule } from "@/lib/scheduleStore";
 import { loadHolidays, Holiday } from "@/lib/holidays";
 import { Employee } from "@/types/employee";
-import MonthlyOverview from "./MonthlyOverview";
+import { TempAssignment, getTempAssignmentsForMonth } from "@/lib/tempAssignments";
+import { TempStaff } from "@/app/temps/page";
+import { supabase } from "@/lib/supabase";
+import MonthlyOverview, { DayAssignmentSummary } from "./MonthlyOverview";
 import DailyAssignmentPanel from "./DailyAssignmentPanel";
 import PrintSchedule from "./PrintSchedule";
 import PrintIndividualSchedule from "./PrintIndividualSchedule";
@@ -21,6 +24,16 @@ const STEPS = [
   { id: 3, label: "Build Schedule", icon: "📋" },
   { id: 4, label: "Review & Print", icon: "🖨️" },
 ];
+
+async function loadTemps(): Promise<TempStaff[]> {
+  const { data, error } = await supabase.from("temps").select("*");
+  if (error) { console.error("loadTemps error:", error); return []; }
+  return (data ?? []).map((row) => ({
+    id: row.id, name: row.name, phone: row.phone ?? "", email: row.email ?? "",
+    role: row.role, skills: row.skills ?? [], rating: row.rating ?? 0,
+    notes: row.notes ?? "", addedAt: row.added_at,
+  }));
+}
 
 export default function ScheduleBuilder() {
   const today = new Date();
@@ -39,26 +52,30 @@ export default function ScheduleBuilder() {
   const [schedule, setSchedule] = useState<MonthSchedule>({});
   const [selectedDate, setSelectedDate] = useState("");
   const [saving, setSaving] = useState(false);
+  const [temps, setTemps] = useState<TempStaff[]>([]);
+  const [monthTempAssignments, setMonthTempAssignments] = useState<TempAssignment[]>([]);
 
   useEffect(() => {
     async function load() {
-      const [s, o, p, ot, h] = await Promise.all([
-        loadStaff(), getOverrides(), loadPrefs(), getOpenTuesdays(), loadHolidays()
+      const [s, o, p, ot, h, t] = await Promise.all([
+        loadStaff(), getOverrides(), loadPrefs(), getOpenTuesdays(), loadHolidays(), loadTemps()
       ]);
       setStaff(s);
       setOverrides(o);
       setPrefs(p);
       setOpenTuesdays(ot);
       setHolidays(h);
+      setTemps(t);
     }
     load();
 
     async function handleVisibility() {
       if (document.visibilityState === "visible") {
-        const [o, ot, h] = await Promise.all([getOverrides(), getOpenTuesdays(), loadHolidays()]);
+        const [o, ot, h, t] = await Promise.all([getOverrides(), getOpenTuesdays(), loadHolidays(), loadTemps()]);
         setOverrides(o);
         setOpenTuesdays(ot);
         setHolidays(h);
+        setTemps(t);
       }
     }
     document.addEventListener("visibilitychange", handleVisibility);
@@ -67,8 +84,12 @@ export default function ScheduleBuilder() {
 
   useEffect(() => {
     async function load() {
-      const saved = await loadSchedule(year, month);
+      const [saved, ta] = await Promise.all([
+        loadSchedule(year, month),
+        getTempAssignmentsForMonth(year, month),
+      ]);
       setSchedule(saved);
+      setMonthTempAssignments(ta);
     }
     load();
   }, [year, month]);
@@ -153,6 +174,10 @@ export default function ScheduleBuilder() {
     setSaving(false);
   }
 
+  function handleTempAssignmentsChange(date: string, updatedForDate: TempAssignment[]) {
+    setMonthTempAssignments((c) => [...c.filter((ta) => ta.date !== date), ...updatedForDate]);
+  }
+
   const dayStatuses = useMemo(() => {
     const statuses: Record<string, "complete" | "warning" | "empty"> = {};
     for (const day of openDays) {
@@ -180,6 +205,50 @@ export default function ScheduleBuilder() {
   const completedDays = Object.values(dayStatuses).filter((s) => s === "complete").length;
   const warningDays = Object.values(dayStatuses).filter((s) => s === "warning").length;
   const totalDays = openDays.length;
+
+  const monthAssignments = useMemo(() => {
+    const result: Record<string, DayAssignmentSummary> = {};
+    for (const day of openDays) {
+      const daySched = schedule[day.date];
+      if (!daySched || daySched.dentists.length === 0) continue;
+
+      const assignments = buildDailyAssignments(
+        staff, daySched.dentists, day.date, prefs, overrides,
+        day.isTuesday && day.isOpenTuesday,
+        daySched.frontDeskRequired ?? 2,
+        daySched.hygienistsRequired ?? 1
+      );
+
+      const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);
+      const tempName = (tempId: string) => temps.find((t) => t.id === tempId)?.name ?? "Temp";
+
+      const ao = daySched.assistantOverrides ?? {};
+      const dentists = assignments.dentists.map(({ dentist, assistant }) => {
+        const tempForDentist = tempsForDay.find(
+          (ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`
+        );
+        if (tempForDentist) {
+          return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: `${tempName(tempForDentist.tempId)} (temp)` };
+        }
+        let resolvedAssistant = assistant;
+        if (dentist.id in ao) {
+          const ovId = ao[dentist.id];
+          resolvedAssistant = ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
+        }
+        return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: resolvedAssistant?.name ?? null };
+      });
+
+      const tempFrontDesk = tempsForDay.filter((ta) => ta.role === "Front Desk").map((ta) => `${tempName(ta.tempId)} (temp)`);
+      const tempHygienists = tempsForDay.filter((ta) => ta.role === "Hygienist").map((ta) => `${tempName(ta.tempId)} (temp)`);
+
+      result[day.date] = {
+        dentists,
+        frontDesk: [...assignments.frontDesk.map((e) => e.name), ...tempFrontDesk],
+        hygienists: [...assignments.hygienists.map((e) => e.name), ...tempHygienists],
+      };
+    }
+    return result;
+  }, [openDays, schedule, staff, prefs, overrides, monthTempAssignments, temps]);
 
   const allDentists = staff.filter((e) => e.role === "Dentist").map((e) => e.name);
   const workingDentists = selectedDate && schedule[selectedDate] ? schedule[selectedDate].dentists : [];
@@ -288,7 +357,7 @@ export default function ScheduleBuilder() {
             </div>
           </div>
 
-          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} />
+          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} dayAssignments={monthAssignments} />
 
           {selectedDate ? (
             <div className="grid gap-6 lg:grid-cols-2">
@@ -376,6 +445,7 @@ export default function ScheduleBuilder() {
                 assignments={selectedAssignments}
                 assistantOverrides={assistantOverrides}
                 onOverrideChange={handleAssistantOverrideChange}
+                onTempAssignmentsChange={handleTempAssignmentsChange}
               />
             </div>
           ) : (
@@ -407,6 +477,17 @@ export default function ScheduleBuilder() {
               </div>
             )}
           </div>
+
+          <MonthlyOverview
+            year={year}
+            month={month}
+            dayStatuses={dayStatuses}
+            selectedDate={selectedDate}
+            onSelectDate={(date) => { handleSelectDate(date); setStep(3); }}
+            openTuesdays={openTuesdays}
+            holidays={holidays}
+            dayAssignments={monthAssignments}
+          />
 
           <div className="rounded-2xl bg-white shadow overflow-hidden">
             <table className="w-full border-collapse text-sm">
