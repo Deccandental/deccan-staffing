@@ -379,7 +379,7 @@ export default function ScheduleBuilder() {
               )}
 
               <DailyAssignmentPanel
-                key={`${selectedDate}-${workingDentists.join(",")}-${frontDeskRequired}-${hygienistsRequired}`}
+                key={selectedDate}
                 selectedDate={selectedDate}
                 assignments={selectedAssignments}
                 assistantOverrides={assistantOverrides}
@@ -437,7 +437,6 @@ export default function ScheduleBuilder() {
                     daySched.hygienistsRequired ?? 1
                   ) : null;
 
-                  // Apply assistant overrides to review table
                   const ao = daySched?.assistantOverrides ?? {};
                   const resolvedDentists = assignments?.dentists.map(({ dentist, assistant }) => {
                     if (dentist.id in ao) {
