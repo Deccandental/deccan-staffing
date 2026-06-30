@@ -20,7 +20,8 @@ export function buildDailyAssignments(
   prefs: DentistPrefs = {},
   overrides: StaffOverride[] = [],
   isOpenTuesday: boolean = false,
-  frontDeskRequired: number = 2
+  frontDeskRequired: number = 2,
+  hygienistsRequired: number = 1
 ): DailyAssignmentsResult {
   const weekday = date ? getWeekday(date) : null;
   const warnings: AssignmentWarning[] = [];
@@ -42,7 +43,6 @@ export function buildDailyAssignments(
   let karlaOnFrontDesk = false;
 
   if (frontDeskRequired === 1) {
-    // Only need 1 front desk — take the first available, leave Karla as assistant
     if (regularFrontDesk.length >= 1) {
       frontDesk = [regularFrontDesk[0]];
     } else {
@@ -50,7 +50,6 @@ export function buildDailyAssignments(
       warnings.push({ severity: "error", message: "No front desk available — temp front desk needed." });
     }
   } else {
-    // Need 2 front desk (default)
     if (regularFrontDesk.length >= 2) {
       frontDesk = regularFrontDesk.slice(0, 2);
     } else if (regularFrontDesk.length === 1) {
@@ -121,12 +120,19 @@ export function buildDailyAssignments(
   }
 
   const orderedAssignments = dentists.map((d) => dentistAssignments.find((a) => a.dentist.id === d.id)!);
-  const hygienists = employees.filter(
-    (e) => (e.role === "Hygienist" || e.skills.includes("Hygienist")) && isAvailable(e)
-  ).slice(0, 1);
 
-  if (hygienists.length === 0 && dentists.length > 0) {
-    warnings.push({ severity: "warning", message: "No hygienist available." });
+  // Hygienists — respect hygienistsRequired
+  const availableHygienists = employees.filter(
+    (e) => (e.role === "Hygienist" || e.skills.includes("Hygienist")) && isAvailable(e)
+  );
+  const hygienists = availableHygienists.slice(0, hygienistsRequired);
+
+  if (hygienists.length < hygienistsRequired && dentists.length > 0) {
+    const shortage = hygienistsRequired - hygienists.length;
+    warnings.push({
+      severity: "warning",
+      message: `${shortage} temp hygienist${shortage !== 1 ? "s" : ""} needed — only ${hygienists.length} of ${hygienistsRequired} required available.`,
+    });
   }
 
   return { dentists: orderedAssignments, frontDesk, hygienists, warnings };
