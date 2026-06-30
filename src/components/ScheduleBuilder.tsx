@@ -84,14 +84,14 @@ export default function ScheduleBuilder() {
         const dentists = staff
           .filter((e) => e.role === "Dentist" && (day.isOpenTuesday || e.defaultSchedule[dowKey]))
           .map((e) => e.name);
-        filled[day.date] = { dentists, frontDeskRequired: 2, hygienistsRequired: 1 };
+        filled[day.date] = { dentists, frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {} };
         toSave.push({ date: day.date, dentists, frontDeskRequired: 2, hygienistsRequired: 1 });
       }
     }
     setSchedule(filled);
     setSaving(true);
     await Promise.all(toSave.map(({ date, dentists, frontDeskRequired, hygienistsRequired }) =>
-      saveDaySchedule(date, dentists, frontDeskRequired, hygienistsRequired)
+      saveDaySchedule(date, dentists, frontDeskRequired, hygienistsRequired, {})
     ));
     setSaving(false);
   }
@@ -104,8 +104,8 @@ export default function ScheduleBuilder() {
       const dentists = staff
         .filter((e) => e.role === "Dentist" && (day?.isOpenTuesday || e.defaultSchedule[dowKey]))
         .map((e) => e.name);
-      setSchedule((c) => ({ ...c, [date]: { dentists, frontDeskRequired: 2, hygienistsRequired: 1 } }));
-      await saveDaySchedule(date, dentists, 2, 1);
+      setSchedule((c) => ({ ...c, [date]: { dentists, frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {} } }));
+      await saveDaySchedule(date, dentists, 2, 1, {});
     }
   }
 
@@ -113,9 +113,10 @@ export default function ScheduleBuilder() {
     if (!selectedDate) return;
     const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
     const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr } }));
+    const ao = schedule[selectedDate]?.assistantOverrides ?? {};
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists, fdr, hr);
+    await saveDaySchedule(selectedDate, dentists, fdr, hr, ao);
     setSaving(false);
   }
 
@@ -123,9 +124,10 @@ export default function ScheduleBuilder() {
     if (!selectedDate) return;
     const dentists = schedule[selectedDate]?.dentists ?? [];
     const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: required, hygienistsRequired: hr } }));
+    const ao = schedule[selectedDate]?.assistantOverrides ?? {};
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: required, hygienistsRequired: hr, assistantOverrides: ao } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists, required, hr);
+    await saveDaySchedule(selectedDate, dentists, required, hr, ao);
     setSaving(false);
   }
 
@@ -133,9 +135,21 @@ export default function ScheduleBuilder() {
     if (!selectedDate) return;
     const dentists = schedule[selectedDate]?.dentists ?? [];
     const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: required } }));
+    const ao = schedule[selectedDate]?.assistantOverrides ?? {};
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: required, assistantOverrides: ao } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists, fdr, required);
+    await saveDaySchedule(selectedDate, dentists, fdr, required, ao);
+    setSaving(false);
+  }
+
+  async function handleAssistantOverrideChange(overridesMap: Record<number, number | null>) {
+    if (!selectedDate) return;
+    const dentists = schedule[selectedDate]?.dentists ?? [];
+    const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
+    const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: overridesMap } }));
+    setSaving(true);
+    await saveDaySchedule(selectedDate, dentists, fdr, hr, overridesMap);
     setSaving(false);
   }
 
@@ -171,6 +185,7 @@ export default function ScheduleBuilder() {
   const workingDentists = selectedDate && schedule[selectedDate] ? schedule[selectedDate].dentists : [];
   const frontDeskRequired = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].frontDeskRequired ?? 2) : 2;
   const hygienistsRequired = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].hygienistsRequired ?? 1) : 1;
+  const assistantOverrides = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].assistantOverrides ?? {}) : {};
 
   const selectedAssignments = useMemo(() => {
     if (!selectedDate) return undefined;
@@ -362,7 +377,14 @@ export default function ScheduleBuilder() {
                   ))}
                 </div>
               )}
-              <DailyAssignmentPanel key={`${selectedDate}-${workingDentists.join(",")}-${frontDeskRequired}-${hygienistsRequired}`} selectedDate={selectedDate} assignments={selectedAssignments} />
+
+              <DailyAssignmentPanel
+                key={`${selectedDate}-${workingDentists.join(",")}-${frontDeskRequired}-${hygienistsRequired}`}
+                selectedDate={selectedDate}
+                assignments={selectedAssignments}
+                assistantOverrides={assistantOverrides}
+                onOverrideChange={handleAssistantOverrideChange}
+              />
             </div>
           ) : (
             <div className="rounded-2xl bg-white p-8 text-center shadow">
@@ -414,6 +436,18 @@ export default function ScheduleBuilder() {
                     daySched.frontDeskRequired ?? 2,
                     daySched.hygienistsRequired ?? 1
                   ) : null;
+
+                  // Apply assistant overrides to review table
+                  const ao = daySched?.assistantOverrides ?? {};
+                  const resolvedDentists = assignments?.dentists.map(({ dentist, assistant }) => {
+                    if (dentist.id in ao) {
+                      const ovId = ao[dentist.id];
+                      const overriddenAssistant = ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
+                      return { dentist, assistant: overriddenAssistant };
+                    }
+                    return { dentist, assistant };
+                  });
+
                   const status = dayStatuses[day.date];
                   const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
                   return (
@@ -424,11 +458,12 @@ export default function ScheduleBuilder() {
                         {day.isHoliday && <span className="ml-2 rounded-full bg-red-100 text-red-600 text-xs px-1.5 py-0.5">{day.holidayName}</span>}
                       </td>
                       <td className="p-4">
-                        {assignments?.dentists.map(({ dentist, assistant }) => (
+                        {resolvedDentists?.map(({ dentist, assistant }) => (
                           <div key={dentist.id} className="flex items-center gap-1.5 text-xs mb-0.5">
                             <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: dentist.color }} />
                             <span className="font-medium">{dentist.name}</span>
                             <span className="text-slate-400">/ {assistant?.name ?? "No Assistant"}</span>
+                            {dentist.id in ao && <span className="text-cyan-400 text-xs">(manual)</span>}
                           </div>
                         )) ?? <span className="text-slate-300 text-xs">Not configured</span>}
                       </td>
