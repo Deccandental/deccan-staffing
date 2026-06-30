@@ -81,6 +81,17 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
         return { dentist, assistant };
       });
 
+      // Apply hygienist slot overrides
+      const ho = daySched.hygienistOverrides ?? {};
+      const hygSlotCount = daySched.hygienistsRequired ?? 1;
+      const resolvedHygienists = Array.from({ length: hygSlotCount }, (_, i) => {
+        if (i in ho) {
+          const ovId = ho[i];
+          return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
+        }
+        return assignments.hygienists[i] ?? null;
+      }).filter(Boolean) as typeof staff;
+
       const hasWarning = assignments.warnings.length > 0;
 
       const pairings = resolvedDentists.map(({ dentist, assistant }) =>
@@ -108,7 +119,7 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
       });
 
       const fdNames = [...assignments.frontDesk.map((e) => e.name.split(" ")[0]), ...tempFD].join(", ") || "—";
-      const hygNames = [...assignments.hygienists.map((e) => e.name.split(" ")[0]), ...tempHyg].join(", ") || "—";
+      const hygNames = [...resolvedHygienists.map((e) => e.name.split(" ")[0]), ...tempHyg].join(", ") || "—";
       const asstTempStr = tempAsst.length > 0 ? `<div class="support-row"><span class="support-label">Temp:</span> ${tempAsst.join(", ")}</div>` : "";
 
       return `
