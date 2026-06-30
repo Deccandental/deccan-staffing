@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { loadStaff } from "@/lib/staffStore";
 import { Employee } from "@/types/employee";
 import { LeaveReason, LeaveRequest } from "@/types/leave";
 import { addLeaveRequest, loadLeaveRequests, cancelLeaveRequest, countBusinessDays, validateNoticePeriod } from "@/lib/leaveStore";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
+import { generateMonth, formatMonthYear } from "@/utils/calendar";
 
 const REASON_LABELS: Record<LeaveReason, string> = {
   sick: "Sick Leave", pto: "PTO / Vacation", leave: "Personal Leave", other: "Other",
@@ -41,7 +42,7 @@ export default function LeavePage() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
-  const [view, setView] = useState<"request" | "my" | "all">("request");
+  const [view, setView] = useState<"request" | "my" | "calendar" | "all">("request");
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
   const [noticeWarning, setNoticeWarning] = useState("");
@@ -51,6 +52,9 @@ export default function LeavePage() {
   const [filterEmployee, setFilterEmployee] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const today0 = new Date();
+  const [calYear, setCalYear] = useState(today0.getFullYear());
+  const [calMonth, setCalMonth] = useState(today0.getMonth() + 1);
 
   const [form, setForm] = useState({
     employeeId: "", employeeEmail: "", startDate: "", endDate: "",
@@ -185,6 +189,33 @@ export default function LeavePage() {
     months.push(d.toISOString().slice(0, 7));
   }
 
+  const calDays = generateMonth(calYear, calMonth);
+  const calFirstDow = new Date(calYear, calMonth - 1, 1).getDay();
+  const calBlanks = Array.from({ length: calFirstDow });
+
+  const leaveByDate = useMemo(() => {
+    const map: Record<string, { employeeId: number; employeeName: string; status: "approved" | "pending"; reason: string }[]> = {};
+    const visible = requests.filter((r) => r.status === "approved" || r.status === "pending");
+    for (const r of visible) {
+      const cur = new Date(r.startDate + "T00:00:00");
+      const end = new Date(r.endDate + "T00:00:00");
+      while (cur <= end) {
+        const dateStr = cur.toISOString().split("T")[0];
+        if (!map[dateStr]) map[dateStr] = [];
+        map[dateStr].push({ employeeId: r.employeeId, employeeName: r.employeeName, status: r.status as "approved" | "pending", reason: REASON_LABELS[r.reason] ?? r.reason });
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+    return map;
+  }, [requests]);
+
+  function prevCalMonth() {
+    if (calMonth === 1) { setCalYear((y) => y - 1); setCalMonth(12); } else setCalMonth((m) => m - 1);
+  }
+  function nextCalMonth() {
+    if (calMonth === 12) { setCalYear((y) => y + 1); setCalMonth(1); } else setCalMonth((m) => m + 1);
+  }
+
   return (
     <div className="min-h-screen" style={{ background: "#f5f5f5" }}>
       <div className="lg:hidden flex items-center justify-between px-4 py-3 bg-white shadow-sm sticky top-0 z-50">
@@ -233,6 +264,7 @@ export default function LeavePage() {
           {[
             { key: "request", label: "📝 New Request" },
             { key: "my", label: "📋 My Requests" },
+            { key: "calendar", label: "🗓️ Calendar" },
             { key: "all", label: "📊 All Absences" },
           ].map((tab) => (
             <button key={tab.key} onClick={() => setView(tab.key as any)}
@@ -373,6 +405,61 @@ export default function LeavePage() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {view === "calendar" && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <button onClick={prevCalMonth} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-gray-500 hover:bg-gray-50 transition shadow-sm">←</button>
+                <span className="text-lg font-bold min-w-[160px] text-center" style={{ color: "#5a5a5a" }}>{formatMonthYear(calYear, calMonth)}</span>
+                <button onClick={nextCalMonth} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-gray-500 hover:bg-gray-50 transition shadow-sm">→</button>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-gray-400">
+                <span>Colors = staff member</span>
+                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-400 border border-white" /> Approved</span>
+                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-400 border border-white" /> Pending</span>
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-white p-4 lg:p-6 shadow">
+              <div className="grid grid-cols-7 mb-2">
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((h) => (
+                  <div key={h} className="py-1 text-center text-xs font-semibold uppercase tracking-wide text-gray-400">{h}</div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1.5">
+                {calBlanks.map((_, i) => <div key={`b${i}`} />)}
+                {calDays.map((day) => {
+                  const entries = leaveByDate[day.date] ?? [];
+                  const isToday = day.date === today0.toISOString().split("T")[0];
+                  return (
+                    <div key={day.date}
+                      className={`rounded-xl border p-1.5 text-left min-h-[70px] sm:min-h-[90px] flex flex-col ${isToday ? "border-cyan-400 bg-cyan-50" : "border-gray-100 bg-gray-50"}`}>
+                      <div className={`text-xs font-bold mb-1 ${isToday ? "text-cyan-600" : "text-gray-400"}`}>{day.day}</div>
+                      <div className="flex flex-wrap gap-1">
+                        {entries.map((e, i) => {
+                          const emp = staff.find((s) => s.id === e.employeeId);
+                          return (
+                            <div key={i} className="relative h-5 w-5 sm:h-6 sm:w-6 flex-shrink-0"
+                              title={`${e.employeeName} — ${e.reason} (${e.status})`}>
+                              <div className="h-full w-full rounded-full flex items-center justify-center text-white font-bold text-[9px] sm:text-[10px]"
+                                style={{ backgroundColor: emp?.color ?? "#9ca3af" }}>
+                                {e.employeeName.charAt(0)}
+                              </div>
+                              <span className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white ${
+                                e.status === "approved" ? "bg-green-500" : "bg-amber-500"
+                              }`} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         )}
 
