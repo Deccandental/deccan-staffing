@@ -90,7 +90,6 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
 
   async function handleAssignTemp() {
     if (!selectedTempId || !assigningRole) return;
-    // For assistants, require a dentist selection
     if (assigningRole === "Assistant" && !selectedDentistId) return;
     const notes = assigningRole === "Assistant" && selectedDentistId
       ? `dentist:${selectedDentistId}`
@@ -113,17 +112,14 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
     return temps.filter((t) => t.role === role || t.skills.includes(role));
   }
 
-  // Working dentists from assignments
   const workingDentists = assignments.dentists.map((d) => d.dentist);
 
-  // Get dentist name for a temp assistant
   function getTempDentistName(notes: string): string {
     if (!notes.startsWith("dentist:")) return "";
     const dentistId = Number(notes.replace("dentist:", ""));
     return staff.find((e) => e.id === dentistId)?.name ?? "";
   }
 
-  // Group temp assignments by role
   const tempsByRole: Record<string, { assignment: TempAssignment; temp: TempStaff | undefined }[]> = {};
   for (const ta of tempAssignments) {
     if (!tempsByRole[ta.role]) tempsByRole[ta.role] = [];
@@ -163,7 +159,6 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
         </div>
       )}
 
-      {/* Temp assignment picker */}
       {assigningRole && (
         <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
           <div className="flex items-center justify-between mb-3">
@@ -172,7 +167,6 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
               className="text-xs text-blue-400 hover:text-blue-600">✕ Cancel</button>
           </div>
 
-          {/* Dentist selector for assistant role */}
           {assigningRole === "Assistant" && workingDentists.length > 0 && (
             <div className="mb-3">
               <p className="text-xs font-semibold text-blue-600 mb-2">Which dentist are they assisting?</p>
@@ -233,7 +227,6 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
         </div>
       )}
 
-      {/* Assigned temps */}
       {tempAssignments.length > 0 && (
         <div className="mb-4 rounded-xl border border-teal-200 bg-teal-50 p-4">
           <p className="text-sm font-semibold text-teal-700 mb-3">🔄 Temp Staff Assigned</p>
@@ -276,7 +269,6 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
               const resolvedAssistant = getAssistant(dentist.id, assistant);
               const isOverridden = dentist.id in overrides;
 
-              // Check if a temp is assigned to this dentist
               const tempForDentist = tempAssignments.find(
                 (ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`
               );
@@ -323,9 +315,23 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
                             ) : "No Assistant"}
                           </span>
                           {!tempName && (
-                            <button onClick={() => setSwapping(dentist.id)}
-                              className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
-                              swap
+                            <div className="flex gap-1">
+                              <button onClick={() => setSwapping(dentist.id)}
+                                className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
+                                swap
+                              </button>
+                              <button onClick={() => { setAssigningRole("Assistant"); setSelectedDentistId(dentist.id); setSelectedTempId(""); }}
+                                className="rounded px-1.5 py-0.5 text-xs text-teal-400 hover:bg-teal-50 hover:text-teal-600 transition">
+                                + temp
+                              </button>
+                            </div>
+                          )}
+                          {tempName && (
+                            <button onClick={() => {
+                              const ta = tempAssignments.find((t) => t.role === "Assistant" && t.notes === `dentist:${dentist.id}`);
+                              if (ta) handleRemoveTemp(ta.id);
+                            }} className="text-xs text-red-400 hover:text-red-600 rounded px-1.5 py-0.5 transition">
+                              remove
                             </button>
                           )}
                         </>
@@ -382,25 +388,6 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
           </div>
         )}
       </section>
-
-      {(tempsByRole["Assistant"] ?? []).length > 0 && (
-        <section className="rounded-xl border p-4">
-          <h3 className="mb-3 font-semibold text-slate-700">Temp Assistants</h3>
-          <div className="space-y-1">
-            {(tempsByRole["Assistant"] ?? []).map(({ assignment, temp }) => {
-              const dentistName = getTempDentistName(assignment.notes);
-              return (
-                <div key={assignment.id} className="flex items-center gap-2 rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
-                  <span className="h-2 w-2 rounded-full bg-teal-400" />
-                  {temp?.name ?? "Unknown"}
-                  {dentistName && <span className="text-xs text-slate-400 ml-1">→ {dentistName}</span>}
-                  <span className="text-xs text-teal-500 ml-1">(temp)</span>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
     </div>
   );
 }
