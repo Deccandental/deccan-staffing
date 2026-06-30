@@ -73,25 +73,43 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
     return defaultAssistant;
   }
 
-  // Assistants currently in use elsewhere today: as another dentist's assistant,
-  // or as a hygienist. A dual-role staffer (skills include both "Assistant" and
-  // "Hygienist") must not show up as available once they're already booked.
+  // Available assistants for this dentist. We only exclude people currently
+  // working as a hygienist today, since that's a different role with no
+  // automatic swap. Assistants already assigned to ANOTHER dentist are still
+  // shown — picking one triggers a true swap (see handleOverride) instead of
+  // creating a duplicate.
   function getAvailableAssistantsFor(dentistId: number): Employee[] {
-    const takenIds = new Set<number>();
+    const hygienistIds = new Set(assignments.hygienists.map((h) => h.id));
+    return staff.filter((e) => e.skills.includes("Assistant") && !hygienistIds.has(e.id));
+  }
 
-    assignments.dentists.forEach(({ dentist, assistant }) => {
-      if (dentist.id === dentistId) return; // exclude the dentist we're swapping for
-      const resolved = getAssistant(dentist.id, assistant);
-      if (resolved) takenIds.add(resolved.id);
+  // For showing "(currently with Dr. X)" hints in the swap dropdown.
+  function getCurrentDentistFor(assistantId: number, excludingDentistId: number): Employee | null {
+    const match = assignments.dentists.find(({ dentist, assistant }) => {
+      if (dentist.id === excludingDentistId) return false;
+      return getAssistant(dentist.id, assistant)?.id === assistantId;
     });
-
-    assignments.hygienists.forEach((h) => takenIds.add(h.id));
-
-    return staff.filter((e) => e.skills.includes("Assistant") && !takenIds.has(e.id));
+    return match ? match.dentist : null;
   }
 
   function handleOverride(dentistId: number, value: string) {
-    const newOverrides = { ...overrides, [dentistId]: value ? Number(value) : null };
+    const newAssistantId = value ? Number(value) : null;
+    const newOverrides = { ...overrides };
+
+    if (newAssistantId !== null) {
+      // If this assistant is already assigned to a different dentist today,
+      // swap: give that dentist whoever dentistId currently has, instead of
+      // leaving them both pointing at the same person.
+      const currentPair = assignments.dentists.find((d) => d.dentist.id === dentistId);
+      const currentAssistant = currentPair ? getAssistant(dentistId, currentPair.assistant) : null;
+      const conflictingDentist = getCurrentDentistFor(newAssistantId, dentistId);
+
+      if (conflictingDentist) {
+        newOverrides[conflictingDentist.id] = currentAssistant ? currentAssistant.id : null;
+      }
+    }
+
+    newOverrides[dentistId] = newAssistantId;
     setOverrides(newOverrides);
     setSwapping(null);
     onOverrideChange?.(newOverrides);
@@ -339,9 +357,14 @@ export default function DailyAssignmentPanel({ selectedDate, assignments = EMPTY
                             defaultValue={resolvedAssistant?.id ?? ""}
                             onChange={(e) => handleOverride(dentist.id, e.target.value)}>
                             <option value="">No Assistant</option>
-                            {getAvailableAssistantsFor(dentist.id).map((a) => (
-                              <option key={a.id} value={a.id}>{a.name}</option>
-                            ))}
+                            {getAvailableAssistantsFor(dentist.id).map((a) => {
+                              const currentlyWith = getCurrentDentistFor(a.id, dentist.id);
+                              return (
+                                <option key={a.id} value={a.id}>
+                                  {a.name}{currentlyWith ? ` (swap with ${currentlyWith.name})` : ""}
+                                </option>
+                              );
+                            })}
                           </select>
                           <button onClick={() => setSwapping(null)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
                         </div>
