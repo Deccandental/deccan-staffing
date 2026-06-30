@@ -2,11 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
+import PasscodeGate from "@/components/PasscodeGate";
 import { Holiday, loadHolidays, addHoliday, removeHoliday } from "@/lib/holidays";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { OpenTuesday, getOpenTuesdays, addOpenTuesday, removeOpenTuesday } from "@/lib/openTuesdays";
-
-const PASSCODE = "1528";
 
 const TYPE_STYLES: Record<string, string> = {
   holiday: "bg-red-100 text-red-700",
@@ -22,10 +21,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-export default function HolidaysPage() {
-  const [authenticated, setAuthenticated] = useState(false);
-  const [passcode, setPasscode] = useState("");
-  const [passcodeError, setPasscodeError] = useState(false);
+function HolidaysPageBody() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [form, setForm] = useState({ date: "", name: "", type: "holiday" as Holiday["type"] });
@@ -36,17 +32,12 @@ export default function HolidaysPage() {
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
 
-  useEffect(() => { if (authenticated) refresh(); }, [authenticated]);
+  useEffect(() => { refresh(); }, []);
 
   async function refresh() {
     const [h, ot] = await Promise.all([loadHolidays(), getOpenTuesdays()]);
     setHolidays(h.sort((a, b) => a.date.localeCompare(b.date)));
     setOpenTuesdays(ot.sort((a, b) => a.date.localeCompare(b.date)));
-  }
-
-  function handlePasscode() {
-    if (passcode === PASSCODE) { setAuthenticated(true); setPasscodeError(false); }
-    else { setPasscodeError(true); setPasscode(""); }
   }
 
   async function handleAdd() {
@@ -81,27 +72,6 @@ export default function HolidaysPage() {
   const days = generateMonth(year, month, openTuesdays, holidays);
   const firstDow = new Date(year, month - 1, 1).getDay();
   const blanks = Array.from({ length: firstDow });
-
-  if (!authenticated) {
-    return (
-      <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
-        <Sidebar />
-        <div className="ml-64 flex items-center justify-center min-h-screen">
-          <div className="rounded-2xl bg-white p-10 shadow-lg w-full max-w-sm text-center">
-            <div className="text-5xl mb-4">🔐</div>
-            <h1 className="text-2xl font-bold mb-1" style={{ color: "#5a5a5a" }}>Manager Access</h1>
-            <p className="text-gray-400 text-sm mb-8">Enter your passcode to manage holidays</p>
-            <input type="password" value={passcode} onChange={(e) => setPasscode(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handlePasscode()}
-              placeholder="Enter passcode" maxLength={6}
-              className={`w-full rounded-xl border px-4 py-3 text-center text-xl tracking-widest font-bold focus:outline-none mb-3 ${passcodeError ? "border-red-300 bg-red-50" : "border-gray-200"}`} />
-            {passcodeError && <p className="text-red-500 text-sm mb-3">Incorrect passcode.</p>}
-            <button onClick={handlePasscode} className="w-full rounded-xl py-3 font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Unlock</button>
-          </div>
-        </div>
-      </main>
-    );
-  }
 
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
@@ -268,5 +238,13 @@ export default function HolidaysPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function HolidaysPage() {
+  return (
+    <PasscodeGate group="admin" subtitle="Enter your passcode to manage holidays & closures">
+      <HolidaysPageBody />
+    </PasscodeGate>
   );
 }
