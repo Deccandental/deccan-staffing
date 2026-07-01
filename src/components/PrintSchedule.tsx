@@ -2,10 +2,11 @@
 
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
-import { loadStaff } from "@/lib/staffStore";
+import { loadStaff, loadPrefs } from "@/lib/staffStore";
 import { loadHolidays } from "@/lib/holidays";
 import { getOpenTuesdays } from "@/lib/openTuesdays";
 import { getTempAssignmentsForMonth } from "@/lib/tempAssignments";
+import { getOverrides } from "@/lib/overrides";
 import { supabase } from "@/lib/supabase";
 import { MonthSchedule } from "@/lib/scheduleStore";
 
@@ -19,11 +20,13 @@ const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function PrintSchedule({ year, month, schedule }: Props) {
   async function handlePrint() {
-    const [staff, holidays, openTuesdays, tempAssignmentsList] = await Promise.all([
+    const [staff, holidays, openTuesdays, tempAssignmentsList, overrides, prefs] = await Promise.all([
       loadStaff(),
       loadHolidays(),
       getOpenTuesdays(),
       getTempAssignmentsForMonth(year, month),
+      getOverrides(),
+      loadPrefs(),
     ]);
 
     // Load temps
@@ -64,7 +67,7 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
       }
 
       const assignments = buildDailyAssignments(
-        staff, daySched.dentists, day.date, {}, [],
+        staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday,
         daySched.frontDeskRequired ?? 2,
         daySched.hygienistsRequired ?? 1
