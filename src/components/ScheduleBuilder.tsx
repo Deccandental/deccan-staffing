@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { loadStaff } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -90,6 +90,10 @@ export default function ScheduleBuilder() {
   // Compute status for each day
   const dayStatuses = useMemo(() => {
     const statuses: Record<string, "complete" | "warning" | "empty"> = {};
+    if (!staffLoaded || !scheduleLoaded) {
+      for (const day of openDays) statuses[day.date] = "empty";
+      return statuses;
+    }
     for (const day of openDays) {
       const daySched = schedule[day.date];
       if (!daySched) { statuses[day.date] = "empty"; continue; }
@@ -114,7 +118,7 @@ export default function ScheduleBuilder() {
   const allDentists = staff.filter((e) => e.role === "Dentist").map((e) => e.name);
   const workingDentists = selectedDate && schedule[selectedDate] ? schedule[selectedDate].dentists : [];
   const selectedAssignments = useMemo(() => {
-    if (!selectedDate) return undefined;
+    if (!selectedDate || !staffLoaded || !scheduleLoaded) return undefined;
     return buildDailyAssignments(staff, workingDentists, selectedDate);
   }, [staff, workingDentists, selectedDate, schedule]);
 
