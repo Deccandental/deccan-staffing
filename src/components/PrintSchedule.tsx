@@ -7,6 +7,7 @@ import { loadHolidays } from "@/lib/holidays";
 import { getOpenTuesdays } from "@/lib/openTuesdays";
 import { getTempAssignmentsForMonth } from "@/lib/tempAssignments";
 import { getOverrides } from "@/lib/overrides";
+import { resolveDentistAssistants } from "@/lib/assistantSlots";
 import { supabase } from "@/lib/supabase";
 import { MonthSchedule } from "@/lib/scheduleStore";
 
@@ -70,18 +71,16 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
         staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday,
         daySched.frontDeskRequired ?? 2,
-        daySched.hygienistsRequired ?? 1
+        daySched.hygienistsRequired ?? 1,
+        daySched.assistantCounts ?? {}
       );
 
-      // Apply assistant overrides
+      // Apply assistant overrides (per-slot, supports more than one assistant per dentist)
       const ao = daySched.assistantOverrides ?? {};
-      const resolvedDentists = assignments.dentists.map(({ dentist, assistant }) => {
-        if (dentist.id in ao) {
-          const ovId = ao[dentist.id];
-          const overriddenAssistant = ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
-          return { dentist, assistant: overriddenAssistant };
-        }
-        return { dentist, assistant };
+      const ac = daySched.assistantCounts ?? {};
+      const resolvedDentists = assignments.dentists.map(({ dentist, assistants }) => {
+        const resolved = resolveDentistAssistants(dentist.id, assistants, ac, ao, staff).filter(Boolean) as typeof staff;
+        return { dentist, assistants: resolved };
       });
 
       // Apply hygienist slot overrides
@@ -97,12 +96,12 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
 
       const hasWarning = assignments.warnings.length > 0;
 
-      const pairings = resolvedDentists.map(({ dentist, assistant }) =>
+      const pairings = resolvedDentists.map(({ dentist, assistants }) =>
         `<div class="pairing">
           <span class="dot" style="background:${dentist.color}"></span>
           <span class="dentist-name">${dentist.name.replace("Dr. ", "Dr.")}</span>
           <span class="separator">/</span>
-          <span class="assistant-name">${assistant?.name.split(" ")[0] ?? "—"}</span>
+          <span class="assistant-name">${assistants.length > 0 ? assistants.map((a) => a.name.split(" ")[0]).join(", ") : "—"}</span>
         </div>`
       ).join("");
 
