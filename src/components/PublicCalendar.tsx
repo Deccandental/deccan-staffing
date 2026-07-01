@@ -7,6 +7,7 @@ import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { loadSchedule, MonthSchedule } from "@/lib/scheduleStore";
+import { resolveDentistAssistants } from "@/lib/assistantSlots";
 import { loadHolidays, Holiday } from "@/lib/holidays";
 import { Employee } from "@/types/employee";
 import { TempAssignment, getTempAssignmentsForMonth } from "@/lib/tempAssignments";
@@ -29,7 +30,7 @@ interface DentistInfo {
   name: string;
   color: string;
   assistantName: string;
-  assistantId: number | null;
+  assistantIds: number[];
 }
 
 interface PersonChip {
@@ -110,24 +111,22 @@ export default function PublicCalendar() {
 
       const assignments = buildDailyAssignments(
         staff, daySched.dentists, day.date, prefs, overrides,
-        day.isTuesday && day.isOpenTuesday, frontDeskRequired, hygienistsRequired
+        day.isTuesday && day.isOpenTuesday, frontDeskRequired, hygienistsRequired,
+        daySched.assistantCounts ?? {}
       );
 
       const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);
       const tempName = (tempId: string) => firstName(temps.find((t) => t.id === tempId)?.name ?? "Temp");
 
       const ao = daySched.assistantOverrides ?? {};
-      const dentists: DentistInfo[] = assignments.dentists.map(({ dentist, assistant }) => {
+      const ac = daySched.assistantCounts ?? {};
+      const dentists: DentistInfo[] = assignments.dentists.map(({ dentist, assistants }) => {
         const tempForDentist = tempsForDay.find((ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`);
-        if (tempForDentist) return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: `${tempName(tempForDentist.tempId)} (temp)`, assistantId: null };
-        let resolvedAssistant = assistant;
-        if (dentist.id in ao) {
-          const ovId = ao[dentist.id];
-          resolvedAssistant = ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
-        }
-        return resolvedAssistant
-          ? { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: firstName(resolvedAssistant.name), assistantId: resolvedAssistant.id }
-          : { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: "???", assistantId: null };
+        if (tempForDentist) return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: `${tempName(tempForDentist.tempId)} (temp)`, assistantIds: [] };
+        const resolved = resolveDentistAssistants(dentist.id, assistants, ac, ao, staff).filter(Boolean) as Employee[];
+        return resolved.length > 0
+          ? { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: resolved.map((a) => firstName(a.name)).join(", "), assistantIds: resolved.map((a) => a.id) }
+          : { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: "???", assistantIds: [] };
       });
 
       const ho = daySched.hygienistOverrides ?? {};
@@ -157,7 +156,7 @@ export default function PublicCalendar() {
     if (!highlightId) return false;
     const info = monthAssignments[date];
     if (!info) return false;
-    if (info.dentists.some((d) => d.id === highlightId || d.assistantId === highlightId)) return true;
+    if (info.dentists.some((d) => d.id === highlightId || d.assistantIds.includes(highlightId))) return true;
     if (info.frontDesk.some((c) => c.id === highlightId)) return true;
     if (info.hygienists.some((c) => c.id === highlightId)) return true;
     return false;
@@ -192,7 +191,7 @@ export default function PublicCalendar() {
 
     if (highlightId && highlightedPerson) {
       const dentistPair = selectedInfo.dentists.find((d) => d.id === highlightId);
-      const assistantPair = selectedInfo.dentists.find((d) => d.assistantId === highlightId);
+      const assistantPair = selectedInfo.dentists.find((d) => d.assistantIds.includes(highlightId));
       const onFront = selectedInfo.frontDesk.find((c) => c.id === highlightId);
       const onHyg = selectedInfo.hygienists.find((c) => c.id === highlightId);
 
@@ -340,7 +339,7 @@ export default function PublicCalendar() {
                   <div className="space-y-1 overflow-hidden">
                     {info.dentists.map((d) => {
                       const dentistMatch = d.id === highlightId;
-                      const assistantMatch = d.assistantId === highlightId;
+                      const assistantMatch = highlightId !== null && d.assistantIds.includes(highlightId);
                       const rowMatch = dentistMatch || assistantMatch;
                       const rowDim = highlightId !== null && !rowMatch;
                       return (
