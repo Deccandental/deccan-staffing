@@ -3,10 +3,11 @@
 import { useState, useEffect } from "react";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
-import { loadStaff } from "@/lib/staffStore";
+import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { getOpenTuesdays } from "@/lib/openTuesdays";
 import { loadHolidays } from "@/lib/holidays";
 import { getTempAssignmentsForMonth, TempAssignment } from "@/lib/tempAssignments";
+import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { supabase } from "@/lib/supabase";
 import { Employee } from "@/types/employee";
 import { MonthSchedule } from "@/lib/scheduleStore";
@@ -23,9 +24,13 @@ export default function PrintIndividualScheduleCalendar({ year, month, schedule 
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"print" | "email">("print");
   const [staff, setStaff] = useState<Employee[]>([]);
+  const [overrides, setOverrides] = useState<StaffOverride[]>([]);
+  const [prefs, setPrefs] = useState<DentistPrefs>({});
 
   useEffect(() => {
     loadStaff().then(setStaff);
+    getOverrides().then(setOverrides);
+    loadPrefs().then(setPrefs);
   }, []);
 
   function getWorkingInfo(emp: Employee, day: ReturnType<typeof generateMonth>[0], tempsForDay: TempAssignment[], temps: { id: string; name: string }[]) {
@@ -33,7 +38,7 @@ export default function PrintIndividualScheduleCalendar({ year, month, schedule 
     if (!daySched) return null;
 
     const assignments = buildDailyAssignments(
-      staff, daySched.dentists, day.date, {}, [],
+      staff, daySched.dentists, day.date, prefs, overrides,
       day.isTuesday && day.isOpenTuesday,
       daySched.frontDeskRequired ?? 2,
       daySched.hygienistsRequired ?? 1
