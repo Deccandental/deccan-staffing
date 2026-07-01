@@ -7,7 +7,8 @@ import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getWeekday } from "@/lib/dateUtils";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
-import { loadSchedule, saveDaySchedule, MonthSchedule } from "@/lib/scheduleStore";
+import { loadSchedule, saveDaySchedule, MonthSchedule, AssistantOverrides } from "@/lib/scheduleStore";
+import { resolveDentistAssistants, getDentistSlotOverrides } from "@/lib/assistantSlots";
 import { loadHolidays, Holiday } from "@/lib/holidays";
 import { Employee } from "@/types/employee";
 import { TempAssignment, getTempAssignmentsForMonth } from "@/lib/tempAssignments";
@@ -109,7 +110,7 @@ export default function ScheduleBuilder() {
         const dentists = staff
           .filter((e) => e.role === "Dentist" && (day.isOpenTuesday || e.defaultSchedule[dowKey]))
           .map((e) => e.name);
-        filled[day.date] = { dentists, frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {}, hygienistOverrides: {} };
+        filled[day.date] = { dentists, frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {}, hygienistOverrides: {}, assistantCounts: {} };
         toSave.push({ date: day.date, dentists, frontDeskRequired: 2, hygienistsRequired: 1 });
       }
     }
@@ -145,7 +146,7 @@ export default function ScheduleBuilder() {
       const dentists = staff
         .filter((e) => e.role === "Dentist" && (day?.isOpenTuesday || e.defaultSchedule[dowKey]))
         .map((e) => e.name);
-      setSchedule((c) => ({ ...c, [date]: { dentists, frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {}, hygienistOverrides: {} } }));
+      setSchedule((c) => ({ ...c, [date]: { dentists, frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {}, hygienistOverrides: {}, assistantCounts: {} } }));
       await saveDaySchedule(date, dentists, 2, 1, {});
     }
   }
@@ -156,9 +157,10 @@ export default function ScheduleBuilder() {
     const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
     const ao = schedule[selectedDate]?.assistantOverrides ?? {};
     const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: ho } }));
+    const ac = schedule[selectedDate]?.assistantCounts ?? {};
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists, fdr, hr, ao, ho);
+    await saveDaySchedule(selectedDate, dentists, fdr, hr, ao, ho, ac);
     setSaving(false);
   }
 
@@ -168,9 +170,10 @@ export default function ScheduleBuilder() {
     const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
     const ao = schedule[selectedDate]?.assistantOverrides ?? {};
     const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: required, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: ho } }));
+    const ac = schedule[selectedDate]?.assistantCounts ?? {};
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: required, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists, required, hr, ao, ho);
+    await saveDaySchedule(selectedDate, dentists, required, hr, ao, ho, ac);
     setSaving(false);
   }
 
@@ -180,21 +183,23 @@ export default function ScheduleBuilder() {
     const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
     const ao = schedule[selectedDate]?.assistantOverrides ?? {};
     const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: required, assistantOverrides: ao, hygienistOverrides: ho } }));
+    const ac = schedule[selectedDate]?.assistantCounts ?? {};
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: required, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists, fdr, required, ao, ho);
+    await saveDaySchedule(selectedDate, dentists, fdr, required, ao, ho, ac);
     setSaving(false);
   }
 
-  async function handleAssistantOverrideChange(overridesMap: Record<number, number | null>) {
+  async function handleAssistantOverrideChange(overridesMap: AssistantOverrides) {
     if (!selectedDate) return;
     const dentists = schedule[selectedDate]?.dentists ?? [];
     const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
     const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
     const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: overridesMap, hygienistOverrides: ho } }));
+    const ac = schedule[selectedDate]?.assistantCounts ?? {};
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: overridesMap, hygienistOverrides: ho, assistantCounts: ac } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists, fdr, hr, overridesMap, ho);
+    await saveDaySchedule(selectedDate, dentists, fdr, hr, overridesMap, ho, ac);
     setSaving(false);
   }
 
@@ -204,9 +209,27 @@ export default function ScheduleBuilder() {
     const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
     const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
     const ao = schedule[selectedDate]?.assistantOverrides ?? {};
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: overridesMap } }));
+    const ac = schedule[selectedDate]?.assistantCounts ?? {};
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: overridesMap, assistantCounts: ac } }));
     setSaving(true);
-    await saveDaySchedule(selectedDate, dentists, fdr, hr, ao, overridesMap);
+    await saveDaySchedule(selectedDate, dentists, fdr, hr, ao, overridesMap, ac);
+    setSaving(false);
+  }
+
+  // Sets how many assistants a specific dentist needs today (default 1).
+  // Trims any now out-of-range slot overrides for that dentist so a stale
+  // override (e.g. slot 2's override after dropping the count to 1) can't
+  // silently resurface if the count is raised again later.
+  async function handleAssistantCountChange(dentistId: number, count: number) {
+    if (!selectedDate) return;
+    const dentists = schedule[selectedDate]?.dentists ?? [];
+    const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
+    const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
+    const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
+    const ac = { ...(schedule[selectedDate]?.assistantCounts ?? {}), [dentistId]: count };
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: schedule[selectedDate]?.assistantOverrides ?? {}, hygienistOverrides: ho, assistantCounts: ac } }));
+    setSaving(true);
+    await saveDaySchedule(selectedDate, dentists, fdr, hr, schedule[selectedDate]?.assistantOverrides ?? {}, ho, ac);
     setSaving(false);
   }
 
@@ -227,7 +250,8 @@ export default function ScheduleBuilder() {
         staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday,
         daySched.frontDeskRequired ?? 2,
-        daySched.hygienistsRequired ?? 1
+        daySched.hygienistsRequired ?? 1,
+        daySched.assistantCounts ?? {}
       );
       if (assignments.warnings.some((w) => w.severity === "error")) {
         statuses[day.date] = "warning";
@@ -256,26 +280,25 @@ export default function ScheduleBuilder() {
         staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday,
         daySched.frontDeskRequired ?? 2,
-        daySched.hygienistsRequired ?? 1
+        daySched.hygienistsRequired ?? 1,
+        daySched.assistantCounts ?? {}
       );
 
       const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);
       const tempName = (tempId: string) => temps.find((t) => t.id === tempId)?.name ?? "Temp";
 
       const ao = daySched.assistantOverrides ?? {};
-      const dentists = assignments.dentists.map(({ dentist, assistant }) => {
+      const ac = daySched.assistantCounts ?? {};
+      const dentists = assignments.dentists.map(({ dentist, assistants }) => {
         const tempForDentist = tempsForDay.find(
           (ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`
         );
         if (tempForDentist) {
           return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: `${tempName(tempForDentist.tempId)} (temp)` };
         }
-        let resolvedAssistant = assistant;
-        if (dentist.id in ao) {
-          const ovId = ao[dentist.id];
-          resolvedAssistant = ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
-        }
-        return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: resolvedAssistant?.name ?? null };
+        const resolved = resolveDentistAssistants(dentist.id, assistants, ac, ao, staff).filter(Boolean) as Employee[];
+        const assistantName = resolved.length > 0 ? resolved.map((a) => a.name).join(", ") : null;
+        return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName };
       });
 
       // Resolve hygienist slots, applying any manual swaps.
@@ -307,6 +330,7 @@ export default function ScheduleBuilder() {
   const hygienistsRequired = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].hygienistsRequired ?? 1) : 1;
   const assistantOverrides = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].assistantOverrides ?? {}) : {};
   const hygienistOverrides = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].hygienistOverrides ?? {}) : {};
+  const assistantCounts = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].assistantCounts ?? {}) : {};
 
   const selectedAssignments = useMemo(() => {
     if (!selectedDate) return undefined;
@@ -314,7 +338,8 @@ export default function ScheduleBuilder() {
     const isOpenTuesday = day?.isTuesday && day?.isOpenTuesday ? true : false;
     const fdr = schedule[selectedDate]?.frontDeskRequired ?? 2;
     const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
-    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday, fdr, hr);
+    const ac = schedule[selectedDate]?.assistantCounts ?? {};
+    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday, fdr, hr, ac);
   }, [staff, workingDentists, selectedDate, schedule, prefs, overrides, openDays]);
 
   function prevMonth() {
@@ -384,7 +409,7 @@ export default function ScheduleBuilder() {
                     <div className="text-xs text-slate-400">How many front desk staff needed today</div>
                   </div>
                   <div className="flex gap-2">
-                    {[1, 2].map((n) => (
+                    {[1, 2, 3].map((n) => (
                       <button key={n} onClick={() => setFrontDeskRequired(n)}
                         className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
                         style={frontDeskRequired === n ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
@@ -454,6 +479,8 @@ export default function ScheduleBuilder() {
                 assignments={selectedAssignments}
                 assistantOverrides={assistantOverrides}
                 onOverrideChange={handleAssistantOverrideChange}
+                assistantCounts={assistantCounts}
+                onAssistantCountChange={handleAssistantCountChange}
                 hygienistsRequired={hygienistsRequired}
                 hygienistOverrides={hygienistOverrides}
                 onHygienistOverrideChange={handleHygienistOverrideChange}
@@ -515,17 +542,15 @@ export default function ScheduleBuilder() {
                     staff, daySched.dentists, day.date, prefs, overrides,
                     day.isTuesday && day.isOpenTuesday,
                     daySched.frontDeskRequired ?? 2,
-                    daySched.hygienistsRequired ?? 1
+                    daySched.hygienistsRequired ?? 1,
+                    daySched.assistantCounts ?? {}
                   ) : null;
 
                   const ao = daySched?.assistantOverrides ?? {};
-                  const resolvedDentists = assignments?.dentists.map(({ dentist, assistant }) => {
-                    if (dentist.id in ao) {
-                      const ovId = ao[dentist.id];
-                      const overriddenAssistant = ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
-                      return { dentist, assistant: overriddenAssistant };
-                    }
-                    return { dentist, assistant };
+                  const ac = daySched?.assistantCounts ?? {};
+                  const resolvedDentists = assignments?.dentists.map(({ dentist, assistants }) => {
+                    const resolved = resolveDentistAssistants(dentist.id, assistants, ac, ao, staff).filter(Boolean) as Employee[];
+                    return { dentist, assistants: resolved };
                   });
 
                   const ho = daySched?.hygienistOverrides ?? {};
@@ -548,12 +573,12 @@ export default function ScheduleBuilder() {
                         {day.isHoliday && <span className="ml-2 rounded-full bg-red-100 text-red-600 text-xs px-1.5 py-0.5">{day.holidayName}</span>}
                       </td>
                       <td className="p-4">
-                        {resolvedDentists?.map(({ dentist, assistant }) => (
+                        {resolvedDentists?.map(({ dentist, assistants }) => (
                           <div key={dentist.id} className="flex items-center gap-1.5 text-xs mb-0.5">
                             <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: dentist.color }} />
                             <span className="font-medium">{dentist.name}</span>
-                            <span className="text-slate-400">/ {assistant?.name ?? "No Assistant"}</span>
-                            {dentist.id in ao && <span className="text-cyan-400 text-xs">(manual)</span>}
+                            <span className="text-slate-400">/ {assistants.length > 0 ? assistants.map((a) => a.name).join(", ") : "No Assistant"}</span>
+                            {Object.keys(getDentistSlotOverrides(ao, dentist.id)).length > 0 && <span className="text-cyan-400 text-xs">(manual)</span>}
                           </div>
                         )) ?? <span className="text-slate-300 text-xs">Not configured</span>}
                       </td>
