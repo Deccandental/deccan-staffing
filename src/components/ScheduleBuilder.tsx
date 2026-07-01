@@ -48,6 +48,7 @@ export default function ScheduleBuilder() {
   const [loadedYearMonth, setLoadedYearMonth] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [saving, setSaving] = useState(false);
+  const [staffLoaded, setStaffLoaded] = useState(false);
   const [temps, setTemps] = useState<TempStaff[]>([]);
   const [monthTempAssignments, setMonthTempAssignments] = useState<TempAssignment[]>([]);
 
@@ -62,6 +63,7 @@ export default function ScheduleBuilder() {
       setOpenTuesdays(ot);
       setHolidays(h);
       setTemps(t);
+      setStaffLoaded(true);
     }
     load();
 
