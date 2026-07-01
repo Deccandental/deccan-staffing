@@ -21,7 +21,8 @@ export function buildDailyAssignments(
   overrides: StaffOverride[] = [],
   isOpenTuesday: boolean = false,
   frontDeskRequired: number = 2,
-  hygienistsRequired: number = 1
+  hygienistsRequired: number = 1,
+  assistantCounts: Record<number, number> = {}
 ): DailyAssignmentsResult {
   const weekday = date ? getWeekday(date) : null;
   const warnings: AssignmentWarning[] = [];
@@ -50,25 +51,27 @@ export function buildDailyAssignments(
       warnings.push({ severity: "error", message: "No front desk available — temp front desk needed." });
     }
   } else {
-    if (regularFrontDesk.length >= 2) {
-      frontDesk = regularFrontDesk.slice(0, 2);
-    } else if (regularFrontDesk.length === 1) {
-      if (karla && isAvailable(karla)) {
-        frontDesk = [regularFrontDesk[0], karla];
-        karlaOnFrontDesk = true;
+    // Fill from regular front desk staff first, then use Karla as a single
+    // floater to cover one remaining gap if needed — same behavior as
+    // before, just generalized to any required count (2, 3, ...).
+    frontDesk = regularFrontDesk.slice(0, frontDeskRequired);
+    const gapAfterRegular = frontDeskRequired - frontDesk.length;
+    if (gapAfterRegular > 0 && karla && isAvailable(karla)) {
+      frontDesk = [...frontDesk, karla];
+      karlaOnFrontDesk = true;
+    }
+    const shortage = frontDeskRequired - frontDesk.length;
+    if (shortage > 0) {
+      const severity: "warning" | "error" = regularFrontDesk.length === 0 ? "error" : "warning";
+      let message: string;
+      if (frontDesk.length === 0) {
+        message = "No front desk available — temp front desk needed.";
+      } else if (regularFrontDesk.length === 0) {
+        message = "All regular front desk staff out — temp front desk needed.";
       } else {
-        frontDesk = regularFrontDesk;
-        warnings.push({ severity: "warning", message: "Only 1 front desk available — temp front desk needed." });
+        message = `Only ${frontDesk.length} of ${frontDeskRequired} front desk available — temp front desk needed.`;
       }
-    } else {
-      if (karla && isAvailable(karla)) {
-        frontDesk = [karla];
-        karlaOnFrontDesk = true;
-        warnings.push({ severity: "error", message: "Both front desk staff out — temp front desk needed." });
-      } else {
-        frontDesk = [];
-        warnings.push({ severity: "error", message: "No front desk available — temp front desk needed." });
-      }
+      warnings.push({ severity, message });
     }
   }
 
@@ -81,11 +84,12 @@ export function buildDailyAssignments(
     (e) => e.skills.includes("Assistant") && isAvailable(e) && !assignedIds.has(e.id)
   );
 
-  if (allAssistants.length < dentists.length) {
-    const shortage = dentists.length - allAssistants.length;
+  const totalAssistantsNeeded = dentists.reduce((sum, d) => sum + Math.max(0, assistantCounts[d.id] ?? 1), 0);
+  if (allAssistants.length < totalAssistantsNeeded) {
+    const shortage = totalAssistantsNeeded - allAssistants.length;
     warnings.push({
       severity: "error",
-      message: `${shortage} temp assistant${shortage !== 1 ? "s" : ""} needed — only ${allAssistants.length} of ${dentists.length} required available.`,
+      message: `${shortage} temp assistant${shortage !== 1 ? "s" : ""} needed — only ${allAssistants.length} of ${totalAssistantsNeeded} required available.`,
     });
   }
 
@@ -94,29 +98,38 @@ export function buildDailyAssignments(
   const dentistAssignments: DentistAssignment[] = [];
 
   for (const dentist of sortedDentists) {
+    const count = Math.max(0, assistantCounts[dentist.id] ?? 1);
     const prefIds: number[] = prefs[dentist.id] ?? [];
-    let assistant: Employee | null = null;
+    const assigned: Employee[] = [];
 
     for (const prefId of prefIds) {
+      if (assigned.length >= count) break;
       const candidate = allAssistants.find((a) => a.id === prefId && !assignedIds.has(a.id));
-      if (candidate) { assistant = candidate; assignedIds.add(candidate.id); break; }
+      if (candidate) { assigned.push(candidate); assignedIds.add(candidate.id); }
     }
 
-    if (!assistant && drHo && dentist.id === drHo.id && karla && !karlaOnFrontDesk && !assignedIds.has(karla.id)) {
-      assistant = karla;
+    if (assigned.length < count && drHo && dentist.id === drHo.id && karla && !karlaOnFrontDesk && !assignedIds.has(karla.id)) {
+      assigned.push(karla);
       assignedIds.add(karla.id);
     }
 
-    if (!assistant) {
+    while (assigned.length < count) {
       const fallback = allAssistants.find((a) => !assignedIds.has(a.id));
-      if (fallback) { assistant = fallback; assignedIds.add(fallback.id); }
+      if (!fallback) break;
+      assigned.push(fallback);
+      assignedIds.add(fallback.id);
     }
 
-    if (!assistant) {
-      warnings.push({ severity: "warning", message: `No assistant available for ${dentist.name} — temp needed.` });
+    if (assigned.length < count) {
+      const shortage = count - assigned.length;
+      if (assigned.length === 0) {
+        warnings.push({ severity: "warning", message: `No assistant available for ${dentist.name} — temp needed.` });
+      } else {
+        warnings.push({ severity: "warning", message: `Only ${assigned.length} of ${count} assistants available for ${dentist.name} — ${shortage} temp needed.` });
+      }
     }
 
-    dentistAssignments.push({ dentist, assistant });
+    dentistAssignments.push({ dentist, assistant: assigned[0] ?? null, assistants: assigned });
   }
 
   const orderedAssignments = dentists.map((d) => dentistAssignments.find((a) => a.dentist.id === d.id)!);
