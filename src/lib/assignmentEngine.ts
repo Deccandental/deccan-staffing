@@ -1,8 +1,8 @@
 import { Employee } from "@/types/employee";
 import { DailyAssignments, DentistAssignment } from "@/types/assignment";
 import { getWeekday } from "./dateUtils";
-import { isUnavailable } from "./overrides";
-import { loadPrefs } from "./staffStore";
+import { StaffOverride } from "./overrides";
+import { DentistPrefs } from "./staffStore";
 
 export interface AssignmentWarning {
   severity: "warning" | "error";
@@ -16,16 +16,24 @@ export interface DailyAssignmentsResult extends DailyAssignments {
 export function buildDailyAssignments(
   employees: Employee[],
   workingDentistNames: string[],
-  date?: string
+  date?: string,
+  prefs: DentistPrefs = {},
+  overrides: StaffOverride[] = [],
+  isOpenTuesday: boolean = false,
+  frontDeskRequired: number = 2,
+  hygienistsRequired: number = 1
 ): DailyAssignmentsResult {
   const weekday = date ? getWeekday(date) : null;
-  const prefs = loadPrefs();
   const warnings: AssignmentWarning[] = [];
 
+  function isUnavailable(emp: Employee): boolean {
+    if (!date) return false;
+    return overrides.some((o) => o.employeeId === emp.id && o.date === date && !o.halfDay && o.reason !== "remote");
+  }
+
   function isAvailable(emp: Employee): boolean {
-    const worksDay = weekday ? emp.defaultSchedule[weekday] : true;
-    const notOverridden = date ? !isUnavailable(emp.id, date) : true;
-    return worksDay && notOverridden;
+    const worksDay = isOpenTuesday ? true : (weekday ? emp.defaultSchedule[weekday] : true);
+    return worksDay && !isUnavailable(emp);
   }
 
   const karla = employees.find((e) => e.name.startsWith("Karla"));
@@ -34,24 +42,33 @@ export function buildDailyAssignments(
   let frontDesk: Employee[] = [];
   let karlaOnFrontDesk = false;
 
-  if (regularFrontDesk.length >= 2) {
-    frontDesk = regularFrontDesk.slice(0, 2);
-  } else if (regularFrontDesk.length === 1) {
-    if (karla && isAvailable(karla)) {
-      frontDesk = [regularFrontDesk[0], karla];
-      karlaOnFrontDesk = true;
-    } else {
-      frontDesk = regularFrontDesk;
-      warnings.push({ severity: "warning", message: "Only 1 front desk available — temp front desk needed." });
-    }
-  } else {
-    if (karla && isAvailable(karla)) {
-      frontDesk = [karla];
-      karlaOnFrontDesk = true;
-      warnings.push({ severity: "error", message: "Both front desk staff out — temp front desk needed." });
+  if (frontDeskRequired === 1) {
+    if (regularFrontDesk.length >= 1) {
+      frontDesk = [regularFrontDesk[0]];
     } else {
       frontDesk = [];
       warnings.push({ severity: "error", message: "No front desk available — temp front desk needed." });
+    }
+  } else {
+    if (regularFrontDesk.length >= 2) {
+      frontDesk = regularFrontDesk.slice(0, 2);
+    } else if (regularFrontDesk.length === 1) {
+      if (karla && isAvailable(karla)) {
+        frontDesk = [regularFrontDesk[0], karla];
+        karlaOnFrontDesk = true;
+      } else {
+        frontDesk = regularFrontDesk;
+        warnings.push({ severity: "warning", message: "Only 1 front desk available — temp front desk needed." });
+      }
+    } else {
+      if (karla && isAvailable(karla)) {
+        frontDesk = [karla];
+        karlaOnFrontDesk = true;
+        warnings.push({ severity: "error", message: "Both front desk staff out — temp front desk needed." });
+      } else {
+        frontDesk = [];
+        warnings.push({ severity: "error", message: "No front desk available — temp front desk needed." });
+      }
     }
   }
 
@@ -64,7 +81,6 @@ export function buildDailyAssignments(
     (e) => e.skills.includes("Assistant") && isAvailable(e) && !assignedIds.has(e.id)
   );
 
-  // Warn early if there aren't enough assistants for the dentists scheduled
   if (allAssistants.length < dentists.length) {
     const shortage = dentists.length - allAssistants.length;
     warnings.push({
@@ -104,10 +120,26 @@ export function buildDailyAssignments(
   }
 
   const orderedAssignments = dentists.map((d) => dentistAssignments.find((a) => a.dentist.id === d.id)!);
-  const hygienists = employees.filter((e) => e.role === "Hygienist" && isAvailable(e)).slice(0, 1);
 
-  if (hygienists.length === 0 && dentists.length > 0) {
-    warnings.push({ severity: "warning", message: "No hygienist available." });
+  // Hygienists — respect hygienistsRequired
+  // Exclude anyone already used as front desk or as a dentist's assistant today,
+  // so a dual-role staffer (e.g. has both "Assistant" and "Hygienist" skills)
+  // can't be double-booked.
+  const availableHygienists = employees.filter(
+    (e) =>
+      (e.role === "Hygienist" || e.skills.includes("Hygienist")) &&
+      isAvailable(e) &&
+      !assignedIds.has(e.id)
+  );
+  const hygienists = availableHygienists.slice(0, hygienistsRequired);
+  hygienists.forEach((h) => assignedIds.add(h.id));
+
+  if (hygienists.length < hygienistsRequired && dentists.length > 0) {
+    const shortage = hygienistsRequired - hygienists.length;
+    warnings.push({
+      severity: "warning",
+      message: `${shortage} temp hygienist${shortage !== 1 ? "s" : ""} needed — only ${hygienists.length} of ${hygienistsRequired} required available.`,
+    });
   }
 
   return { dentists: orderedAssignments, frontDesk, hygienists, warnings };

@@ -5,16 +5,10 @@ import Link from "next/link";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { buildDailyAssignments, DailyAssignmentsResult } from "@/lib/assignmentEngine";
 import { loadStaff } from "@/lib/staffStore";
+import { loadSchedule } from "@/lib/scheduleStore";
 import { Employee } from "@/types/employee";
 
 const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const SCHEDULE_KEY = "deccan-schedule-v1";
-
-function loadSchedule(): Record<string, { dentists: string[] }> {
-  if (typeof window === "undefined") return {};
-  try { return JSON.parse(localStorage.getItem(SCHEDULE_KEY) ?? "{}"); }
-  catch { return {}; }
-}
 
 export default function HomeCalendar() {
   const today = new Date();
@@ -23,15 +17,34 @@ export default function HomeCalendar() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [schedule, setSchedule] = useState<Record<string, { dentists: string[] }>>({});
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => { setStaff(loadStaff()); setSchedule(loadSchedule()); }, []);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const [s, sched] = await Promise.all([
+        loadStaff(),
+        loadSchedule(year, month),
+      ]);
+      setStaff(s);
+      setSchedule(sched);
+      setLoading(false);
+    }
+    load();
+  }, [year, month]);
 
   const days = generateMonth(year, month);
   const firstDow = new Date(year, month - 1, 1).getDay();
   const blanks = Array.from({ length: firstDow });
 
-  function prevMonth() { if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1); setSelectedDate(null); }
-  function nextMonth() { if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1); setSelectedDate(null); }
+  function prevMonth() {
+    if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1);
+    setSelectedDate(null);
+  }
+  function nextMonth() {
+    if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1);
+    setSelectedDate(null);
+  }
 
   const selectedAssignments: DailyAssignmentsResult | null = useMemo(() => {
     if (!selectedDate) return null;
@@ -75,7 +88,7 @@ export default function HomeCalendar() {
               <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, margin: "4px 0 0", letterSpacing: "0.15em", textTransform: "uppercase", fontWeight: 400 }}>Sleep Center</p>
 
               <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginTop: 12 }}>
-                {formatMonthYear(year, month)} — {completeDays} of {openDays.length} days fully staffed
+                {formatMonthYear(year, month)} — {loading ? "Loading..." : `${completeDays} of ${openDays.length} days fully staffed`}
               </p>
 
               <div style={{ marginTop: 10, width: 280, height: 4, background: "rgba(255,255,255,0.15)", borderRadius: 2, overflow: "hidden" }}>

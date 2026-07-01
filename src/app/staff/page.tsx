@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
+import PasscodeGate from "@/components/PasscodeGate";
 import { Employee, EmployeeRole, DentistSpecialty } from "@/types/employee";
 import {
   loadStaff, addEmployee, updateEmployee, removeEmployee,
@@ -24,6 +25,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   role: "Assistant",
   color: "#2563eb",
   skills: ["Assistant"],
+  email: "",
   defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
 };
 
@@ -35,7 +37,7 @@ const ROLE_COLORS: Record<string, string> = {
   Hygienist: "bg-emerald-100 text-emerald-700",
 };
 
-export default function StaffPage() {
+function StaffPageBody() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [editing, setEditing] = useState<Employee | null>(null);
@@ -43,31 +45,42 @@ export default function StaffPage() {
   const [form, setForm] = useState<Omit<Employee, "id">>(EMPTY_EMP);
   const [activeTab, setActiveTab] = useState<"staff" | "prefs">("staff");
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { refresh(); }, []);
 
-  function refresh() { setStaff(loadStaff()); setPrefs(loadPrefs()); }
+  async function refresh() {
+    setLoading(true);
+    const [s, p] = await Promise.all([loadStaff(), loadPrefs()]);
+    setStaff(s);
+    setPrefs(p);
+    setLoading(false);
+  }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.name.trim()) return;
-    if (editing) { updateEmployee({ ...form, id: editing.id }); }
-    else { addEmployee(form); }
+    if (editing) { await updateEmployee({ ...form, id: editing.id }); }
+    else { await addEmployee(form); }
     setEditing(null);
     setAdding(false);
     setForm(EMPTY_EMP);
-    refresh();
+    await refresh();
   }
 
   function handleEdit(emp: Employee) {
     setEditing(emp);
     setAdding(false);
-    setForm({ name: emp.name, role: emp.role, specialty: emp.specialty, color: emp.color, skills: emp.skills, defaultSchedule: { ...emp.defaultSchedule } });
+    setForm({
+      name: emp.name, role: emp.role, specialty: emp.specialty,
+      color: emp.color, skills: emp.skills, email: emp.email ?? "",
+      defaultSchedule: { ...emp.defaultSchedule }
+    });
   }
 
-  function handleDelete(id: number) {
-    removeEmployee(id);
+  async function handleDelete(id: number) {
+    await removeEmployee(id);
     setConfirmDelete(null);
-    refresh();
+    await refresh();
   }
 
   function toggleSkill(skill: string) {
@@ -81,7 +94,7 @@ export default function StaffPage() {
     setForm((f) => ({ ...f, defaultSchedule: { ...f.defaultSchedule, [day]: !f.defaultSchedule[day] } }));
   }
 
-  function movePref(dentistId: number, assistantId: number, dir: -1 | 1) {
+  async function movePref(dentistId: number, assistantId: number, dir: -1 | 1) {
     const current = prefs[dentistId] ?? [];
     const idx = current.indexOf(assistantId);
     if (idx === -1) return;
@@ -89,41 +102,60 @@ export default function StaffPage() {
     const swap = idx + dir;
     if (swap < 0 || swap >= next.length) return;
     [next[idx], next[swap]] = [next[swap], next[idx]];
-    setDentistPrefs(dentistId, next);
-    refresh();
+    await setDentistPrefs(dentistId, next);
+    await refresh();
   }
 
-  function initPrefs(dentistId: number) {
+  async function initPrefs(dentistId: number) {
     const assistants = staff.filter((e) => e.skills.includes("Assistant") || e.skills.includes("RDA"));
     const current = prefs[dentistId] ?? [];
     const missing = assistants.filter((a) => !current.includes(a.id)).map((a) => a.id);
     const full = [...current.filter((id) => staff.find((e) => e.id === id)), ...missing];
-    setDentistPrefs(dentistId, full);
-    refresh();
+    await setDentistPrefs(dentistId, full);
+    await refresh();
   }
 
   const dentists = staff.filter((e) => e.role === "Dentist");
   const assistants = staff.filter((e) => e.skills.includes("Assistant") || e.skills.includes("RDA"));
 
+  if (loading) {
+    return (
+      <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+        <Sidebar />
+        <div className="lg:ml-64 pt-16 lg:pt-0 flex items-center justify-center min-h-screen">
+          <p className="text-gray-400">Loading staff...</p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
       <Sidebar />
-      <div className="ml-64 p-8">
+      <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold" style={{ color: "#5a5a5a" }}>Staff Management</h1>
             <p className="mt-1 text-gray-400">{staff.length} team members</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setActiveTab("staff")} className="rounded-xl px-4 py-2 text-sm font-semibold transition" style={activeTab === "staff" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>Staff Directory</button>
-            <button onClick={() => setActiveTab("prefs")} className="rounded-xl px-4 py-2 text-sm font-semibold transition" style={activeTab === "prefs" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>Dentist Preferences</button>
+            <button onClick={() => setActiveTab("staff")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
+              style={activeTab === "staff" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
+              Staff Directory
+            </button>
+            <button onClick={() => setActiveTab("prefs")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
+              style={activeTab === "prefs" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
+              Dentist Preferences
+            </button>
           </div>
         </div>
 
         {activeTab === "staff" && (
           <div className="space-y-4">
             {!adding && !editing && (
-              <button onClick={() => { setAdding(true); setEditing(null); setForm(EMPTY_EMP); }} className="rounded-xl px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+              <button onClick={() => { setAdding(true); setEditing(null); setForm(EMPTY_EMP); }}
+                className="rounded-xl px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition"
+                style={{ backgroundColor: "#e8622a" }}>
                 + Add Employee
               </button>
             )}
@@ -135,31 +167,42 @@ export default function StaffPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Name</label>
-                    <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="Full name" />
+                    <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="Full name" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-500 mb-1">Email Address</label>
+                    <input type="email" value={form.email ?? ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="staff@mydeccandental.com" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Primary Role</label>
-                    <select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as EmployeeRole, specialty: undefined }))} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none">
+                    <select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as EmployeeRole, specialty: undefined }))}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none">
                       {ROLES.map((r) => <option key={r}>{r}</option>)}
                     </select>
                   </div>
                 </div>
 
-                {/* Specialty — only for Dentists */}
                 {form.role === "Dentist" && (
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Specialty</label>
-                    <select value={form.specialty ?? "General Dentist"} onChange={(e) => setForm((f) => ({ ...f, specialty: e.target.value as DentistSpecialty }))} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none">
+                    <select value={form.specialty ?? "General Dentist"}
+                      onChange={(e) => setForm((f) => ({ ...f, specialty: e.target.value as DentistSpecialty }))}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none">
                       {SPECIALTIES.map((s) => <option key={s}>{s}</option>)}
                     </select>
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-2">Skills <span className="text-gray-300">(check all that apply)</span></label>
+                  <label className="block text-sm font-medium text-gray-500 mb-2">Skills</label>
                   <div className="flex flex-wrap gap-2">
                     {ALL_SKILLS.map((s) => (
-                      <button key={s} onClick={() => toggleSkill(s)} className="rounded-full border px-3 py-1 text-xs font-medium transition" style={form.skills.includes(s) ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>{s}</button>
+                      <button key={s} onClick={() => toggleSkill(s)} className="rounded-full border px-3 py-1 text-xs font-medium transition"
+                        style={form.skills.includes(s) ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>
+                        {s}
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -168,7 +211,9 @@ export default function StaffPage() {
                   <label className="block text-sm font-medium text-gray-500 mb-2">Default Schedule</label>
                   <div className="flex gap-2">
                     {DAYS.map((day, i) => (
-                      <button key={day} onClick={() => toggleDay(day)} disabled={day === "tuesday"} className="flex-1 rounded-lg py-2 text-xs font-semibold transition" style={form.defaultSchedule[day] ? { backgroundColor: "#e8622a", color: "white" } : { background: "#f1f5f9", color: "#9ca3af" }}>
+                      <button key={day} onClick={() => toggleDay(day)}
+                        className="flex-1 rounded-lg py-2 text-xs font-semibold transition"
+                        style={form.defaultSchedule[day] ? { backgroundColor: "#e8622a", color: "white" } : { background: "#f1f5f9", color: "#9ca3af" }}>
                         {DAY_LABELS[i]}
                       </button>
                     ))}
@@ -179,14 +224,22 @@ export default function StaffPage() {
                   <label className="block text-sm font-medium text-gray-500 mb-2">Color</label>
                   <div className="flex flex-wrap gap-2">
                     {COLORS.map((c) => (
-                      <button key={c} onClick={() => setForm((f) => ({ ...f, color: c }))} className="h-8 w-8 rounded-full transition" style={{ backgroundColor: c, outline: form.color === c ? `3px solid ${c}` : "none", outlineOffset: "2px" }} />
+                      <button key={c} onClick={() => setForm((f) => ({ ...f, color: c }))}
+                        className="h-8 w-8 rounded-full transition"
+                        style={{ backgroundColor: c, outline: form.color === c ? `3px solid ${c}` : "none", outlineOffset: "2px" }} />
                     ))}
                   </div>
                 </div>
 
                 <div className="flex gap-3 pt-2">
-                  <button onClick={handleSave} className="rounded-xl px-5 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>{editing ? "Save Changes" : "Add Employee"}</button>
-                  <button onClick={() => { setEditing(null); setAdding(false); }} className="rounded-xl border border-gray-200 px-5 py-2 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition">Cancel</button>
+                  <button onClick={handleSave} className="rounded-xl px-5 py-2 text-sm font-semibold text-white hover:opacity-90 transition"
+                    style={{ backgroundColor: "#e8622a" }}>
+                    {editing ? "Save Changes" : "Add Employee"}
+                  </button>
+                  <button onClick={() => { setEditing(null); setAdding(false); }}
+                    className="rounded-xl border border-gray-200 px-5 py-2 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition">
+                    Cancel
+                  </button>
                 </div>
               </div>
             )}
@@ -196,45 +249,65 @@ export default function StaffPage() {
                 <div key={emp.id} className="rounded-2xl bg-white p-5 shadow">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full flex items-center justify-center text-white font-bold" style={{ backgroundColor: emp.color }}>{emp.name.charAt(0)}</div>
+                      <div className="h-10 w-10 rounded-full flex items-center justify-center text-white font-bold"
+                        style={{ backgroundColor: emp.color }}>
+                        {emp.name.charAt(0)}
+                      </div>
                       <div>
                         <div className="font-semibold" style={{ color: "#5a5a5a" }}>{emp.name}</div>
+                        {emp.email && <div className="text-xs text-gray-400">{emp.email}</div>}
                         <div className="flex flex-wrap gap-1 mt-1">
                           {emp.role === "Dentist" ? (
                             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role]}`}>
                               {emp.specialty ?? "Dentist"}
                             </span>
                           ) : (
-                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role] ?? "bg-slate-100 text-slate-600"}`}>{emp.role}</span>
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role] ?? "bg-slate-100 text-slate-600"}`}>
+                              {emp.role}
+                            </span>
                           )}
                         </div>
                       </div>
                     </div>
                     <div className="flex gap-1">
-                      <button onClick={() => handleEdit(emp)} className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition">Edit</button>
+                      <button onClick={() => handleEdit(emp)}
+                        className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition">
+                        Edit
+                      </button>
                       {confirmDelete === emp.id ? (
                         <div className="flex gap-1">
-                          <button onClick={() => handleDelete(emp.id)} className="rounded-lg px-2 py-1 text-xs bg-red-100 text-red-600 hover:bg-red-200 transition">Confirm</button>
-                          <button onClick={() => setConfirmDelete(null)} className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 transition">Cancel</button>
+                          <button onClick={() => handleDelete(emp.id)}
+                            className="rounded-lg px-2 py-1 text-xs bg-red-100 text-red-600 hover:bg-red-200 transition">
+                            Confirm
+                          </button>
+                          <button onClick={() => setConfirmDelete(null)}
+                            className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 transition">
+                            Cancel
+                          </button>
                         </div>
                       ) : (
-                        <button onClick={() => setConfirmDelete(emp.id)} className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-red-50 hover:text-red-500 transition">Remove</button>
+                        <button onClick={() => setConfirmDelete(emp.id)}
+                          className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-red-50 hover:text-red-500 transition">
+                          Remove
+                        </button>
                       )}
                     </div>
                   </div>
 
                   {emp.skills.length > 1 && (
                     <div className="mb-3 flex flex-wrap gap-1">
-                      {emp.skills.map((s) => <span key={s} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{s}</span>)}
+                      {emp.skills.map((s) => (
+                        <span key={s} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{s}</span>
+                      ))}
                     </div>
                   )}
 
                   <div className="flex gap-1">
                     {DAYS.map((day, i) => {
                       const works = emp.defaultSchedule[day];
-                      const isTue = day === "tuesday";
                       return (
-                        <div key={day} className="flex-1 rounded py-1 text-center text-xs font-semibold" style={isTue ? { background: "#f1f5f9", color: "#cbd5e1" } : works ? { backgroundColor: emp.color, color: "white" } : { background: "#f1f5f9", color: "#cbd5e1" }}>
+                        <div key={day} className="flex-1 rounded py-1 text-center text-xs font-semibold"
+                          style={works ? { backgroundColor: emp.color, color: "white" } : { background: "#f1f5f9", color: "#cbd5e1" }}>
                           {DAY_LABELS[i]}
                         </div>
                       );
@@ -256,13 +329,20 @@ export default function StaffPage() {
                   <div key={dentist.id} className="rounded-2xl bg-white p-6 shadow">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-3">
-                        <div className="h-9 w-9 rounded-full flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: dentist.color }}>{dentist.name.charAt(0)}</div>
+                        <div className="h-9 w-9 rounded-full flex items-center justify-center text-white font-bold text-sm"
+                          style={{ backgroundColor: dentist.color }}>
+                          {dentist.name.charAt(0)}
+                        </div>
                         <div>
                           <span className="font-semibold" style={{ color: "#5a5a5a" }}>{dentist.name}</span>
                           {dentist.specialty && <span className="ml-2 text-xs text-gray-400">{dentist.specialty}</span>}
                         </div>
                       </div>
-                      <button onClick={() => initPrefs(dentist.id)} className="rounded-lg px-3 py-1.5 text-sm font-medium transition" style={{ backgroundColor: "#fff0eb", color: "#e8622a" }}>Set Preferences</button>
+                      <button onClick={() => initPrefs(dentist.id)}
+                        className="rounded-lg px-3 py-1.5 text-sm font-medium transition"
+                        style={{ backgroundColor: "#fff0eb", color: "#e8622a" }}>
+                        Set Preferences
+                      </button>
                     </div>
                     <p className="text-sm text-gray-400">No preferences set — click to configure.</p>
                   </div>
@@ -274,7 +354,10 @@ export default function StaffPage() {
               return (
                 <div key={dentist.id} className="rounded-2xl bg-white p-6 shadow">
                   <div className="flex items-center gap-3 mb-5">
-                    <div className="h-9 w-9 rounded-full flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: dentist.color }}>{dentist.name.charAt(0)}</div>
+                    <div className="h-9 w-9 rounded-full flex items-center justify-center text-white font-bold text-sm"
+                      style={{ backgroundColor: dentist.color }}>
+                      {dentist.name.charAt(0)}
+                    </div>
                     <div>
                       <span className="font-semibold" style={{ color: "#5a5a5a" }}>{dentist.name}</span>
                       {dentist.specialty && <span className="ml-2 text-xs text-gray-400">{dentist.specialty}</span>}
@@ -287,10 +370,14 @@ export default function StaffPage() {
                         <span className="w-6 text-center text-sm font-bold text-gray-300">{idx + 1}</span>
                         <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: asst.color }} />
                         <span className="flex-1 text-sm font-medium" style={{ color: "#5a5a5a" }}>{asst.name}</span>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full mr-2 ${ROLE_COLORS[asst.role] ?? "bg-gray-100 text-gray-500"}`}>{asst.role}</span>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full mr-2 ${ROLE_COLORS[asst.role] ?? "bg-gray-100 text-gray-500"}`}>
+                          {asst.role}
+                        </span>
                         <div className="flex gap-1">
-                          <button onClick={() => movePref(dentist.id, asst.id, -1)} disabled={idx === 0} className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-200 disabled:opacity-30 transition">↑</button>
-                          <button onClick={() => movePref(dentist.id, asst.id, 1)} disabled={idx === orderedAssistants.length - 1} className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-200 disabled:opacity-30 transition">↓</button>
+                          <button onClick={() => movePref(dentist.id, asst.id, -1)} disabled={idx === 0}
+                            className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-200 disabled:opacity-30 transition">↑</button>
+                          <button onClick={() => movePref(dentist.id, asst.id, 1)} disabled={idx === orderedAssistants.length - 1}
+                            className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-200 disabled:opacity-30 transition">↓</button>
                         </div>
                       </div>
                     ))}
@@ -302,5 +389,13 @@ export default function StaffPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function StaffPage() {
+  return (
+    <PasscodeGate group="admin" subtitle="Enter your passcode to manage staff">
+      <StaffPageBody />
+    </PasscodeGate>
   );
 }
