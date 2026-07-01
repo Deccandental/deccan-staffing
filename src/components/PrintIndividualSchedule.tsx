@@ -3,30 +3,47 @@
 import { useState, useEffect } from "react";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
-import { loadStaff } from "@/lib/staffStore";
+import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
+import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
+import { loadHolidays, Holiday } from "@/lib/holidays";
+import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { Employee } from "@/types/employee";
+import { MonthSchedule } from "@/lib/scheduleStore";
 
 interface Props {
   year: number;
   month: number;
-  schedule: Record<string, { dentists: string[] }>;
+  schedule: MonthSchedule;
 }
 
 export default function PrintIndividualSchedule({ year, month, schedule }: Props) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"print" | "email">("print");
   const [staff, setStaff] = useState<Employee[]>([]);
+  const [overrides, setOverrides] = useState<StaffOverride[]>([]);
+  const [prefs, setPrefs] = useState<DentistPrefs>({});
+  const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
 
   useEffect(() => {
     loadStaff().then(setStaff);
+    getOverrides().then(setOverrides);
+    loadPrefs().then(setPrefs);
+    getOpenTuesdays().then(setOpenTuesdays);
+    loadHolidays().then(setHolidays);
   }, []);
 
   function getRows(emp: Employee) {
-    const days = generateMonth(year, month).filter((d) => d.isOpen);
+    const days = generateMonth(year, month, openTuesdays, holidays).filter((d) => d.isOpen);
     return days.map((day) => {
       const daySched = schedule[day.date];
       if (!daySched) return null;
-      const assignments = buildDailyAssignments(staff, daySched.dentists, day.date);
+      const assignments = buildDailyAssignments(
+        staff, daySched.dentists, day.date, prefs, overrides,
+        day.isTuesday && day.isOpenTuesday,
+        daySched.frontDeskRequired ?? 2,
+        daySched.hygienistsRequired ?? 1
+      );
       const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric",
       });
@@ -34,19 +51,46 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
       let detail = "";
       let working = false;
 
+      const ao = daySched.assistantOverrides ?? {};
+
       if (emp.role === "Dentist") {
         const pair = assignments.dentists.find((d) => d.dentist.id === emp.id);
-        if (pair) { working = true; role = "Dentist"; detail = pair.assistant ? `Assistant: ${pair.assistant.name}` : "No assistant assigned"; }
+        if (pair) {
+          working = true; role = "Dentist";
+          let assistant = pair.assistant;
+          if (pair.dentist.id in ao) {
+            const ovId = ao[pair.dentist.id];
+            assistant = ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
+          }
+          detail = assistant ? `Assistant: ${assistant.name}` : "No assistant assigned";
+        }
       } else if (emp.skills.includes("Assistant") || emp.role === "RDA") {
-        const pair = assignments.dentists.find((d) => d.assistant?.id === emp.id);
+        const pair = assignments.dentists.find((d) => {
+          if (d.dentist.id in ao) {
+            const ovId = ao[d.dentist.id];
+            return ovId === emp.id;
+          }
+          return d.assistant?.id === emp.id;
+        });
         const onFD = assignments.frontDesk.find((e) => e.id === emp.id);
         if (pair) { working = true; role = emp.role; detail = `With: ${pair.dentist.name}`; }
         else if (onFD) { working = true; role = "Front Desk"; detail = "Front desk coverage"; }
       } else if (emp.role === "Front Desk") {
         const onFD = assignments.frontDesk.find((e) => e.id === emp.id);
         if (onFD) { working = true; role = "Front Desk"; detail = ""; }
-      } else if (emp.role === "Hygienist") {
-        working = true; role = "Hygienist"; detail = "";
+      } else if (emp.role === "Hygienist" || emp.skills.includes("Hygienist")) {
+        const ho = daySched.hygienistOverrides ?? {};
+        const hygSlotCount = daySched.hygienistsRequired ?? 1;
+        const resolvedHygienists = Array.from({ length: hygSlotCount }, (_, i) => {
+          if (i in ho) {
+            const ovId = ho[i];
+            return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
+          }
+          return assignments.hygienists[i] ?? null;
+        });
+        if (resolvedHygienists.some((e) => e?.id === emp.id)) {
+          working = true; role = "Hygienist"; detail = "";
+        }
       }
 
       if (!working) return null;
