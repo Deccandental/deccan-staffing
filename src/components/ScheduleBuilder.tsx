@@ -1,12 +1,7 @@
 "use client";
 
-<<<<<<< HEAD
-import { useState, useEffect, useMemo, useRef } from "react";
-import { loadStaff } from "@/lib/staffStore";
-=======
 import { useState, useEffect, useMemo } from "react";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
->>>>>>> a9ff4a01520111d0a781104f3902757fe47c5ee4
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getWeekday } from "@/lib/dateUtils";
@@ -312,11 +307,6 @@ export default function ScheduleBuilder() {
   const hygienistOverrides = selectedDate && schedule[selectedDate] ? (schedule[selectedDate].hygienistOverrides ?? {}) : {};
 
   const selectedAssignments = useMemo(() => {
-<<<<<<< HEAD
-    if (!selectedDate || !staffLoaded || !scheduleLoaded) return undefined;
-    return buildDailyAssignments(staff, workingDentists, selectedDate);
-  }, [staff, workingDentists, selectedDate, schedule]);
-=======
     if (!selectedDate) return undefined;
     const day = openDays.find((d) => d.date === selectedDate);
     const isOpenTuesday = day?.isTuesday && day?.isOpenTuesday ? true : false;
@@ -324,7 +314,6 @@ export default function ScheduleBuilder() {
     const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
     return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday, fdr, hr);
   }, [staff, workingDentists, selectedDate, schedule, prefs, overrides, openDays]);
->>>>>>> a9ff4a01520111d0a781104f3902757fe47c5ee4
 
   function prevMonth() {
     if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1);
