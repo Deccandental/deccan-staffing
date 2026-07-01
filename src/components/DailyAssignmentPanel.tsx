@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { DailyAssignmentsResult } from "@/lib/assignmentEngine";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
+import { AssistantOverrides } from "@/lib/scheduleStore";
+import { resolveDentistAssistants, getDentistSlotOverrides, setDentistSlotOverride, clearDentistSlotOverride } from "@/lib/assistantSlots";
 import { TempStaff } from "@/app/temps/page";
 import { TempAssignment, getTempAssignments, addTempAssignment, removeTempAssignment } from "@/lib/tempAssignments";
 import { supabase } from "@/lib/supabase";
@@ -11,8 +13,10 @@ import { supabase } from "@/lib/supabase";
 interface Props {
   selectedDate: string;
   assignments?: DailyAssignmentsResult;
-  assistantOverrides?: Record<number, number | null>;
-  onOverrideChange?: (overrides: Record<number, number | null>) => void;
+  assistantOverrides?: AssistantOverrides;
+  onOverrideChange?: (overrides: AssistantOverrides) => void;
+  assistantCounts?: Record<number, number>;
+  onAssistantCountChange?: (dentistId: number, count: number) => void;
   hygienistsRequired?: number;
   hygienistOverrides?: Record<number, number | null>;
   onHygienistOverrideChange?: (overrides: Record<number, number | null>) => void;
@@ -38,12 +42,13 @@ async function loadTemps(): Promise<TempStaff[]> {
 
 export default function DailyAssignmentPanel({
   selectedDate, assignments = EMPTY, assistantOverrides = {}, onOverrideChange,
+  assistantCounts = {}, onAssistantCountChange,
   hygienistsRequired, hygienistOverrides = {}, onHygienistOverrideChange,
   onTempAssignmentsChange,
 }: Props) {
-  const [overrides, setOverrides] = useState<Record<number, number | null>>(assistantOverrides);
+  const [overrides, setOverrides] = useState<AssistantOverrides>(assistantOverrides);
   const [hygOverrides, setHygOverrides] = useState<Record<number, number | null>>(hygienistOverrides);
-  const [swapping, setSwapping] = useState<number | null>(null);
+  const [swapping, setSwapping] = useState<{ dentistId: number; slotIndex: number } | null>(null);
   const [hygSwapping, setHygSwapping] = useState<number | null>(null);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [temps, setTemps] = useState<TempStaff[]>([]);
@@ -76,31 +81,45 @@ export default function DailyAssignmentPanel({
       })
     : "";
 
-  function getAssistant(dentistId: number, defaultAssistant: Employee | null): Employee | null {
-    if (dentistId in overrides) {
-      const ovId = overrides[dentistId];
-      return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
-    }
-    return defaultAssistant;
+  // Resolves the full, ordered list of assistants for one dentist, applying
+  // any manual per-slot overrides on top of the engine's auto-assignment.
+  function getResolvedSlots(dentistId: number): (Employee | null)[] {
+    const autoAssigned = assignments.dentists.find((d) => d.dentist.id === dentistId)?.assistants ?? [];
+    return resolveDentistAssistants(dentistId, autoAssigned, assistantCounts, overrides, staff);
   }
 
-  // Available assistants for this dentist. We only exclude people currently
-  // working as a hygienist today, since that's a different role with no
-  // automatic swap. Assistants already assigned to ANOTHER dentist are still
-  // shown — picking one triggers a true swap (see handleOverride) instead of
-  // creating a duplicate.
-  function getAvailableAssistantsFor(dentistId: number): Employee[] {
+  // Available assistants for a specific dentist slot. Excludes people
+  // currently working as a hygienist today (cross-role conflict, no auto
+  // swap), and excludes anyone already filling ANOTHER slot for this SAME
+  // dentist (no point offering a duplicate). Assistants already assigned to
+  // a DIFFERENT dentist are still shown — picking one triggers a true swap
+  // (see handleOverride) instead of creating a duplicate.
+  function getAvailableAssistantsFor(dentistId: number, excludingSlot: number): Employee[] {
     const hygienistIds = new Set(resolvedHygienists.map((h) => h.id));
-    return staff.filter((e) => e.skills.includes("Assistant") && !hygienistIds.has(e.id));
+    const sameDentistOtherSlots = new Set(
+      getResolvedSlots(dentistId)
+        .filter((_, i) => i !== excludingSlot)
+        .filter(Boolean)
+        .map((e) => (e as Employee).id)
+    );
+    return staff.filter((e) => e.skills.includes("Assistant") && !hygienistIds.has(e.id) && !sameDentistOtherSlots.has(e.id));
   }
 
-  // For showing "(currently with Dr. X)" hints in the swap dropdown.
-  function getCurrentDentistFor(assistantId: number, excludingDentistId: number): Employee | null {
-    const match = assignments.dentists.find(({ dentist, assistant }) => {
-      if (dentist.id === excludingDentistId) return false;
-      return getAssistant(dentist.id, assistant)?.id === assistantId;
-    });
-    return match ? match.dentist : null;
+  // For showing "(currently with Dr. X)" hints in the swap dropdown — scans
+  // every dentist's every slot except the one being edited.
+  function getCurrentAssignmentFor(
+    assistantId: number,
+    excludingDentistId: number,
+    excludingSlot: number
+  ): { dentist: Employee; slotIndex: number } | null {
+    for (const { dentist } of assignments.dentists) {
+      const slots = getResolvedSlots(dentist.id);
+      for (let i = 0; i < slots.length; i++) {
+        if (dentist.id === excludingDentistId && i === excludingSlot) continue;
+        if (slots[i]?.id === assistantId) return { dentist, slotIndex: i };
+      }
+    }
+    return null;
   }
 
   // Hygienist slots: independent "seats" (0-indexed, up to hygienistsRequired)
@@ -126,9 +145,8 @@ export default function DailyAssignmentPanel({
   // swap (see handleHygOverride) instead of creating a duplicate.
   function getAvailableHygienistsFor(slotIndex: number): Employee[] {
     const assistantIds = new Set<number>();
-    assignments.dentists.forEach(({ dentist, assistant }) => {
-      const resolved = getAssistant(dentist.id, assistant);
-      if (resolved) assistantIds.add(resolved.id);
+    assignments.dentists.forEach(({ dentist }) => {
+      getResolvedSlots(dentist.id).forEach((a) => { if (a) assistantIds.add(a.id); });
     });
     return staff.filter((e) => (e.role === "Hygienist" || e.skills.includes("Hygienist")) && !assistantIds.has(e.id));
   }
@@ -167,32 +185,29 @@ export default function DailyAssignmentPanel({
     onHygienistOverrideChange?.(newHygOverrides);
   }
 
-  function handleOverride(dentistId: number, value: string) {
+  function handleOverride(dentistId: number, slotIndex: number, value: string) {
     const newAssistantId = value ? Number(value) : null;
-    const newOverrides = { ...overrides };
+    let newOverrides = overrides;
 
     if (newAssistantId !== null) {
-      // If this assistant is already assigned to a different dentist today,
-      // swap: give that dentist whoever dentistId currently has, instead of
-      // leaving them both pointing at the same person.
-      const currentPair = assignments.dentists.find((d) => d.dentist.id === dentistId);
-      const currentAssistant = currentPair ? getAssistant(dentistId, currentPair.assistant) : null;
-      const conflictingDentist = getCurrentDentistFor(newAssistantId, dentistId);
-
-      if (conflictingDentist) {
-        newOverrides[conflictingDentist.id] = currentAssistant ? currentAssistant.id : null;
+      // If this assistant is already filling a different slot (their own or
+      // another dentist's) today, swap: give that slot whoever is currently
+      // here, instead of leaving two slots pointing at the same person.
+      const conflict = getCurrentAssignmentFor(newAssistantId, dentistId, slotIndex);
+      if (conflict) {
+        const currentAtThisSlot = getResolvedSlots(dentistId)[slotIndex];
+        newOverrides = setDentistSlotOverride(newOverrides, conflict.dentist.id, conflict.slotIndex, currentAtThisSlot ? currentAtThisSlot.id : null);
       }
     }
 
-    newOverrides[dentistId] = newAssistantId;
+    newOverrides = setDentistSlotOverride(newOverrides, dentistId, slotIndex, newAssistantId);
     setOverrides(newOverrides);
     setSwapping(null);
     onOverrideChange?.(newOverrides);
   }
 
-  function handleClearOverride(dentistId: number) {
-    const newOverrides = { ...overrides };
-    delete newOverrides[dentistId];
+  function handleClearOverride(dentistId: number, slotIndex: number) {
+    const newOverrides = clearDentistSlotOverride(overrides, dentistId, slotIndex);
     setOverrides(newOverrides);
     onOverrideChange?.(newOverrides);
   }
@@ -237,11 +252,12 @@ export default function DailyAssignmentPanel({
     tempsByRole[ta.role].push({ assignment: ta, temp: temps.find((t) => t.id === ta.tempId) });
   }
 
-  // Determine which dentists still need an assistant (no override, no temp)
+  // Determine which dentists still need at least one assistant (some empty
+  // slot, no override filling it, no temp covering the dentist).
   const dentistsStillNeedingAssistant = assignments.dentists.filter((d) => {
-    const hasOverride = d.dentist.id in overrides;
     const hasTemp = tempAssignments.some((ta) => ta.role === "Assistant" && ta.notes === `dentist:${d.dentist.id}`);
-    return !d.assistant && !hasOverride && !hasTemp;
+    if (hasTemp) return false;
+    return getResolvedSlots(d.dentist.id).some((slot) => slot === null);
   });
 
   const hygienistStillNeeded = resolvedHygienists.length === 0 && hygSlotCount > 0 && (tempsByRole["Hygienist"]?.length ?? 0) === 0 && assignments.dentists.length > 0;
@@ -256,8 +272,8 @@ export default function DailyAssignmentPanel({
       const dentistMatch = assignments.dentists.find((d) => w.message.includes(d.dentist.name));
       if (dentistMatch) {
         const hasTemp = tempAssignments.some((ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentistMatch.dentist.id}`);
-        const hasOverride = dentistMatch.dentist.id in overrides;
-        return !hasTemp && !hasOverride;
+        const hasAnyOverride = Object.keys(getDentistSlotOverrides(overrides, dentistMatch.dentist.id)).length > 0;
+        return !hasTemp && !hasAnyOverride;
       }
       // General assistant shortage warning
       return dentistsStillNeedingAssistant.length > 0;
@@ -408,10 +424,11 @@ export default function DailyAssignmentPanel({
         {assignments.dentists.length === 0 ? (
           <p className="text-sm text-slate-400">No dentists selected.</p>
         ) : (
-          <div className="space-y-2">
-            {assignments.dentists.map(({ dentist, assistant }) => {
-              const resolvedAssistant = getAssistant(dentist.id, assistant);
-              const isOverridden = dentist.id in overrides;
+          <div className="space-y-3">
+            {assignments.dentists.map(({ dentist }) => {
+              const count = Math.max(0, assistantCounts[dentist.id] ?? 1);
+              const resolvedSlots = getResolvedSlots(dentist.id);
+              const slotOverrides = getDentistSlotOverrides(overrides, dentist.id);
 
               const tempForDentist = tempAssignments.find(
                 (ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`
@@ -420,70 +437,97 @@ export default function DailyAssignmentPanel({
 
               return (
                 <div key={dentist.id} className="rounded-lg bg-slate-50 px-3 py-2">
-                  <div className="flex items-center justify-between">
+                  <div className="mb-2 flex items-center justify-between">
                     <span className="flex items-center gap-2 font-medium text-sm">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dentist.color }} />
+                      <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: dentist.color }} />
                       {dentist.name}
                     </span>
-                    <div className="flex items-center gap-2">
-                      {swapping === dentist.id ? (
-                        <div className="flex items-center gap-1">
-                          <select className="rounded border border-slate-200 px-2 py-1 text-xs"
-                            defaultValue={resolvedAssistant?.id ?? ""}
-                            onChange={(e) => handleOverride(dentist.id, e.target.value)}>
-                            <option value="">No Assistant</option>
-                            {getAvailableAssistantsFor(dentist.id).map((a) => {
-                              const currentlyWith = getCurrentDentistFor(a.id, dentist.id);
-                              return (
-                                <option key={a.id} value={a.id}>
-                                  {a.name}{currentlyWith ? ` (swap with ${currentlyWith.name})` : ""}
-                                </option>
-                              );
-                            })}
-                          </select>
-                          <button onClick={() => setSwapping(null)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
+                    <div className="flex items-center gap-1">
+                      <span className="mr-1 text-xs text-slate-400">Assistants</span>
+                      {[0, 1, 2, 3].map((n) => (
+                        <button key={n} onClick={() => onAssistantCountChange?.(dentist.id, n)}
+                          className="rounded px-2 py-0.5 text-xs font-semibold transition"
+                          style={count === n ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {count === 0 && !tempName && (
+                    <p className="pl-4 text-xs text-slate-400">No assistant needed today</p>
+                  )}
+
+                  <div className="space-y-1.5">
+                    {resolvedSlots.map((resolvedAssistant, slotIndex) => {
+                      const isOverridden = slotIndex in slotOverrides;
+                      const isSwapping = swapping?.dentistId === dentist.id && swapping?.slotIndex === slotIndex;
+                      return (
+                        <div key={slotIndex} className="flex items-center justify-between pl-4">
+                          {count > 1 && <span className="w-14 flex-shrink-0 text-xs text-slate-400">#{slotIndex + 1}</span>}
+                          <div className="ml-auto flex items-center gap-2">
+                            {isSwapping ? (
+                              <div className="flex items-center gap-1">
+                                <select className="rounded border border-slate-200 px-2 py-1 text-xs"
+                                  defaultValue={resolvedAssistant?.id ?? ""}
+                                  onChange={(e) => handleOverride(dentist.id, slotIndex, e.target.value)}>
+                                  <option value="">No Assistant</option>
+                                  {getAvailableAssistantsFor(dentist.id, slotIndex).map((a) => {
+                                    const conflict = getCurrentAssignmentFor(a.id, dentist.id, slotIndex);
+                                    return (
+                                      <option key={a.id} value={a.id}>
+                                        {a.name}{conflict ? ` (swap with ${conflict.dentist.name})` : ""}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                                <button onClick={() => setSwapping(null)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
+                              </div>
+                            ) : (
+                              <>
+                                <span className={`text-sm flex items-center gap-1.5 ${resolvedAssistant ? "text-slate-600" : "text-amber-500"}`}>
+                                  {resolvedAssistant ? (
+                                    <>
+                                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: resolvedAssistant.color }} />
+                                      {resolvedAssistant.name}
+                                      {isOverridden && (
+                                        <button onClick={() => handleClearOverride(dentist.id, slotIndex)} className="text-xs text-cyan-500 ml-1 hover:text-red-400">
+                                          (manual ✕)
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : "No Assistant"}
+                                </span>
+                                <button onClick={() => setSwapping({ dentistId: dentist.id, slotIndex })}
+                                  className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
+                                  swap
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </div>
-                      ) : (
+                      );
+                    })}
+
+                    <div className="flex items-center justify-between pl-4">
+                      {tempName ? (
                         <>
-                          <span className={`text-sm flex items-center gap-1.5 ${resolvedAssistant || tempName ? "text-slate-600" : "text-amber-500"}`}>
-                            {tempName ? (
-                              <>
-                                <span className="h-2 w-2 rounded-full bg-teal-400" />
-                                {tempName} <span className="text-xs text-teal-500">(temp)</span>
-                              </>
-                            ) : resolvedAssistant ? (
-                              <>
-                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: resolvedAssistant.color }} />
-                                {resolvedAssistant.name}
-                                {isOverridden && (
-                                  <button onClick={() => handleClearOverride(dentist.id)} className="text-xs text-cyan-500 ml-1 hover:text-red-400">
-                                    (manual ✕)
-                                  </button>
-                                )}
-                              </>
-                            ) : "No Assistant"}
+                          <span className="text-sm flex items-center gap-1.5 text-slate-600">
+                            <span className="h-2 w-2 rounded-full bg-teal-400" />
+                            {tempName} <span className="text-xs text-teal-500">(temp)</span>
                           </span>
-                          {!tempName && (
-                            <div className="flex gap-1">
-                              <button onClick={() => setSwapping(dentist.id)}
-                                className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
-                                swap
-                              </button>
-                              <button onClick={() => { setAssigningRole("Assistant"); setSelectedDentistId(dentist.id); setSelectedTempId(""); }}
-                                className="rounded px-1.5 py-0.5 text-xs text-teal-400 hover:bg-teal-50 hover:text-teal-600 transition">
-                                + temp
-                              </button>
-                            </div>
-                          )}
-                          {tempName && (
-                            <button onClick={() => {
-                              const ta = tempAssignments.find((t) => t.role === "Assistant" && t.notes === `dentist:${dentist.id}`);
-                              if (ta) handleRemoveTemp(ta.id);
-                            }} className="text-xs text-red-400 hover:text-red-600 rounded px-1.5 py-0.5 transition">
-                              remove
-                            </button>
-                          )}
+                          <button onClick={() => {
+                            const ta = tempAssignments.find((t) => t.role === "Assistant" && t.notes === `dentist:${dentist.id}`);
+                            if (ta) handleRemoveTemp(ta.id);
+                          }} className="text-xs text-red-400 hover:text-red-600 rounded px-1.5 py-0.5 transition">
+                            remove
+                          </button>
                         </>
+                      ) : (
+                        <button onClick={() => { setAssigningRole("Assistant"); setSelectedDentistId(dentist.id); setSelectedTempId(""); }}
+                          className="rounded px-1.5 py-0.5 text-xs text-teal-400 hover:bg-teal-50 hover:text-teal-600 transition">
+                          + temp
+                        </button>
                       )}
                     </div>
                   </div>
