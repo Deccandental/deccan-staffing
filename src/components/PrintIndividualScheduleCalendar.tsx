@@ -43,7 +43,8 @@ export default function PrintIndividualScheduleCalendar({ year, month, schedule 
       day.isTuesday && day.isOpenTuesday,
       daySched.frontDeskRequired ?? 2,
       daySched.hygienistsRequired ?? 1,
-      daySched.assistantCounts ?? {}
+      daySched.assistantCounts ?? {},
+      daySched.floaterAssistantId ?? null
     );
 
     const tempName = (tempId: string) => temps.find((t) => t.id === tempId)?.name ?? "Temp";
@@ -66,6 +67,8 @@ export default function PrintIndividualScheduleCalendar({ year, month, schedule 
         return resolved.some((a) => a?.id === emp.id);
       });
       if (directPair) return { label: "Assistant", detail: `w/ ${directPair.dentist.name}` };
+
+      if (daySched.floaterAssistantId === emp.id) return { label: "Floater", detail: "Extra coverage for the day" };
 
       const onFD = assignments.frontDesk.find((e) => e.id === emp.id);
       if (onFD) return { label: "Front Desk", detail: "" };

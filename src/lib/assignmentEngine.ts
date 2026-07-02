@@ -22,7 +22,8 @@ export function buildDailyAssignments(
   isOpenTuesday: boolean = false,
   frontDeskRequired: number = 2,
   hygienistsRequired: number = 1,
-  assistantCounts: Record<number, number> = {}
+  assistantCounts: Record<number, number> = {},
+  floaterAssistantId: number | null = null
 ): DailyAssignmentsResult {
   const weekday = date ? getWeekday(date) : null;
   const warnings: AssignmentWarning[] = [];
@@ -80,6 +81,9 @@ export function buildDailyAssignments(
   );
 
   const assignedIds = new Set<number>(frontDesk.map((e) => e.id));
+  // The Floater is already committed for the day — exclude them from the
+  // pool so the engine can't also auto-assign them to a dentist or hygiene.
+  if (floaterAssistantId != null) assignedIds.add(floaterAssistantId);
   const allAssistants = employees.filter(
     (e) => e.skills.includes("Assistant") && isAvailable(e) && !assignedIds.has(e.id)
   );

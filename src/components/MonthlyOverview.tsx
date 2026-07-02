@@ -10,6 +10,7 @@ export interface DayAssignmentSummary {
   dentists: { id: number; name: string; color: string; assistantName: string | null }[];
   frontDesk: string[];
   hygienists: string[];
+  floater?: string | null;
 }
 
 interface Props {
@@ -110,6 +111,12 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
                     <div className="truncate text-[9px] leading-tight">
                       <span className={`font-semibold ${isSelected ? "text-cyan-100" : "text-emerald-600"}`}>Hyg:</span>{" "}
                       <span className={isSelected ? "text-cyan-50" : "text-slate-500"}>{info.hygienists.join("/")}</span>
+                    </div>
+                  )}
+                  {info.floater && (
+                    <div className="truncate text-[9px] leading-tight">
+                      <span className={`font-semibold ${isSelected ? "text-cyan-100" : "text-slate-500"}`}>Float:</span>{" "}
+                      <span className={isSelected ? "text-cyan-50" : "text-slate-500"}>{info.floater}</span>
                     </div>
                   )}
                 </div>
