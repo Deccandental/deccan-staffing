@@ -7,6 +7,7 @@ import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { loadHolidays, Holiday } from "@/lib/holidays";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
+import { resolveDentistAssistants } from "@/lib/assistantSlots";
 import { Employee } from "@/types/employee";
 import { MonthSchedule } from "@/lib/scheduleStore";
 
@@ -42,7 +43,8 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
         staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday,
         daySched.frontDeskRequired ?? 2,
-        daySched.hygienistsRequired ?? 1
+        daySched.hygienistsRequired ?? 1,
+        daySched.assistantCounts ?? {}
       );
       const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric",
@@ -52,25 +54,19 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
       let working = false;
 
       const ao = daySched.assistantOverrides ?? {};
+      const ac = daySched.assistantCounts ?? {};
 
       if (emp.role === "Dentist") {
         const pair = assignments.dentists.find((d) => d.dentist.id === emp.id);
         if (pair) {
           working = true; role = "Dentist";
-          let assistant = pair.assistant;
-          if (pair.dentist.id in ao) {
-            const ovId = ao[pair.dentist.id];
-            assistant = ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
-          }
-          detail = assistant ? `Assistant: ${assistant.name}` : "No assistant assigned";
+          const resolved = resolveDentistAssistants(pair.dentist.id, pair.assistants, ac, ao, staff).filter(Boolean) as Employee[];
+          detail = resolved.length > 0 ? `Assistant: ${resolved.map((a) => a.name).join(", ")}` : "No assistant assigned";
         }
       } else if (emp.skills.includes("Assistant") || emp.role === "RDA") {
         const pair = assignments.dentists.find((d) => {
-          if (d.dentist.id in ao) {
-            const ovId = ao[d.dentist.id];
-            return ovId === emp.id;
-          }
-          return d.assistant?.id === emp.id;
+          const resolved = resolveDentistAssistants(d.dentist.id, d.assistants, ac, ao, staff);
+          return resolved.some((a) => a?.id === emp.id);
         });
         const onFD = assignments.frontDesk.find((e) => e.id === emp.id);
         if (pair) { working = true; role = emp.role; detail = `With: ${pair.dentist.name}`; }
