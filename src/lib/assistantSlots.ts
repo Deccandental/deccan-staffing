@@ -70,15 +70,3 @@ export function clearDentistSlotOverride(
   delete current[slotIndex];
   return { ...overrides, [dentistId]: current };
 }
-
-/**
- * Resolves the day's Floater — one extra assistant added for the day as a
- * whole, not tied to any specific dentist — from their stored id.
- */
-export function resolveFloater(
-  floaterAssistantId: number | null | undefined,
-  staff: Employee[]
-): Employee | null {
-  if (floaterAssistantId == null) return null;
-  return staff.find((e) => e.id === floaterAssistantId) ?? null;
-}

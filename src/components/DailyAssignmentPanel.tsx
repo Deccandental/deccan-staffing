@@ -5,7 +5,7 @@ import { DailyAssignmentsResult } from "@/lib/assignmentEngine";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
 import { AssistantOverrides } from "@/lib/scheduleStore";
-import { resolveDentistAssistants, resolveFloater, getDentistSlotOverrides, setDentistSlotOverride, clearDentistSlotOverride } from "@/lib/assistantSlots";
+import { resolveDentistAssistants, getDentistSlotOverrides, setDentistSlotOverride, clearDentistSlotOverride } from "@/lib/assistantSlots";
 import { TempStaff } from "@/app/temps/page";
 import { TempAssignment, getTempAssignments, addTempAssignment, removeTempAssignment } from "@/lib/tempAssignments";
 import { supabase } from "@/lib/supabase";
@@ -20,8 +20,6 @@ interface Props {
   hygienistsRequired?: number;
   hygienistOverrides?: Record<number, number | null>;
   onHygienistOverrideChange?: (overrides: Record<number, number | null>) => void;
-  floaterAssistantId?: number | null;
-  onFloaterChange?: (assistantId: number | null) => void;
   onTempAssignmentsChange?: (date: string, assignments: TempAssignment[]) => void;
 }
 
@@ -46,14 +44,11 @@ export default function DailyAssignmentPanel({
   selectedDate, assignments = EMPTY, assistantOverrides = {}, onOverrideChange,
   assistantCounts = {}, onAssistantCountChange,
   hygienistsRequired, hygienistOverrides = {}, onHygienistOverrideChange,
-  floaterAssistantId = null, onFloaterChange,
   onTempAssignmentsChange,
 }: Props) {
   const [overrides, setOverrides] = useState<AssistantOverrides>(assistantOverrides);
   const [hygOverrides, setHygOverrides] = useState<Record<number, number | null>>(hygienistOverrides);
-  const [floaterId, setFloaterId] = useState<number | null>(floaterAssistantId);
   const [swapping, setSwapping] = useState<{ dentistId: number; slotIndex: number } | null>(null);
-  const [floaterSwapping, setFloaterSwapping] = useState(false);
   const [hygSwapping, setHygSwapping] = useState<number | null>(null);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [temps, setTemps] = useState<TempStaff[]>([]);
@@ -70,9 +65,7 @@ export default function DailyAssignmentPanel({
   useEffect(() => {
     setOverrides(assistantOverrides);
     setHygOverrides(hygienistOverrides);
-    setFloaterId(floaterAssistantId);
     setSwapping(null);
-    setFloaterSwapping(false);
     setHygSwapping(null);
     setAssigningRole(null);
     setSelectedTempId("");
@@ -80,7 +73,7 @@ export default function DailyAssignmentPanel({
     if (selectedDate) {
       getTempAssignments(selectedDate).then(setTempAssignments);
     }
-  }, [selectedDate, JSON.stringify(assistantOverrides), JSON.stringify(hygienistOverrides), floaterAssistantId]);
+  }, [selectedDate, JSON.stringify(assistantOverrides), JSON.stringify(hygienistOverrides)]);
 
   const dateLabel = selectedDate
     ? new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
@@ -109,9 +102,7 @@ export default function DailyAssignmentPanel({
         .filter(Boolean)
         .map((e) => (e as Employee).id)
     );
-    return staff.filter((e) =>
-      e.skills.includes("Assistant") && !hygienistIds.has(e.id) && !sameDentistOtherSlots.has(e.id) && e.id !== resolvedFloater?.id
-    );
+    return staff.filter((e) => e.skills.includes("Assistant") && !hygienistIds.has(e.id) && !sameDentistOtherSlots.has(e.id));
   }
 
   // For showing "(currently with Dr. X)" hints in the swap dropdown — scans
@@ -147,34 +138,6 @@ export default function DailyAssignmentPanel({
   }
 
   const resolvedHygienists = Array.from({ length: hygSlotCount }, (_, i) => getHygienist(i)).filter(Boolean) as Employee[];
-
-  // Today's Floater — one extra assistant added for the day, independent of
-  // any dentist. Resolved from the stored id, defaulting to none.
-  const resolvedFloater = resolveFloater(floaterId, staff);
-
-  // Available assistants for the Floater slot. Excludes hygienists and
-  // anyone already assisting a dentist today, so the Floater represents
-  // genuinely extra coverage rather than a duplicate assignment.
-  function getAvailableAssistantsForFloater(): Employee[] {
-    const hygienistIds = new Set(resolvedHygienists.map((h) => h.id));
-    const dentistAssistantIds = new Set<number>();
-    assignments.dentists.forEach(({ dentist }) => {
-      getResolvedSlots(dentist.id).forEach((a) => { if (a) dentistAssistantIds.add(a.id); });
-    });
-    return staff.filter((e) => e.skills.includes("Assistant") && !hygienistIds.has(e.id) && !dentistAssistantIds.has(e.id));
-  }
-
-  function handleFloaterChange(value: string) {
-    const newId = value ? Number(value) : null;
-    setFloaterId(newId);
-    setFloaterSwapping(false);
-    onFloaterChange?.(newId);
-  }
-
-  function handleRemoveFloater() {
-    setFloaterId(null);
-    onFloaterChange?.(null);
-  }
 
   // Available hygienists for a slot. Exclude people currently working as an
   // assistant today (cross-role conflict, no auto swap). People already in
@@ -667,52 +630,6 @@ export default function DailyAssignmentPanel({
               </div>
             ))}
           </div>
-        )}
-      </section>
-
-      <section className="mb-4 rounded-xl border p-4">
-        <h3 className="mb-3 font-semibold text-slate-700">Floater</h3>
-        {resolvedFloater || floaterSwapping ? (
-          <div className="rounded-lg bg-slate-50 px-3 py-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-400">Extra assistant for the day</span>
-              <div className="flex items-center gap-2">
-                {floaterSwapping ? (
-                  <div className="flex items-center gap-1">
-                    <select className="rounded border border-slate-200 px-2 py-1 text-xs"
-                      defaultValue={resolvedFloater?.id ?? ""}
-                      onChange={(e) => handleFloaterChange(e.target.value)}>
-                      <option value="">No Floater</option>
-                      {getAvailableAssistantsForFloater().map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
-                    </select>
-                    <button onClick={() => setFloaterSwapping(false)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
-                  </div>
-                ) : (
-                  <>
-                    <span className="text-sm flex items-center gap-1.5 text-slate-600">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: resolvedFloater?.color }} />
-                      {resolvedFloater?.name}
-                    </span>
-                    <button onClick={() => setFloaterSwapping(true)}
-                      className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
-                      swap
-                    </button>
-                    <button onClick={handleRemoveFloater}
-                      className="rounded px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-50 hover:text-red-600 transition">
-                      remove
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <button onClick={() => setFloaterSwapping(true)}
-            className="rounded-lg border border-dashed px-3 py-2 text-sm text-slate-400 hover:border-slate-300 hover:text-slate-600 transition w-full text-left">
-            + Add Floater for the day
-          </button>
         )}
       </section>
     </div>

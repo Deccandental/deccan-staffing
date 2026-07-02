@@ -20,11 +20,6 @@ export type DaySchedule = {
   // for that dentist — keeps this fully backward compatible with existing
   // saved rows that predate this field.
   assistantCounts?: Record<number, number>;
-  // The day's Floater: one extra assistant added for the day as a whole,
-  // not tied to any specific dentist. Absent/undefined or null means no
-  // Floater is assigned that day. Purely additive on top of the per-dentist
-  // assistantCounts/assistantOverrides mechanism above.
-  floaterAssistantId?: number | null;
 };
 export type MonthSchedule = Record<string, DaySchedule>;
 
@@ -36,7 +31,7 @@ export async function loadSchedule(year: number, month: number): Promise<MonthSc
   const key = monthKey(year, month);
   const { data, error } = await supabase
     .from("schedules")
-    .select("date, dentists, front_desk_required, hygienists_required, assistant_overrides, hygienist_overrides, assistant_counts, floater_assistant_id")
+    .select("date, dentists, front_desk_required, hygienists_required, assistant_overrides, hygienist_overrides, assistant_counts")
     .like("date", `${key}-%`);
   if (error) { console.error("loadSchedule error:", error); return {}; }
   const schedule: MonthSchedule = {};
@@ -48,7 +43,6 @@ export async function loadSchedule(year: number, month: number): Promise<MonthSc
       assistantOverrides: row.assistant_overrides ?? {},
       hygienistOverrides: row.hygienist_overrides ?? {},
       assistantCounts: row.assistant_counts ?? {},
-      floaterAssistantId: row.floater_assistant_id ?? null,
     };
   }
   return schedule;
@@ -61,14 +55,13 @@ export async function saveDaySchedule(
   hygienistsRequired: number = 1,
   assistantOverrides: AssistantOverrides = {},
   hygienistOverrides: Record<number, number | null> = {},
-  assistantCounts: Record<number, number> = {},
-  floaterAssistantId: number | null = null
+  assistantCounts: Record<number, number> = {}
 ): Promise<void> {
   const { error } = await supabase.from("schedules").upsert(
     {
       date, dentists, front_desk_required: frontDeskRequired, hygienists_required: hygienistsRequired,
       assistant_overrides: assistantOverrides, hygienist_overrides: hygienistOverrides,
-      assistant_counts: assistantCounts, floater_assistant_id: floaterAssistantId,
+      assistant_counts: assistantCounts,
     },
     { onConflict: "date" }
   );
