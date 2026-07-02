@@ -394,6 +394,16 @@ export default function PublicCalendar() {
                         </div>
                       );
                     })()}
+                    {info.floater && (() => {
+                      const rowMatch = info.floater.id === highlightId;
+                      const rowDim = highlightId !== null && !rowMatch;
+                      return (
+                        <div className="text-sm leading-snug truncate" style={{ opacity: rowDim ? 0.25 : 1 }}>
+                          <span className="font-bold text-slate-500">Float:</span>{" "}
+                          <span className={`text-slate-600 font-medium ${rowMatch ? "bg-cyan-100 text-cyan-800 rounded px-1" : ""}`}>{info.floater.name}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ) : (
                   !loading && (
