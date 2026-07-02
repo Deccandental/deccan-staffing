@@ -42,6 +42,7 @@ interface DayInfo {
   dentists: DentistInfo[];
   frontDesk: PersonChip[];
   hygienists: PersonChip[];
+  floater: PersonChip | null;
 }
 
 async function loadTemps(): Promise<TempStaff[]> {
@@ -112,7 +113,7 @@ export default function PublicCalendar() {
       const assignments = buildDailyAssignments(
         staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday, frontDeskRequired, hygienistsRequired,
-        daySched.assistantCounts ?? {}
+        daySched.assistantCounts ?? {}, daySched.floaterAssistantId ?? null
       );
 
       const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);
@@ -147,7 +148,10 @@ export default function PublicCalendar() {
       ];
       if (hygienists.length === 0 && hygienistsRequired > 0) hygienists.push({ id: null, name: "???" });
 
-      result[day.date] = { dentists, frontDesk, hygienists };
+      const floaterEmp = daySched.floaterAssistantId != null ? staff.find((e) => e.id === daySched.floaterAssistantId) : null;
+      const floater: PersonChip | null = floaterEmp ? { id: floaterEmp.id, name: firstName(floaterEmp.name) } : null;
+
+      result[day.date] = { dentists, frontDesk, hygienists, floater };
     }
     return result;
   }, [days, schedule, staff, prefs, overrides, monthTempAssignments, temps]);
@@ -159,6 +163,7 @@ export default function PublicCalendar() {
     if (info.dentists.some((d) => d.id === highlightId || d.assistantIds.includes(highlightId))) return true;
     if (info.frontDesk.some((c) => c.id === highlightId)) return true;
     if (info.hygienists.some((c) => c.id === highlightId)) return true;
+    if (info.floater?.id === highlightId) return true;
     return false;
   }
 
@@ -194,6 +199,7 @@ export default function PublicCalendar() {
       const assistantPair = selectedInfo.dentists.find((d) => d.assistantIds.includes(highlightId));
       const onFront = selectedInfo.frontDesk.find((c) => c.id === highlightId);
       const onHyg = selectedInfo.hygienists.find((c) => c.id === highlightId);
+      const onFloater = selectedInfo.floater?.id === highlightId;
 
       let roleLabel = "";
       let detail = "";
@@ -202,6 +208,7 @@ export default function PublicCalendar() {
       else if (assistantPair) { roleLabel = "Assistant"; detail = `w/ ${assistantPair.name}`; }
       else if (onFront) { roleLabel = "Front Desk"; }
       else if (onHyg) { roleLabel = "Hygienist"; }
+      else if (onFloater) { roleLabel = "Floater"; detail = "Extra coverage for the day"; }
       else {
         return (
           <div className="rounded-2xl bg-white p-5 shadow mt-4">
@@ -249,6 +256,12 @@ export default function PublicCalendar() {
             <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5">
               <span className="text-xs font-bold text-emerald-600 w-12 flex-shrink-0">Hyg</span>
               <span className="text-sm text-slate-600">{selectedInfo.hygienists.map((c) => c.name).join(" / ")}</span>
+            </div>
+          )}
+          {selectedInfo.floater && (
+            <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5">
+              <span className="text-xs font-bold text-slate-500 w-12 flex-shrink-0">Float</span>
+              <span className="text-sm text-slate-600">{selectedInfo.floater.name}</span>
             </div>
           )}
         </div>

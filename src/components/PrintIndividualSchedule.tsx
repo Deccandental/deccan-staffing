@@ -44,7 +44,8 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
         day.isTuesday && day.isOpenTuesday,
         daySched.frontDeskRequired ?? 2,
         daySched.hygienistsRequired ?? 1,
-        daySched.assistantCounts ?? {}
+        daySched.assistantCounts ?? {},
+        daySched.floaterAssistantId ?? null
       );
       const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric",
@@ -70,6 +71,7 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
         });
         const onFD = assignments.frontDesk.find((e) => e.id === emp.id);
         if (pair) { working = true; role = emp.role; detail = `With: ${pair.dentist.name}`; }
+        else if (daySched.floaterAssistantId === emp.id) { working = true; role = "Floater"; detail = "Extra coverage for the day"; }
         else if (onFD) { working = true; role = "Front Desk"; detail = "Front desk coverage"; }
       } else if (emp.role === "Front Desk") {
         const onFD = assignments.frontDesk.find((e) => e.id === emp.id);

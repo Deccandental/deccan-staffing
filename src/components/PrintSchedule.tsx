@@ -72,7 +72,8 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
         day.isTuesday && day.isOpenTuesday,
         daySched.frontDeskRequired ?? 2,
         daySched.hygienistsRequired ?? 1,
-        daySched.assistantCounts ?? {}
+        daySched.assistantCounts ?? {},
+        daySched.floaterAssistantId ?? null
       );
 
       // Apply assistant overrides (per-slot, supports more than one assistant per dentist)
@@ -123,12 +124,15 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
       const fdNames = [...assignments.frontDesk.map((e) => e.name.split(" ")[0]), ...tempFD].join(", ") || "—";
       const hygNames = [...resolvedHygienists.map((e) => e.name.split(" ")[0]), ...tempHyg].join(", ") || "—";
       const asstTempStr = tempAsst.length > 0 ? `<div class="support-row"><span class="support-label">Temp:</span> ${tempAsst.join(", ")}</div>` : "";
+      const floaterEmp = daySched.floaterAssistantId != null ? staff.find((e) => e.id === daySched.floaterAssistantId) : null;
+      const floaterStr = floaterEmp ? `<div class="support-row"><span class="support-label">Float:</span> ${floaterEmp.name.split(" ")[0]}</div>` : "";
 
       return `
         <td class="day-cell open ${hasWarning ? "has-warning" : "complete"}">
           <div class="day-number ${hasWarning ? "warning-num" : ""}">${day.day}${day.isTuesday ? ' <span class="tue-badge">Tue</span>' : ""}</div>
           <div class="pairings">${pairings}</div>
           ${asstTempStr}
+          ${floaterStr}
           <div class="support-row">
             <span class="support-label">FD:</span> ${fdNames}
           </div>
