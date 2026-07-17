@@ -267,7 +267,8 @@ export default function ScheduleBuilder() {
     }
     for (const day of openDays) {
       const daySched = schedule[day.date];
-      if (!daySched) { statuses[day.date] = "empty"; continue; }
+      if (!daySched || daySched.dentists.length === 0) { statuses[day.date] = "empty"; continue; }
+
       const assignments = buildDailyAssignments(
         staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday,
@@ -276,18 +277,45 @@ export default function ScheduleBuilder() {
         daySched.assistantCounts ?? {},
         daySched.floaterAssistantId ?? null
       );
-      if (assignments.warnings.some((w) => w.severity === "error")) {
-        statuses[day.date] = "warning";
-      } else if (assignments.warnings.length > 0) {
-        statuses[day.date] = "warning";
-      } else if (daySched.dentists.length > 0) {
-        statuses[day.date] = "complete";
-      } else {
-        statuses[day.date] = "empty";
-      }
+
+      // A warning here is only "real" if nothing -- a manual override or a
+      // temp -- has since filled the gap it flagged. Mirrors the same
+      // resolved-by-temp logic used in the Daily Assignments panel, so the
+      // calendar's warning indicator clears once a day is actually covered.
+      const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);
+      const ao = daySched.assistantOverrides ?? {};
+      const ac = daySched.assistantCounts ?? {};
+
+      const dentistsStillShort = assignments.dentists.some(({ dentist, assistants }) => {
+        const hasTemp = tempsForDay.some((ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`);
+        if (hasTemp) return false;
+        return resolveDentistAssistants(dentist.id, assistants, ac, ao, staff).some((slot) => slot === null);
+      });
+
+      const ho = daySched.hygienistOverrides ?? {};
+      const hygienistsRequired = daySched.hygienistsRequired ?? 1;
+      const resolvedHygienistsCount = Array.from({ length: hygienistsRequired }, (_, i) => {
+        if (i in ho) { const ovId = ho[i]; return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null; }
+        return assignments.hygienists[i] ?? null;
+      }).filter(Boolean).length;
+      const tempHygienists = tempsForDay.filter((ta) => ta.role === "Hygienist").length;
+      const hygienistsShort = hygienistsRequired > 0 && resolvedHygienistsCount + tempHygienists < hygienistsRequired;
+
+      const frontDeskRequired = daySched.frontDeskRequired ?? 2;
+      const tempFrontDesk = tempsForDay.filter((ta) => ta.role === "Front Desk").length;
+      const frontDeskShort = frontDeskRequired > 0 && assignments.frontDesk.length + tempFrontDesk < frontDeskRequired;
+
+      const hasOtherErrorWarning = assignments.warnings.some((w) =>
+        w.severity === "error" &&
+        !w.message.includes("assistant") &&
+        !w.message.includes("front desk") &&
+        !w.message.includes("hygienist")
+      );
+
+      statuses[day.date] = dentistsStillShort || hygienistsShort || frontDeskShort || hasOtherErrorWarning ? "warning" : "complete";
     }
     return statuses;
-  }, [schedule, staff, openDays, prefs, overrides]);
+  }, [schedule, staff, openDays, prefs, overrides, monthTempAssignments]);
 
   const completedDays = Object.values(dayStatuses).filter((s) => s === "complete").length;
   const warningDays = Object.values(dayStatuses).filter((s) => s === "warning").length;
