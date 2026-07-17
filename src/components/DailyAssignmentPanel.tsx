@@ -304,6 +304,23 @@ export default function DailyAssignmentPanel({
   const frontDeskFilled = assignments.frontDesk.length + (tempsByRole["Front Desk"]?.length ?? 0);
   const frontDeskStillShort = assignments.warnings.some((w) => w.message.includes("front desk")) && frontDeskFilled < frontDeskRequired;
 
+  // Assign each temp hygienist to the next empty slot (by slot order), so
+  // temps render inline against "Hygienist 1 / 2" instead of in a separate
+  // list below. Any temps beyond the number of empty slots (more temps than
+  // slots available) overflow into an extra list underneath.
+  const hygTemps = tempsByRole["Hygienist"] ?? [];
+  const hygSlotTemps: (typeof hygTemps[number] | undefined)[] = [];
+  let hygTempPointer = 0;
+  for (let i = 0; i < hygSlotCount; i++) {
+    if (getHygienist(i)) {
+      hygSlotTemps.push(undefined);
+    } else {
+      hygSlotTemps.push(hygTemps[hygTempPointer]);
+      if (hygTemps[hygTempPointer]) hygTempPointer++;
+    }
+  }
+  const overflowHygTemps = hygTemps.slice(hygTempPointer);
+
   // Filter warnings to hide ones already resolved by temps
   const visibleWarnings = assignments.warnings.filter((w) => {
     if (w.message.includes("hygienist")) return hygienistStillNeeded;
@@ -613,8 +630,9 @@ export default function DailyAssignmentPanel({
             {Array.from({ length: hygSlotCount }, (_, slotIndex) => {
               const resolved = getHygienist(slotIndex);
               const isOverridden = slotIndex in hygOverrides;
+              const tempFiller = hygSlotTemps[slotIndex];
               return (
-                <div key={slotIndex} className="rounded-lg bg-slate-50 px-3 py-2">
+                <div key={slotIndex} className={`rounded-lg px-3 py-2 ${tempFiller ? "bg-teal-50 border border-teal-100" : "bg-slate-50"}`}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-slate-400">Hygienist {hygSlotCount > 1 ? slotIndex + 1 : ""}</span>
                     <div className="flex items-center gap-2">
@@ -635,6 +653,17 @@ export default function DailyAssignmentPanel({
                           </select>
                           <button onClick={() => setHygSwapping(null)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
                         </div>
+                      ) : tempFiller ? (
+                        <>
+                          <span className="text-sm flex items-center gap-1.5 text-slate-600">
+                            <span className="h-2 w-2 rounded-full bg-teal-400" />
+                            {tempFiller.temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
+                          </span>
+                          <button onClick={() => handleRemoveTemp(tempFiller.assignment.id)}
+                            className="rounded px-1.5 py-0.5 text-xs text-red-400 hover:text-red-600 transition">
+                            remove
+                          </button>
+                        </>
                       ) : (
                         <>
                           <span className={`text-sm flex items-center gap-1.5 ${resolved ? "text-slate-600" : "text-amber-500"}`}>
@@ -661,7 +690,7 @@ export default function DailyAssignmentPanel({
                 </div>
               );
             })}
-            {(tempsByRole["Hygienist"] ?? []).map(({ assignment, temp }) => (
+            {overflowHygTemps.map(({ assignment, temp }) => (
               <div key={assignment.id} className="flex items-center justify-between rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
                 <span className="flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full bg-teal-400" />
