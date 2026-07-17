@@ -53,13 +53,15 @@ export default function PasscodeGate({
     return (
       <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
         <Sidebar />
-        <div className="ml-64 flex items-center justify-center min-h-screen">
-          <div className="rounded-2xl bg-white p-10 shadow-lg w-full max-w-sm text-center">
+        <div className="pt-16 lg:pt-0 lg:ml-64 flex items-center justify-center min-h-screen px-4">
+          <div className="rounded-2xl bg-white p-6 sm:p-10 shadow-lg w-full max-w-sm text-center">
             <div className="text-5xl mb-4">🔐</div>
             <h1 className="text-2xl font-bold mb-1" style={{ color: "#5a5a5a" }}>{title}</h1>
             <p className="text-gray-400 text-sm mb-8">{subtitle}</p>
             <input
               type="password"
+              inputMode="numeric"
+              autoComplete="one-time-code"
               value={passcode}
               onChange={(e) => setPasscode(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handlePasscode()}
