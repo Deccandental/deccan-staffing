@@ -517,6 +517,7 @@ export default function ScheduleBuilder() {
                 hygienistOverrides={hygienistOverrides}
                 onHygienistOverrideChange={handleHygienistOverrideChange}
                 onTempAssignmentsChange={handleTempAssignmentsChange}
+                frontDeskRequired={frontDeskRequired}
               />
             </div>
           ) : (
