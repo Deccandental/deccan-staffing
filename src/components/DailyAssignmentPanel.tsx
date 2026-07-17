@@ -23,6 +23,7 @@ interface Props {
   floaterAssistantId?: number | null;
   onFloaterChange?: (assistantId: number | null) => void;
   onTempAssignmentsChange?: (date: string, assignments: TempAssignment[]) => void;
+  frontDeskRequired?: number;
 }
 
 const EMPTY: DailyAssignmentsResult = { dentists: [], frontDesk: [], hygienists: [], warnings: [] };
@@ -48,6 +49,7 @@ export default function DailyAssignmentPanel({
   hygienistsRequired, hygienistOverrides = {}, onHygienistOverrideChange,
   floaterAssistantId = null, onFloaterChange,
   onTempAssignmentsChange,
+  frontDeskRequired = 2,
 }: Props) {
   const [overrides, setOverrides] = useState<AssistantOverrides>(assistantOverrides);
   const [hygOverrides, setHygOverrides] = useState<Record<number, number | null>>(hygienistOverrides);
@@ -297,8 +299,10 @@ export default function DailyAssignmentPanel({
     return getResolvedSlots(d.dentist.id).some((slot) => slot === null);
   });
 
-  const hygienistStillNeeded = resolvedHygienists.length === 0 && hygSlotCount > 0 && (tempsByRole["Hygienist"]?.length ?? 0) === 0 && assignments.dentists.length > 0;
-  const frontDeskStillShort = assignments.warnings.some((w) => w.message.includes("front desk")) && (tempsByRole["Front Desk"]?.length ?? 0) === 0;
+  const hygienistsFilled = resolvedHygienists.length + (tempsByRole["Hygienist"]?.length ?? 0);
+  const hygienistStillNeeded = hygSlotCount > 0 && hygienistsFilled < hygSlotCount && assignments.dentists.length > 0;
+  const frontDeskFilled = assignments.frontDesk.length + (tempsByRole["Front Desk"]?.length ?? 0);
+  const frontDeskStillShort = assignments.warnings.some((w) => w.message.includes("front desk")) && frontDeskFilled < frontDeskRequired;
 
   // Filter warnings to hide ones already resolved by temps
   const visibleWarnings = assignments.warnings.filter((w) => {
