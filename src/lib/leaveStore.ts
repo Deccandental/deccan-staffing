@@ -59,6 +59,11 @@ export async function cancelLeaveRequest(id: string): Promise<void> {
   if (error) console.error("cancelLeaveRequest error:", error);
 }
 
+export async function deleteLeaveRequest(id: string): Promise<void> {
+  const { error } = await supabase.from("leave_requests").delete().eq("id", id);
+  if (error) console.error("deleteLeaveRequest error:", error);
+}
+
 export function countBusinessDays(start: string, end: string): number {
   const CLOSED = new Set([0, 6]);
   let count = 0;
