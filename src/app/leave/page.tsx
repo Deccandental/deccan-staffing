@@ -5,7 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { loadStaff } from "@/lib/staffStore";
 import { Employee } from "@/types/employee";
 import { LeaveReason, LeaveRequest } from "@/types/leave";
-import { addLeaveRequest, loadLeaveRequests, cancelLeaveRequest, countBusinessDays, validateNoticePeriod } from "@/lib/leaveStore";
+import { addLeaveRequest, loadLeaveRequests, cancelLeaveRequest, deleteLeaveRequest, countBusinessDays, validateNoticePeriod } from "@/lib/leaveStore";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 
@@ -44,6 +44,7 @@ export default function LeavePage() {
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
   const [view, setView] = useState<"request" | "my" | "calendar" | "all">("request");
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [noticeWarning, setNoticeWarning] = useState("");
   const [allPasscode, setAllPasscode] = useState("");
@@ -99,28 +100,34 @@ export default function LeavePage() {
   }
 
   async function handleSubmit() {
+    if (isSubmitting) return;
     setError("");
     if (!form.employeeId) { setError("Please select your name."); return; }
     if (!form.employeeEmail) { setError("Please enter your email."); return; }
     if (!form.startDate || !form.endDate) { setError("Please select start and end dates."); return; }
     if (form.endDate < form.startDate) { setError("End date must be after start date."); return; }
 
-    const req = await addLeaveRequest({
-      employeeId: Number(form.employeeId), employeeName: selectedEmployee?.name ?? "",
-      employeeEmail: form.employeeEmail, startDate: form.startDate, endDate: form.endDate,
-      isPartialDay: form.isPartialDay, partialHours: form.partialHours,
-      reason: form.reason, notes: form.notes, totalDays,
-    });
-
+    setIsSubmitting(true);
     try {
-      await fetch("/api/leave/notify", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request: req, type: "submitted" }),
+      const req = await addLeaveRequest({
+        employeeId: Number(form.employeeId), employeeName: selectedEmployee?.name ?? "",
+        employeeEmail: form.employeeEmail, startDate: form.startDate, endDate: form.endDate,
+        isPartialDay: form.isPartialDay, partialHours: form.partialHours,
+        reason: form.reason, notes: form.notes, totalDays,
       });
-    } catch {}
 
-    setSubmitted(true);
-    await refresh();
+      try {
+        await fetch("/api/leave/notify", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ request: req, type: "submitted" }),
+        });
+      } catch {}
+
+      setSubmitted(true);
+      await refresh();
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   const myRequests = requests.filter((r) => r.employeeId === Number(form.employeeId));
@@ -358,8 +365,8 @@ export default function LeavePage() {
                     rows={3} placeholder="Any additional details..." className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none resize-none" style={{ fontSize: 16 }} />
                 </div>
                 {error && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">🔴 {error}</div>}
-                <button onClick={handleSubmit} className="w-full rounded-xl py-4 font-semibold text-white transition hover:opacity-90 text-base" style={{ backgroundColor: "#e8622a" }}>
-                  Submit Leave Request
+                <button onClick={handleSubmit} disabled={isSubmitting} className="w-full rounded-xl py-4 font-semibold text-white transition hover:opacity-90 text-base disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                  {isSubmitting ? "Submitting…" : "Submit Leave Request"}
                 </button>
               </div>
             )}
@@ -399,7 +406,14 @@ export default function LeavePage() {
                     {req.reviewNote && <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500 mb-3"><span className="font-medium">Manager note:</span> {req.reviewNote}</div>}
                     <div className="flex items-center justify-between text-xs text-gray-300">
                       <span>Submitted {new Date(req.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
-                      {req.status === "pending" && <button onClick={async () => { await cancelLeaveRequest(req.id); await refresh(); }} className="text-red-400 hover:text-red-600 font-medium">Cancel</button>}
+                      <span className="flex items-center gap-3">
+                        {req.status === "pending" && <button onClick={async () => { await cancelLeaveRequest(req.id); await refresh(); }} className="text-red-400 hover:text-red-600 font-medium">Cancel</button>}
+                        {(req.status === "cancelled" || req.status === "denied") && (
+                          <button onClick={async () => { if (confirm("Delete this request permanently? This can't be undone.")) { await deleteLeaveRequest(req.id); await refresh(); } }} className="text-gray-400 hover:text-red-600 font-medium">
+                            Delete
+                          </button>
+                        )}
+                      </span>
                     </div>
                   </div>
                 ))}
