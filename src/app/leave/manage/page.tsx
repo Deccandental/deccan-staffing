@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import PasscodeGate from "@/components/PasscodeGate";
 import { LeaveRequest, LeaveReason } from "@/types/leave";
-import { loadLeaveRequests, updateLeaveStatus, countBusinessDays } from "@/lib/leaveStore";
+import { loadLeaveRequests, updateLeaveStatus, deleteLeaveRequest, countBusinessDays } from "@/lib/leaveStore";
 import { setUnavailable, clearUnavailable } from "@/lib/overrides";
 import { supabase } from "@/lib/supabase";
 
@@ -93,6 +93,14 @@ function LeaveManagePageBody() {
       await removeFromAvailability(req);
     }
     await updateLeaveStatus(req.id, "cancelled");
+    setProcessing(null);
+    await refresh();
+  }
+
+  async function handleDelete(req: LeaveRequest) {
+    if (!confirm(`Permanently delete this request from ${req.employeeName}? This can't be undone.`)) return;
+    setProcessing(req.id);
+    await deleteLeaveRequest(req.id);
     setProcessing(null);
     await refresh();
   }
@@ -259,6 +267,19 @@ function LeaveManagePageBody() {
                   <button onClick={() => handleCancel(req)} disabled={processing === req.id}
                     className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-400 hover:bg-red-50 disabled:opacity-50">
                     {processing === req.id ? "Cancelling..." : "✕ Cancel Request"}
+                  </button>
+                  <button onClick={() => handleDelete(req)} disabled={processing === req.id}
+                    className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-400 hover:bg-gray-50 disabled:opacity-50">
+                    {processing === req.id ? "Deleting..." : "🗑 Delete"}
+                  </button>
+                </div>
+              )}
+
+              {req.status === "cancelled" && (
+                <div className="flex gap-2 mt-2">
+                  <button onClick={() => handleDelete(req)} disabled={processing === req.id}
+                    className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-400 hover:bg-gray-50 disabled:opacity-50">
+                    {processing === req.id ? "Deleting..." : "🗑 Delete permanently"}
                   </button>
                 </div>
               )}
