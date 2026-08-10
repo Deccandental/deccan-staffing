@@ -240,7 +240,7 @@ function LeaveManagePageBody() {
                   <textarea value={reviewNote[req.id] ?? ""} onChange={(e) => setReviewNote((n) => ({ ...n, [req.id]: e.target.value }))}
                     placeholder="Add a note (optional)..." rows={2}
                     className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none resize-none" />
-                  <div className="flex gap-3">
+                  <div className="flex flex-wrap gap-3">
                     <button onClick={() => handleApprove(req)} disabled={processing === req.id}
                       className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
                       style={{ backgroundColor: "#16a34a" }}>
@@ -253,6 +253,10 @@ function LeaveManagePageBody() {
                     <button onClick={() => startEdit(req)} disabled={processing === req.id}
                       className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-500 hover:bg-gray-50 disabled:opacity-50">
                       ✏️ Edit
+                    </button>
+                    <button onClick={() => handleDelete(req)} disabled={processing === req.id}
+                      className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-400 hover:bg-gray-50 disabled:opacity-50">
+                      {processing === req.id ? "Deleting..." : "🗑 Delete"}
                     </button>
                   </div>
                 </div>
