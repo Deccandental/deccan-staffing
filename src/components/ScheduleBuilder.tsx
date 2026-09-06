@@ -14,7 +14,8 @@ import { Employee } from "@/types/employee";
 import { TempAssignment, getTempAssignmentsForMonth } from "@/lib/tempAssignments";
 import { TempStaff } from "@/app/temps/page";
 import { supabase } from "@/lib/supabase";
-import MonthlyOverview, { DayAssignmentSummary } from "./MonthlyOverview";
+import MonthlyOverview, { DayAssignmentSummary, DayEventSummary } from "./MonthlyOverview";
+import { loadEventsForMonth } from "@/lib/eventsStore";
 import DailyAssignmentPanel from "./DailyAssignmentPanel";
 import PrintSchedule from "./PrintSchedule";
 import PrintIndividualSchedule from "./PrintIndividualSchedule";
@@ -46,6 +47,7 @@ export default function ScheduleBuilder() {
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [schedule, setSchedule] = useState<MonthSchedule>({});
+  const [dayEvents, setDayEvents] = useState<Record<string, DayEventSummary[]>>({});
   const [loadedYearMonth, setLoadedYearMonth] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [saving, setSaving] = useState(false);
@@ -83,12 +85,19 @@ export default function ScheduleBuilder() {
 
   useEffect(() => {
     async function load() {
-      const [saved, ta] = await Promise.all([
+      const [saved, ta, ev] = await Promise.all([
         loadSchedule(year, month),
         getTempAssignmentsForMonth(year, month),
+        loadEventsForMonth(year, month),
       ]);
       setSchedule(saved);
       setMonthTempAssignments(ta);
+      const grouped: Record<string, DayEventSummary[]> = {};
+      for (const e of ev) {
+        if (!grouped[e.date]) grouped[e.date] = [];
+        grouped[e.date].push({ title: e.title, mandatory: e.mandatory });
+      }
+      setDayEvents(grouped);
       setLoadedYearMonth(`${year}-${month}`);
     }
     load();
@@ -451,7 +460,7 @@ export default function ScheduleBuilder() {
             </div>
           </div>
 
-          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} dayAssignments={monthAssignments} />
+          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} dayAssignments={monthAssignments} dayEvents={dayEvents} />
 
           {selectedDate ? (
             <div className="grid gap-6 lg:grid-cols-2">
@@ -583,6 +592,7 @@ export default function ScheduleBuilder() {
             openTuesdays={openTuesdays}
             holidays={holidays}
             dayAssignments={monthAssignments}
+            dayEvents={dayEvents}
           />
 
           <div className="rounded-2xl bg-white shadow overflow-hidden">
