@@ -29,6 +29,12 @@ const navGroups = [
       { label: "Manage Leave", href: "/leave/manage", icon: "🔐" },
     ],
   },
+  {
+    label: "Events 🔒",
+    items: [
+      { label: "Events", href: "/events", icon: "📌" },
+    ],
+  },
 ];
 
 function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
