@@ -10,7 +10,7 @@ import {
 } from "@/lib/eventsStore";
 
 const EMPTY_FORM: NewEventInput = {
-  date: "", time: "", title: "", description: "",
+  date: "", time: "", endTime: "", title: "", description: "",
   mandatory: false, inviteAll: true, invitedStaffIds: [],
   remind1Day: true, remind1Week: true, remind3Weeks: false,
 };
@@ -99,15 +99,20 @@ function EventsPageBody() {
             <h2 className="text-lg font-bold mb-4">New Event</h2>
             {error && <p className="mb-3 text-sm text-red-500">{error}</p>}
 
-            <div className="grid gap-4 sm:grid-cols-2 mb-4">
+            <div className="grid gap-4 sm:grid-cols-3 mb-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1">Date</label>
                 <input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-orange-400" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Time (optional)</label>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">Start time (optional)</label>
                 <input type="time" value={form.time} onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-orange-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">End time (optional)</label>
+                <input type="time" value={form.endTime} onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-orange-400" />
               </div>
             </div>
@@ -199,7 +204,7 @@ function EventsPageBody() {
                       {ev.announced && <span className="rounded-full bg-cyan-100 text-cyan-600 text-xs font-semibold px-2 py-0.5">Announced</span>}
                     </div>
                     <div className="text-sm text-slate-500 mt-0.5">
-                      {dateLabel}{ev.time ? ` · ${ev.time}` : ""}
+                      {dateLabel}{ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : ""}
                     </div>
                     {ev.description && <p className="text-sm text-slate-600 mt-1.5">{ev.description}</p>}
                     <div className="text-xs text-slate-400 mt-2">
