@@ -97,6 +97,34 @@ export async function createEvent(input: NewEventInput): Promise<StaffEvent | nu
   return fromRow(data);
 }
 
+export async function updateEvent(id: string, input: NewEventInput): Promise<StaffEvent | null> {
+  // If the date changed, the 1-day/1-week/3-week windows are now relative to
+  // a different day, so clear any reminders already marked sent — otherwise
+  // a reminder that already fired for the old date could wrongly block that
+  // same threshold from firing for the new date.
+  const { data: existing } = await supabase.from("events").select("date").eq("id", id).single();
+  const dateChanged = existing && existing.date !== input.date;
+
+  const update: Record<string, any> = {
+    date: input.date,
+    time: input.time,
+    end_time: input.endTime,
+    title: input.title,
+    description: input.description,
+    mandatory: input.mandatory,
+    invite_all: input.inviteAll,
+    invited_staff_ids: input.invitedStaffIds,
+    remind_1_day: input.remind1Day,
+    remind_1_week: input.remind1Week,
+    remind_3_weeks: input.remind3Weeks,
+  };
+  if (dateChanged) update.reminders_sent = {};
+
+  const { data, error } = await supabase.from("events").update(update).eq("id", id).select().single();
+  if (error) { console.error("updateEvent error:", error); return null; }
+  return fromRow(data);
+}
+
 export async function deleteEvent(id: string): Promise<void> {
   const { error } = await supabase.from("events").delete().eq("id", id);
   if (error) console.error("deleteEvent error:", error);
