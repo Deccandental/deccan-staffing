@@ -8,6 +8,7 @@ function fromRow(row: any): StaffEvent {
     id: row.id,
     date: row.date,
     time: row.time ?? "",
+    endTime: row.end_time ?? "",
     title: row.title,
     description: row.description ?? "",
     mandatory: row.mandatory ?? false,
