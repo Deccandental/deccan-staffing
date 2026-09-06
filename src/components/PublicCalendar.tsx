@@ -8,6 +8,7 @@ import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { loadSchedule, MonthSchedule } from "@/lib/scheduleStore";
 import { resolveDentistAssistants } from "@/lib/assistantSlots";
+import { StaffEvent, loadEventsForMonth } from "@/lib/eventsStore";
 import { loadHolidays, Holiday } from "@/lib/holidays";
 import { Employee } from "@/types/employee";
 import { TempAssignment, getTempAssignmentsForMonth } from "@/lib/tempAssignments";
@@ -66,6 +67,7 @@ export default function PublicCalendar() {
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [schedule, setSchedule] = useState<MonthSchedule>({});
+  const [events, setEvents] = useState<StaffEvent[]>([]);
   const [temps, setTemps] = useState<TempStaff[]>([]);
   const [monthTempAssignments, setMonthTempAssignments] = useState<TempAssignment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,8 +88,8 @@ export default function PublicCalendar() {
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const [saved, ta] = await Promise.all([loadSchedule(year, month), getTempAssignmentsForMonth(year, month)]);
-      setSchedule(saved); setMonthTempAssignments(ta); setLoading(false);
+      const [saved, ta, ev] = await Promise.all([loadSchedule(year, month), getTempAssignmentsForMonth(year, month), loadEventsForMonth(year, month)]);
+      setSchedule(saved); setMonthTempAssignments(ta); setEvents(ev); setLoading(false);
     }
     load();
   }, [year, month]);
@@ -156,6 +158,15 @@ export default function PublicCalendar() {
     return result;
   }, [days, schedule, staff, prefs, overrides, monthTempAssignments, temps]);
 
+  const dayEvents = useMemo(() => {
+    const result: Record<string, StaffEvent[]> = {};
+    for (const ev of events) {
+      if (!result[ev.date]) result[ev.date] = [];
+      result[ev.date].push(ev);
+    }
+    return result;
+  }, [events]);
+
   function isPersonWorkingOn(date: string): boolean {
     if (!highlightId) return false;
     const info = monthAssignments[date];
@@ -177,6 +188,25 @@ export default function PublicCalendar() {
   const highlightedPerson = highlightId ? staff.find((e) => e.id === highlightId) : null;
   const selectedInfo = selectedDate ? monthAssignments[selectedDate] : null;
   const selectedDay = selectedDate ? days.find((d) => d.date === selectedDate) : null;
+  const selectedDayEvents = selectedDate ? dayEvents[selectedDate] ?? [] : [];
+
+  function EventBadges() {
+    if (selectedDayEvents.length === 0) return null;
+    return (
+      <div className="mb-3 space-y-1.5">
+        {selectedDayEvents.map((ev) => (
+          <div key={ev.id} className="rounded-xl px-3 py-2" style={{ background: ev.mandatory ? "#fef2f2" : "#faf5ff" }}>
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-sm" style={{ color: ev.mandatory ? "#dc2626" : "#7c3aed" }}>📌 {ev.title}</span>
+              {ev.mandatory && <span className="rounded-full bg-red-100 text-red-600 text-xs font-semibold px-1.5 py-0.5">Mandatory</span>}
+            </div>
+            {ev.time && <div className="text-xs text-slate-500 mt-0.5">{ev.time}</div>}
+            {ev.description && <div className="text-xs text-slate-500 mt-0.5">{ev.description}</div>}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   function DetailPanel() {
     if (!selectedDate || !selectedDay) return null;
@@ -189,6 +219,7 @@ export default function PublicCalendar() {
       return (
         <div className="rounded-2xl bg-white p-5 shadow mt-4">
           <div className="font-semibold text-slate-700 mb-1">{dateLabel}</div>
+          <EventBadges />
           <div className="text-sm text-slate-400">{selectedDay.isHoliday ? `🏖️ ${selectedDay.holidayName}` : "Not scheduled"}</div>
         </div>
       );
@@ -213,6 +244,7 @@ export default function PublicCalendar() {
         return (
           <div className="rounded-2xl bg-white p-5 shadow mt-4">
             <div className="font-semibold text-slate-700 mb-1">{dateLabel}</div>
+            <EventBadges />
             <div className="text-sm text-slate-400">{highlightedPerson.name} is not scheduled this day.</div>
           </div>
         );
@@ -221,6 +253,7 @@ export default function PublicCalendar() {
       return (
         <div className="rounded-2xl bg-white p-5 shadow mt-4">
           <div className="text-sm text-slate-400 mb-3">{dateLabel}</div>
+          <EventBadges />
           <div className="flex items-center gap-3">
             <div className="h-11 w-11 rounded-full flex items-center justify-center text-white font-bold text-base flex-shrink-0"
               style={{ backgroundColor: highlightedPerson.color }}>
@@ -238,6 +271,7 @@ export default function PublicCalendar() {
     return (
       <div className="rounded-2xl bg-white p-5 shadow mt-4">
         <div className="font-semibold text-slate-700 mb-3">{dateLabel}</div>
+        <EventBadges />
         <div className="space-y-2">
           {selectedInfo.dentists.map((d) => (
             <div key={d.id} className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5">
@@ -287,6 +321,7 @@ export default function PublicCalendar() {
             const isSelected = selectedDate === day.date;
             const info = monthAssignments[day.date];
             const isOpenTue = day.isTuesday && day.isOpenTuesday;
+            const dayEventList = dayEvents[day.date] ?? [];
 
             let showDot = false;
             let dotColor = "#64748b";
@@ -319,9 +354,12 @@ export default function PublicCalendar() {
                   }`} style={isSelected ? { backgroundColor: "#e8622a" } : isToday ? { backgroundColor: "#0891b2" } : {}}>
                     {day.day}
                   </div>
-                  <div className="h-1.5 mt-0.5 flex items-center justify-center">
+                  <div className="h-1.5 mt-0.5 flex items-center justify-center gap-0.5">
                     {showDot && !isSelected && (
                       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: dotColor }} />
+                    )}
+                    {dayEventList.length > 0 && !isSelected && (
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: dayEventList.some((e) => e.mandatory) ? "#dc2626" : "#7c3aed" }} />
                     )}
                   </div>
                 </div>
@@ -348,6 +386,15 @@ export default function PublicCalendar() {
                   <span className={`text-sm font-medium ${isToday ? "text-cyan-600" : isOpenTue ? "text-blue-400" : "text-slate-400"}`}>{day.weekday}</span>
                   <span className={`text-xl font-bold ${isToday ? "text-cyan-600" : "text-slate-700"}`}>{day.day}</span>
                 </div>
+                {dayEventList.length > 0 && (
+                  <div className="space-y-0.5 mb-1">
+                    {dayEventList.map((ev) => (
+                      <div key={ev.id} className="truncate text-xs font-semibold leading-tight" style={{ color: ev.mandatory ? "#dc2626" : "#7c3aed" }}>
+                        📌 {ev.title}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {info ? (
                   <div className="space-y-1 overflow-hidden">
                     {info.dentists.map((d) => {
