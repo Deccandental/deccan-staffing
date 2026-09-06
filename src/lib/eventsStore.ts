@@ -53,11 +53,15 @@ function fromRow(row: any): StaffEvent {
 }
 
 export async function loadEventsForMonth(year: number, month: number): Promise<StaffEvent[]> {
-  const key = `${year}-${String(month).padStart(2, "0")}`;
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const monthEnd = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
   const { data, error } = await supabase
     .from("events")
     .select("*")
-    .like("date", `${key}-%`)
+    .gte("date", monthStart)
+    .lt("date", monthEnd)
     .order("date")
     .order("time");
   if (error) { console.error("loadEventsForMonth error:", error); return []; }
