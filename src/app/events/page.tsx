@@ -219,3 +219,47 @@ function EventsPageBody() {
             events.map((ev) => {
               const dateLabel = new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", {
                 weekday: "long", month: "long", day: "numeric",
+              });
+              return (
+                <div key={ev.id} className="rounded-2xl bg-white p-5 shadow flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-slate-700">{ev.title}</span>
+                      {ev.mandatory && <span className="rounded-full bg-red-100 text-red-600 text-xs font-semibold px-2 py-0.5">Mandatory</span>}
+                      {ev.announced && <span className="rounded-full bg-cyan-100 text-cyan-600 text-xs font-semibold px-2 py-0.5">Announced</span>}
+                    </div>
+                    <div className="text-sm text-slate-500 mt-0.5">
+                      {dateLabel}{ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : ""}
+                    </div>
+                    {ev.description && <p className="text-sm text-slate-600 mt-1.5">{ev.description}</p>}
+                    <div className="text-xs text-slate-400 mt-2">
+                      {ev.inviteAll ? "All staff invited" : `${ev.invitedStaffIds.length} staff invited`} · {reminderSummary(ev)}
+                    </div>
+                  </div>
+                  <div className="flex flex-shrink-0 gap-2">
+                    <button onClick={() => startEdit(ev)}
+                      className="rounded-lg px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition font-medium">
+                      Edit
+                    </button>
+                    <button onClick={() => handleDelete(ev.id)}
+                      className="rounded-lg px-3 py-1.5 text-xs text-red-400 hover:bg-red-50 hover:text-red-600 transition font-medium">
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export default function EventsPage() {
+  return (
+    <PasscodeGate group="events" subtitle="Enter your passcode to manage events">
+      <EventsPageBody />
+    </PasscodeGate>
+  );
+}
