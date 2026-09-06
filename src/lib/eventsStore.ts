@@ -4,6 +4,7 @@ export interface StaffEvent {
   id: string;
   date: string;
   time: string;
+  endTime: string;
   title: string;
   description: string;
   mandatory: boolean;
@@ -20,6 +21,7 @@ export interface StaffEvent {
 export interface NewEventInput {
   date: string;
   time: string;
+  endTime: string;
   title: string;
   description: string;
   mandatory: boolean;
@@ -35,6 +37,7 @@ function fromRow(row: any): StaffEvent {
     id: row.id,
     date: row.date,
     time: row.time ?? "",
+    endTime: row.end_time ?? "",
     title: row.title,
     description: row.description ?? "",
     mandatory: row.mandatory ?? false,
@@ -78,6 +81,7 @@ export async function createEvent(input: NewEventInput): Promise<StaffEvent | nu
     .insert({
       date: input.date,
       time: input.time,
+      end_time: input.endTime,
       title: input.title,
       description: input.description,
       mandatory: input.mandatory,
