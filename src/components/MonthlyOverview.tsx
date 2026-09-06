@@ -13,6 +13,11 @@ export interface DayAssignmentSummary {
   floater?: string | null;
 }
 
+export interface DayEventSummary {
+  title: string;
+  mandatory: boolean;
+}
+
 interface Props {
   year: number;
   month: number;
@@ -22,9 +27,10 @@ interface Props {
   openTuesdays?: OpenTuesday[];
   holidays?: Holiday[];
   dayAssignments?: Record<string, DayAssignmentSummary>;
+  dayEvents?: Record<string, DayEventSummary[]>;
 }
 
-export default function MonthlyOverview({ year, month, dayStatuses, selectedDate, onSelectDate, openTuesdays = [], holidays = [], dayAssignments }: Props) {
+export default function MonthlyOverview({ year, month, dayStatuses, selectedDate, onSelectDate, openTuesdays = [], holidays = [], dayAssignments, dayEvents }: Props) {
   const days = generateMonth(year, month, openTuesdays, holidays);
   const firstDow = new Date(year, month - 1, 1).getDay();
   const blanks = Array.from({ length: firstDow });
@@ -58,6 +64,7 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
           const status = dayStatuses[day.date];
           const isOpenTue = day.isTuesday && day.isOpenTuesday;
           const info = dayAssignments?.[day.date];
+          const events = dayEvents?.[day.date] ?? [];
 
           if (!day.isOpen) {
             return (
@@ -66,6 +73,11 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
                 <div className={`text-xs ${day.isHoliday ? "text-red-400" : "text-slate-400"}`}>{day.weekday}</div>
                 <div className={`text-sm font-medium ${day.isHoliday ? "text-red-500" : "text-slate-400"}`}>{day.day}</div>
                 {day.isHoliday && <div className="text-xs text-red-400 truncate" style={{ fontSize: 8 }}>{day.holidayName?.slice(0, 8)}</div>}
+                {events.length > 0 && (
+                  <div className="mt-0.5 truncate text-[8px] font-semibold" style={{ color: events.some((e) => e.mandatory) ? "#dc2626" : "#7c3aed" }}>
+                    📌 {events[0].title}
+                  </div>
+                )}
               </div>
             );
           }
@@ -79,7 +91,7 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
 
           return (
             <button key={day.date} onClick={() => onSelectDate(day.date)}
-              className={`rounded-lg border p-1.5 text-left transition flex flex-col min-h-[60px] ${info ? "min-h-[92px]" : ""} ${statusStyle}`}>
+              className={`rounded-lg border p-1.5 text-left transition flex flex-col min-h-[60px] ${info || events.length > 0 ? "min-h-[92px]" : ""} ${statusStyle}`}>
               <div className="flex items-center justify-between gap-1">
                 <span className={`text-xs ${isSelected ? "text-cyan-100" : isOpenTue ? "text-blue-400" : "text-slate-400"}`}>{day.weekday}</span>
                 <span className="text-sm font-semibold">{day.day}</span>
@@ -87,6 +99,16 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
               {!isSelected && status === "complete" && !info && <div className="mt-0.5 text-xs text-green-500 text-center">✓</div>}
               {!isSelected && status === "warning" && !info && <div className="mt-0.5 text-xs text-amber-500 text-center">⚠</div>}
               {isOpenTue && !status && !info && <div className="mt-0.5 text-xs text-blue-400 text-center">Open</div>}
+              {events.length > 0 && (
+                <div className="mt-0.5 space-y-0.5">
+                  {events.map((ev, i) => (
+                    <div key={i} className="truncate text-[9px] font-semibold leading-tight"
+                      style={{ color: isSelected ? "white" : ev.mandatory ? "#dc2626" : "#7c3aed" }}>
+                      📌 {ev.title}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {info && (
                 <div className="mt-1 space-y-0.5 overflow-hidden">
