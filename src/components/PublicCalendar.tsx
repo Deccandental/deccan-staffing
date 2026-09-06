@@ -200,7 +200,7 @@ export default function PublicCalendar() {
               <span className="font-semibold text-sm" style={{ color: ev.mandatory ? "#dc2626" : "#7c3aed" }}>📌 {ev.title}</span>
               {ev.mandatory && <span className="rounded-full bg-red-100 text-red-600 text-xs font-semibold px-1.5 py-0.5">Mandatory</span>}
             </div>
-            {ev.time && <div className="text-xs text-slate-500 mt-0.5">{ev.time}</div>}
+            {ev.time && <div className="text-xs text-slate-500 mt-0.5">{ev.time}{ev.endTime ? ` – ${ev.endTime}` : ""}</div>}
             {ev.description && <div className="text-xs text-slate-500 mt-0.5">{ev.description}</div>}
           </div>
         ))}
