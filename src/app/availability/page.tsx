@@ -141,6 +141,7 @@ function AvailabilityPageBody() {
             </span>
             <span className="flex items-center gap-1"><span className="inline-block h-4 w-4 rounded bg-blue-200 border border-blue-300" /> Full day off</span>
             <span className="flex items-center gap-1"><span className="inline-block h-4 w-4 rounded bg-teal-200 border border-teal-300 text-teal-700 text-center font-bold" style={{fontSize:8}}>R</span> Remote</span>
+            <span className="flex items-center gap-1"><span style={{fontSize:11}}>🔒</span> From an approved leave request — edit in Manage Leave</span>
           </div>
         </div>
 
@@ -189,23 +190,29 @@ function AvailabilityPageBody() {
                               const reasonStyle = REASONS.find((r) => r.key === override?.reason) ?? REASONS[1];
                               const isRemote = override?.reason === "remote" && !override.halfDay;
 
-                              const approvedHalfReq = leaveRequests.find(
+                              const approvedReqForDate = leaveRequests.find(
                                 (r) => r.employeeId === emp.id &&
                                   r.startDate <= d.date && r.endDate >= d.date &&
-                                  r.isPartialDay && r.status === "approved"
+                                  r.status === "approved"
                               );
 
                               const isFullDay = override && !override.halfDay && !isRemote;
                               const isHalfAM = override?.halfDay === "AM";
                               const isHalfPM = override?.halfDay === "PM";
-                              const isHalfFromLeave = approvedHalfReq && !override;
+                              const isHalfFromLeave = !!approvedReqForDate?.isPartialDay && !override;
+                              // A full-day override that lines up with an approved request (of
+                              // either kind) is treated as request-backed too, so a manual click
+                              // here can't silently desync from the actual approved request —
+                              // changes to it belong in Manage Leave instead.
+                              const isFullDayFromLeave = isFullDay && !!approvedReqForDate;
 
                               const tooltip = isRemote
                                 ? "Remote — working from home. Click to clear."
+                                : isFullDayFromLeave ? `${override?.reason} — from an approved leave request. Change it in Manage Leave.`
                                 : isFullDay ? `${override?.reason} — full day out. Click to clear.`
                                 : isHalfAM ? `AM off (${override?.reason}). Click for PM off.`
                                 : isHalfPM ? `PM off (${override?.reason}). Click for full day.`
-                                : isHalfFromLeave ? `Half day from approved leave`
+                                : isHalfFromLeave ? "Half day from an approved leave request. Change it in Manage Leave."
                                 : "Click: AM off → PM off → Full day → Clear";
 
                               return (
@@ -217,6 +224,12 @@ function AvailabilityPageBody() {
                                       className="mx-auto h-8 w-8 rounded border text-xs font-bold transition hover:opacity-75 flex items-center justify-center bg-teal-200 border-teal-300 text-teal-700">
                                       R
                                     </button>
+                                  ) : isFullDayFromLeave ? (
+                                    <div title={tooltip}
+                                      className={`mx-auto h-8 w-8 rounded border text-xs font-bold flex items-center justify-center relative cursor-default ${reasonStyle.cell}`}>
+                                      {reasonStyle.letter}
+                                      <span className="absolute -top-1 -right-1 text-[9px] leading-none">🔒</span>
+                                    </div>
                                   ) : isFullDay ? (
                                     <button onClick={() => handleToggle(emp.id, d.date)} title={tooltip}
                                       className={`mx-auto h-8 w-8 rounded border text-xs font-bold transition hover:opacity-75 flex items-center justify-center ${reasonStyle.cell}`}>
@@ -245,6 +258,7 @@ function AvailabilityPageBody() {
                                       <div style={{ position: "absolute", top: 0, left: 0, width: "50%", height: "100%", background: "#dbeafe" }} />
                                       <div style={{ position: "absolute", top: 0, right: 0, width: "50%", height: "100%", background: "#bbf7d0" }} />
                                       <span style={{ position: "relative", zIndex: 1, fontSize: 9, color: "#1e40af", fontWeight: 700 }}>½</span>
+                                      <span className="absolute -top-1 -right-1 text-[9px] leading-none" style={{ zIndex: 2 }}>🔒</span>
                                     </div>
                                   ) : (
                                     <button onClick={() => handleToggle(emp.id, d.date)} title={tooltip}
