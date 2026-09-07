@@ -28,7 +28,9 @@ export async function loadHoBonusMonth(year: number, month: number): Promise<HoB
 export async function loadHoBonusMonths(year: number): Promise<HoBonusMonth[]> {
   const { data, error } = await supabase.from("ho_bonus_months").select("*").eq("year", year).order("month");
   if (error) { console.error("loadHoBonusMonths error:", error); return []; }
-  return (data ?? []).map(fromRow);
+  const byMonth: Record<number, HoBonusMonth> = {};
+  for (const row of data ?? []) byMonth[row.month] = fromRow(row);
+  return Array.from({ length: 12 }, (_, i) => i + 1).map((m) => byMonth[m] ?? { year, month: m, production: 0, paid: 0, notes: "" });
 }
 
 export async function saveHoBonusMonth(m: HoBonusMonth): Promise<void> {
