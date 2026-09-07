@@ -176,6 +176,14 @@ export async function addGrowthBonusPayment(payment: Omit<GrowthBonusPayment, "i
   return fromPaymentRow(data);
 }
 
+export async function updateGrowthBonusPayment(id: string, updates: { date: string; amount: number; notes: string }): Promise<GrowthBonusPayment | null> {
+  const { data, error } = await supabase.from("growth_bonus_payments").update({
+    date: updates.date, amount: updates.amount, notes: updates.notes,
+  }).eq("id", id).select().single();
+  if (error) { console.error("updateGrowthBonusPayment error:", error); return null; }
+  return fromPaymentRow(data);
+}
+
 export async function deleteGrowthBonusPayment(id: string): Promise<void> {
   const { error } = await supabase.from("growth_bonus_payments").delete().eq("id", id);
   if (error) console.error("deleteGrowthBonusPayment error:", error);
