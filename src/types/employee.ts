@@ -11,6 +11,14 @@ export type EmployeeRole =
   | "Front Desk"
   | "Hygienist";
 
+export interface WeekdaySchedule {
+  monday: boolean;
+  tuesday: boolean;
+  wednesday: boolean;
+  thursday: boolean;
+  friday: boolean;
+}
+
 export interface Employee {
   id: number;
   name: string;
@@ -39,17 +47,15 @@ export interface Employee {
   // When true, this person is left out of the Payroll Dashboard entirely
   // (e.g. a practice owner who isn't paid through this system).
   excludeFromPayroll?: boolean;
+  // Recurring days this person works remotely — independent of whether the
+  // office itself is open that day (e.g. "works remote every Tuesday" even
+  // on Tuesdays the office is closed). Same shape as defaultSchedule.
+  remoteDays?: WeekdaySchedule;
   // When true, this person is inactive — hidden from every "pick who's
   // working / assign this to" list (Schedule Builder, swap menus, Events
   // invite list, PIN logins, etc.) but their existing records (leave
   // requests, certifications, past schedule assignments) still resolve
   // their name correctly, since the row itself is never deleted.
   archived?: boolean;
-  defaultSchedule: {
-    monday: boolean;
-    tuesday: boolean;
-    wednesday: boolean;
-    thursday: boolean;
-    friday: boolean;
-  };
+  defaultSchedule: WeekdaySchedule;
 }
