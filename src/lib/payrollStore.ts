@@ -53,6 +53,15 @@ export async function loadPayrollEntries(payPeriodStart: string): Promise<Payrol
   return (data ?? []).map(fromRow);
 }
 
+// Loads every entry whose pay period starts within [startDate, endDate] —
+// used for quarterly/yearly bonus calculations that span several pay periods.
+export async function loadPayrollEntriesInRange(startDate: string, endDate: string): Promise<PayrollEntry[]> {
+  const { data, error } = await supabase.from("payroll_entries").select("*")
+    .gte("pay_period_start", startDate).lte("pay_period_start", endDate);
+  if (error) { console.error("loadPayrollEntriesInRange error:", error); return []; }
+  return (data ?? []).map(fromRow);
+}
+
 export async function savePayrollEntry(entry: NewPayrollEntry): Promise<PayrollEntry | null> {
   const { data, error } = await supabase
     .from("payroll_entries")
