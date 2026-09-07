@@ -20,6 +20,7 @@ import {
 } from "@/lib/growthBonus";
 import { PvBonusQuarter, loadPvBonusYear } from "@/lib/pvBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
+import { formatMoney } from "@/lib/format";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
 const REASON_LABELS: Record<string, string> = {
@@ -291,7 +292,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   <h2 className="font-bold text-slate-700">
                     {bonusUnlocked ? "🎉 " : "🚀 "}{QUARTER_LABELS[currentQuarter]} {bonusYear} Bonus Progress{bonusUnlocked ? " — unlocked!" : ""}
                   </h2>
-                  <span className="text-sm text-slate-600">Received this year: <strong>${bonusReceivedThisYear.toLocaleString()}</strong></span>
+                  <span className="text-sm text-slate-600">Received this year: <strong>${formatMoney(bonusReceivedThisYear)}</strong></span>
                 </div>
                 <div className="w-full h-3 rounded-full bg-white overflow-hidden">
                   <div className="h-full rounded-full transition-all" style={{ width: `${bonusProgressPct}%`, backgroundColor: bonusUnlocked ? "#10b981" : "#f59e0b" }} />
@@ -307,7 +308,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       <div key={q} className="flex items-center justify-between text-sm bg-white/60 rounded-lg px-3 py-1.5">
                         <span className="font-medium text-slate-700">{QUARTER_LABELS[q]}</span>
                         {result.calc.eligible ? (
-                          <span className="text-emerald-700 font-semibold">✓ Unlocked — you earned ${result.myBonus.toLocaleString()}</span>
+                          <span className="text-emerald-700 font-semibold">✓ Unlocked — you earned ${formatMoney(result.myBonus)}</span>
                         ) : (
                           <span className="text-slate-400">Not met</span>
                         )}
@@ -330,9 +331,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       <div key={q.quarter} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
                         <span className="font-medium text-slate-700">{QUARTER_LABELS[q.quarter]}</span>
                         <div className="flex items-center gap-3">
-                          <span className="text-slate-400 text-xs">{percent}%: ${owed.toLocaleString()}</span>
+                          <span className="text-slate-400 text-xs">{percent}%: ${formatMoney(owed)}</span>
                           {balance > 0 ? (
-                            <span className="text-amber-600 font-semibold">Bonus: ${balance.toLocaleString()}</span>
+                            <span className="text-amber-600 font-semibold">Bonus: ${formatMoney(balance)}</span>
                           ) : q.totalIncome > 0 ? (
                             <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
                           ) : (
@@ -350,9 +351,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               <div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow">
                 <h2 className="font-bold text-slate-700 mb-3">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
                 <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
-                  <span className="text-slate-500">Earned ${hygieneEarned.toLocaleString()} · Paid ${hygienePaid.toLocaleString()}</span>
+                  <span className="text-slate-500">Earned ${formatMoney(hygieneEarned)} · Paid ${formatMoney(hygienePaid)}</span>
                   {hygieneBalance > 0 ? (
-                    <span className="text-amber-600 font-semibold">Bonus: ${hygieneBalance.toLocaleString()}</span>
+                    <span className="text-amber-600 font-semibold">Bonus: ${formatMoney(hygieneBalance)}</span>
                   ) : hygieneEarned > 0 ? (
                     <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
                   ) : (
