@@ -9,7 +9,7 @@ import {
   loadAllCertifications, loadCertificationsForEmployee, loadDistinctTitles,
   createCertification, updateCertification, deleteCertification, uploadCertFile,
 } from "@/lib/certsStore";
-import CertsLoginGate, { CertsIdentity } from "@/components/CertsLoginGate";
+import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
 interface FormState {
   ownerType: CertOwnerType;
@@ -156,7 +156,8 @@ function CertForm({
   );
 }
 
-function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity; logout: () => void }) {
+function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
+  const isManager = identity.canManageCerts;
   const [staff, setStaff] = useState<Employee[]>([]);
   const [myCerts, setMyCerts] = useState<Certification[]>([]);
   const [allCerts, setAllCerts] = useState<Certification[]>([]);
@@ -178,11 +179,11 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
     setStaff(s);
     const titles = await loadDistinctTitles();
     setTitleOptions(titles);
-    if (identity.mode === "staff") {
+    if (identity.mode === "staff" && identity.employeeId != null) {
       const mine = await loadCertificationsForEmployee(identity.employeeId);
       setMyCerts(mine);
     }
-    if (identity.mode === "manager") {
+    if (isManager) {
       const all = await loadAllCertifications();
       setAllCerts(all);
     }
@@ -244,7 +245,7 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
       fileUrl = uploaded.url;
       fileName = uploaded.name;
     } else if (editingId) {
-      const existing = (identity.mode === "manager" ? allCerts : myCerts).find((c) => c.id === editingId);
+      const existing = (isManager ? allCerts : myCerts).find((c) => c.id === editingId);
       fileUrl = existing?.fileUrl ?? "";
       fileName = existing?.fileName ?? "";
     }
@@ -301,7 +302,7 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm text-sm">
             <span className="text-gray-400">
-              {identity.mode === "manager" ? "👔 Manager view" : `👤 ${identity.employeeName}`}
+              {isManager ? "👔 Manager view" : `👤 ${identity.employeeName ?? ""}`}
             </span>
             <button onClick={logout} className="text-xs font-semibold text-gray-400 hover:text-red-500 underline">
               Not you?
@@ -309,7 +310,7 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
           </div>
         </header>
 
-        {identity.mode === "manager" && (
+        {isManager && (
           <div className="flex gap-2 mb-6">
             <button onClick={() => setView("mine")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
               style={view === "mine" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
@@ -366,7 +367,7 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
           </div>
         )}
 
-        {identity.mode === "manager" && view === "all" && (
+        {isManager && view === "all" && (
           <div className="max-w-3xl space-y-4">
             {!showForm && (
               <div className="flex gap-2">
@@ -428,8 +429,8 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
 
 export default function CertificationsPage() {
   return (
-    <CertsLoginGate>
+    <AppIdentityGate>
       {(identity, logout) => <CertificationsPageBody identity={identity} logout={logout} />}
-    </CertsLoginGate>
+    </AppIdentityGate>
   );
 }
