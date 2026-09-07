@@ -24,7 +24,7 @@ function rowToEmployee(row: any): Employee {
     canManageLeave: row.can_manage_leave ?? false,
     canManageEvents: row.can_manage_events ?? false,
     canManageCerts: row.can_manage_certs ?? false,
-    defaultSchedule,
+        archived: row.archived ?? false,    defaultSchedule,
   };
 }
 
