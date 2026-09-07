@@ -17,6 +17,10 @@ export interface PayrollEntry {
   bonusAmount: number;
   hygienePatientCount: number;
   notes: string;
+  // Marked true when this person isn't being paid this period — keeps them
+  // visible in the list (so the choice is remembered) without requiring
+  // real numbers to be entered.
+  skipped: boolean;
   updatedAt: string;
 }
 
@@ -38,6 +42,7 @@ function fromRow(row: any): PayrollEntry {
     bonusAmount: row.bonus_amount ?? 0,
     hygienePatientCount: row.hygiene_patient_count ?? 0,
     notes: row.notes ?? "",
+    skipped: row.skipped ?? false,
     updatedAt: row.updated_at,
   };
 }
@@ -65,6 +70,7 @@ export async function savePayrollEntry(entry: NewPayrollEntry): Promise<PayrollE
       bonus_amount: entry.bonusAmount,
       hygiene_patient_count: entry.hygienePatientCount,
       notes: entry.notes,
+      skipped: entry.skipped,
       updated_at: new Date().toISOString(),
     }, { onConflict: "pay_period_start,person_key" })
     .select()
