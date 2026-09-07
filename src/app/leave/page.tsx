@@ -8,7 +8,7 @@ import { LeaveReason, LeaveRequest } from "@/types/leave";
 import { addLeaveRequest, loadLeaveRequests, cancelLeaveRequest, deleteLeaveRequest, countBusinessDays, validateNoticePeriod, isPaidLeaveReason, computeDefaultPaidHours } from "@/lib/leaveStore";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
-import StaffLoginGate, { StaffIdentity } from "@/components/StaffLoginGate";
+import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
 const REASON_LABELS: Record<LeaveReason, string> = {
   sick: "Sick Leave", pto: "PTO / Vacation", leave: "Personal Leave", other: "Other",
@@ -37,7 +37,8 @@ interface AbsenceEntry {
   submittedAt?: string;
 }
 
-function LeavePageBody({ identity, logout }: { identity: StaffIdentity; logout: () => void }) {
+function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
+  const isManager = identity.canManageLeave;
   const [staff, setStaff] = useState<Employee[]>([]);
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
@@ -54,8 +55,8 @@ function LeavePageBody({ identity, logout }: { identity: StaffIdentity; logout: 
   const [calMonth, setCalMonth] = useState(today0.getMonth() + 1);
 
   const [form, setForm] = useState({
-    employeeId: identity.mode === "staff" ? String(identity.employeeId) : "",
-    employeeEmail: identity.mode === "staff" ? identity.employeeEmail : "",
+    employeeId: !isManager ? String(identity.employeeId ?? "") : "",
+    employeeEmail: !isManager ? (identity.employeeEmail ?? "") : "",
     startDate: "", endDate: "",
     isPartialDay: false, partialHours: "", reason: "pto" as LeaveReason, notes: "",
     paidHours: 0,
@@ -300,7 +301,7 @@ function LeavePageBody({ identity, logout }: { identity: StaffIdentity; logout: 
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm text-sm">
             <span className="text-gray-400">
-              {identity.mode === "manager" ? "👔 Manager view" : `👤 ${identity.employeeName}`}
+              {isManager ? "👔 Manager view" : `👤 ${identity.employeeName ?? ""}`}
             </span>
             <button onClick={logout} className="text-xs font-semibold text-gray-400 hover:text-red-500 underline">
               Not you?
@@ -313,7 +314,7 @@ function LeavePageBody({ identity, logout }: { identity: StaffIdentity; logout: 
             { key: "request", label: "📝 New Request" },
             { key: "my", label: "📋 My Requests" },
             { key: "calendar", label: "🗓️ Calendar" },
-            ...(identity.mode === "manager" ? [{ key: "all", label: "📊 All Absences" }] : []),
+            ...(isManager ? [{ key: "all", label: "📊 All Absences" }] : []),
           ].map((tab) => (
             <button key={tab.key} onClick={() => setView(tab.key as any)}
               className="rounded-xl px-4 py-2 text-sm font-semibold transition whitespace-nowrap flex-shrink-0"
@@ -341,7 +342,7 @@ function LeavePageBody({ identity, logout }: { identity: StaffIdentity; logout: 
                 <h2 className="text-lg font-bold" style={{ color: "#5a5a5a" }}>Submit a Leave Request</h2>
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Your Name</label>
-                  {identity.mode === "staff" ? (
+                  {!isManager ? (
                     <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold" style={{ color: "#5a5a5a" }}>
                       {identity.employeeName}
                     </div>
@@ -439,7 +440,7 @@ function LeavePageBody({ identity, logout }: { identity: StaffIdentity; logout: 
 
         {view === "my" && (
           <div className="max-w-lg mx-auto lg:mx-0">
-            {identity.mode === "manager" && (
+            {isManager && (
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-500 mb-1">Select staff member</label>
                 <select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))}
@@ -545,7 +546,7 @@ function LeavePageBody({ identity, logout }: { identity: StaffIdentity; logout: 
 
         {view === "all" && (
           <div>
-            {identity.mode !== "manager" ? (
+            {!isManager ? (
               <div className="max-w-sm mx-auto mt-4">
                 <div className="rounded-2xl bg-white p-8 shadow text-center">
                   <div className="text-4xl mb-3">🔒</div>
@@ -632,8 +633,8 @@ function LeavePageBody({ identity, logout }: { identity: StaffIdentity; logout: 
 
 export default function LeavePage() {
   return (
-    <StaffLoginGate>
+    <AppIdentityGate>
       {(identity, logout) => <LeavePageBody identity={identity} logout={logout} />}
-    </StaffLoginGate>
+    </AppIdentityGate>
   );
 }
