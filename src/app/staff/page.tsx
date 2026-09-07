@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import PasscodeGate from "@/components/PasscodeGate";
+import AppIdentityGate from "@/components/AppIdentityGate";
+import AccessDenied from "@/components/AccessDenied";
 import { Employee, EmployeeRole, DentistSpecialty } from "@/types/employee";
 import {
   loadStaff, addEmployee, updateEmployee, removeEmployee, setEmployeeArchived,
@@ -548,8 +549,10 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 
 export default function StaffPage() {
   return (
-    <PasscodeGate group="admin" subtitle="Enter your passcode to manage staff">
-      {(unlockedVia) => <StaffPageBody isSuperAdmin={unlockedVia === "super"} />}
-    </PasscodeGate>
+    <AppIdentityGate>
+      {(identity, logout) => identity.canAdmin
+        ? <StaffPageBody isSuperAdmin={identity.mode === "super"} />
+        : <AccessDenied logout={logout} />}
+    </AppIdentityGate>
   );
 }
