@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
         headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           from: "Deccan Dental <noreply@mydeccandental.com>",
-          to: ["dr.nanjapa@mydeccandental.com", "ketki@mydeccandental.com"],
+          to: ["dr.nanjapa@mydeccandental.com", "ketki@mydeccandental.com", "dr.coulter@mydeccandental.com"],
           subject: `New Leave Request — ${request.employeeName}`,
           html: `
             <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#5a5a5a">
