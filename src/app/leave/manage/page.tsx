@@ -26,6 +26,21 @@ function LeaveManagePageBody() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ startDate: string; endDate: string }>({ startDate: "", endDate: "" });
+  const [sendingPayroll, setSendingPayroll] = useState(false);
+  const [payrollMessage, setPayrollMessage] = useState("");
+
+  async function handleSendPayrollSummary() {
+    setSendingPayroll(true);
+    setPayrollMessage("");
+    try {
+      const res = await fetch("/api/leave/payroll-summary", { method: "POST" });
+      const data = await res.json();
+      setPayrollMessage(data.sent ? "Payroll summary email sent." : "Could not send the email — check that RESEND_API_KEY is set.");
+    } catch {
+      setPayrollMessage("Something went wrong sending the email.");
+    }
+    setSendingPayroll(false);
+  }
 
   useEffect(() => { refresh(); }, []);
 
@@ -144,7 +159,13 @@ function LeaveManagePageBody() {
             <h1 className="text-3xl font-bold" style={{ color: "#5a5a5a" }}>Leave Management</h1>
             <p className="mt-1 text-gray-400">{pendingCount > 0 ? `${pendingCount} pending request${pendingCount !== 1 ? "s" : ""} awaiting review` : "No pending requests"}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {payrollMessage && <span className="text-xs text-slate-400 max-w-[200px]">{payrollMessage}</span>}
+            <button onClick={handleSendPayrollSummary} disabled={sendingPayroll}
+              className="rounded-xl px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
+              style={{ background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
+              {sendingPayroll ? "Sending…" : "📧 Send Payroll Summary Now"}
+            </button>
             <button onClick={() => setFilter("pending")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
               style={filter === "pending" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
               Pending {pendingCount > 0 && <span className="ml-1 rounded-full bg-white px-1.5 text-xs" style={{ color: "#e8622a" }}>{pendingCount}</span>}
