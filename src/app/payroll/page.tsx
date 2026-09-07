@@ -442,7 +442,7 @@ function PayrollPageBody() {
           </button>
           <button onClick={() => setMainTab("pv")} className="px-4 py-2 text-sm font-semibold transition"
             style={mainTab === "pv" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
-            PV Bonus
+            Net Production Bonus
           </button>
           <button onClick={() => setMainTab("ho")} className="px-4 py-2 text-sm font-semibold transition"
             style={mainTab === "ho" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
@@ -875,11 +875,13 @@ function PvBonusPanel() {
   }
 
   const eligibleStaff = staff.filter((e) => e.pvBonusEligible);
+  const selectedEmployee = staff.find((e) => e.id === employeeId);
+  const percent = selectedEmployee?.netProductionBonusPercent ?? 30;
   const sortedYears = [...years].sort((a, b) => b - a);
   const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
 
   if (eligibleStaff.length === 0 && !loading) {
-    return <p className="text-sm text-slate-400">No one is marked "Eligible for PV-style Bonus" yet — set that on the Staff page first.</p>;
+    return <p className="text-sm text-slate-400">No one is marked "Eligible for Net Production Based Bonus" yet — set that on the Staff page first.</p>;
   }
 
   return (
@@ -913,7 +915,7 @@ function PvBonusPanel() {
                       <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
                         <th className="px-3 py-2 font-medium">Quarter</th>
                         <th className="px-2 py-2 font-medium">Total Income</th>
-                        <th className="px-2 py-2 font-medium">30%</th>
+                        <th className="px-2 py-2 font-medium">{percent}%</th>
                         <th className="px-2 py-2 font-medium">Paid Amount</th>
                         <th className="px-2 py-2 font-medium">Balance</th>
                         <th className="px-2 py-2 font-medium">Paid?</th>
@@ -922,7 +924,7 @@ function PvBonusPanel() {
                     </thead>
                     <tbody>
                       {yearRows.map((q) => {
-                        const owed = q.totalIncome * 0.3;
+                        const owed = q.totalIncome * (percent / 100);
                         const balance = owed - q.amountPaid;
                         return (
                           <tr key={q.quarter} className="border-b border-slate-50 last:border-0">
