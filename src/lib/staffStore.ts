@@ -23,6 +23,7 @@ function rowToEmployee(row: any): Employee {
     canAdmin: row.can_admin ?? false,
     canManageLeave: row.can_manage_leave ?? false,
     canManageEvents: row.can_manage_events ?? false,
+    canManageCerts: row.can_manage_certs ?? false,
     defaultSchedule,
   };
 }
@@ -38,6 +39,7 @@ export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee |
     name: emp.name, role: emp.role, specialty: emp.specialty ?? null,
     color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin || null,
     can_admin: emp.canAdmin ?? false, can_manage_leave: emp.canManageLeave ?? false, can_manage_events: emp.canManageEvents ?? false,
+    can_manage_certs: emp.canManageCerts ?? false,
     default_schedule: emp.defaultSchedule,
   }).select().single();
   if (error) { console.error("addEmployee error:", error); return null; }
@@ -49,6 +51,7 @@ export async function updateEmployee(emp: Employee): Promise<void> {
     name: emp.name, role: emp.role, specialty: emp.specialty ?? null,
     color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin || null,
     can_admin: emp.canAdmin ?? false, can_manage_leave: emp.canManageLeave ?? false, can_manage_events: emp.canManageEvents ?? false,
+    can_manage_certs: emp.canManageCerts ?? false,
     default_schedule: emp.defaultSchedule,
   }).eq("id", emp.id);
   if (error) console.error("updateEmployee error:", error);
