@@ -11,6 +11,7 @@ const navGroups = [
     items: [
       { label: "Calendar", href: "/", icon: "📅" },
       { label: "Leave Request", href: "/leave", icon: "📝" },
+      { label: "Staff Dashboard", href: "/staff-dashboard", icon: "🗂️" },
     ],
   },
   {
