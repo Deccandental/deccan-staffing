@@ -37,6 +37,8 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   ptoBalanceHours: 0,
   sickBalanceHours: 0,
   excludeFromPayroll: false,
+  growthBonusEligible: false,
+  growthBonusMultiplier: 1,
   defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
 };
 
@@ -92,6 +94,8 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       canManagePayroll: emp.canManagePayroll ?? false, ptoBalanceHours: emp.ptoBalanceHours ?? 0,
       sickBalanceHours: emp.sickBalanceHours ?? 0, excludeFromPayroll: emp.excludeFromPayroll ?? false,
       remoteDays: emp.remoteDays ? { ...emp.remoteDays } : undefined,
+      hireDate: emp.hireDate ?? "", growthBonusEligible: emp.growthBonusEligible ?? false,
+      growthBonusMultiplier: emp.growthBonusMultiplier ?? 1,
       defaultSchedule: { ...emp.defaultSchedule }
     });
   }
@@ -313,6 +317,30 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                     <input type="checkbox" checked={form.excludeFromPayroll ?? false} onChange={(e) => setForm((f) => ({ ...f, excludeFromPayroll: e.target.checked }))} />
                     <span className="text-sm font-medium text-gray-700">Exclude from Payroll Dashboard (e.g. a practice owner not paid through this system)</span>
                   </label>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2 rounded-xl bg-slate-50 p-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-500 mb-1">Hire Date</label>
+                    <input type="date" value={form.hireDate ?? ""} onChange={(e) => setForm((f) => ({ ...f, hireDate: e.target.value }))}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" />
+                    <p className="text-xs text-gray-400 mt-1">Used for the Growth Bonus's 5-month new-hire grace period.</p>
+                  </div>
+                  <div>
+                    <label className="flex items-center gap-2 cursor-pointer mb-1">
+                      <input type="checkbox" checked={form.growthBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, growthBonusEligible: e.target.checked }))} />
+                      <span className="text-sm font-medium text-gray-700">Eligible for Growth Bonus</span>
+                    </label>
+                    {form.growthBonusEligible && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-500">Point multiplier</label>
+                        <input type="number" step="0.1" value={form.growthBonusMultiplier ?? 1}
+                          onChange={(e) => setForm((f) => ({ ...f, growthBonusMultiplier: Number(e.target.value) }))}
+                          className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none" />
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-400 mt-1">Owner, contractors (e.g. Dr. Ho), and temps stay unchecked — they're not part of this program.</p>
+                  </div>
                 </div>
 
                 {form.role === "Dentist" && (
