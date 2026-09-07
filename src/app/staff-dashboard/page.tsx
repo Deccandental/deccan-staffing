@@ -12,7 +12,7 @@ import {
 } from "@/lib/certsStore";
 import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
 import { UpcomingShift, loadUpcomingShiftsForEmployee } from "@/lib/staffSchedule";
-import DashboardLoginGate, { DashboardIdentity } from "@/components/DashboardLoginGate";
+import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
 const REASON_LABELS: Record<string, string> = {
   sick: "Sick Leave", pto: "PTO / Vacation", leave: "Personal Leave", other: "Other",
@@ -54,9 +54,10 @@ interface CertFormState {
 
 const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "" };
 
-function DashboardPageBody({ identity, logout }: { identity: DashboardIdentity; logout: () => void }) {
+function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
+  const isManager = identity.canAdmin;
   const [staff, setStaff] = useState<Employee[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(identity.mode === "staff" ? identity.employeeId : null);
+  const [selectedId, setSelectedId] = useState<number | null>(identity.mode === "staff" ? (identity.employeeId ?? null) : null);
   const [shifts, setShifts] = useState<UpcomingShift[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [certs, setCerts] = useState<Certification[]>([]);
@@ -174,7 +175,7 @@ function DashboardPageBody({ identity, logout }: { identity: DashboardIdentity; 
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm text-sm">
             <span className="text-gray-400">
-              {identity.mode === "manager" ? "👔 Manager view" : `👤 ${identity.employeeName}`}
+              {isManager ? "👔 Manager view" : `👤 ${identity.employeeName ?? ""}`}
             </span>
             <button onClick={logout} className="text-xs font-semibold text-gray-400 hover:text-red-500 underline">
               Not you?
@@ -182,7 +183,7 @@ function DashboardPageBody({ identity, logout }: { identity: DashboardIdentity; 
           </div>
         </header>
 
-        {identity.mode === "manager" && (
+        {isManager && (
           <div className="mb-6 max-w-sm">
             <label className="block text-xs font-semibold text-slate-500 mb-1">View staff member</label>
             <select value={selectedId ?? ""} onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : null)}
@@ -376,8 +377,8 @@ function DashboardPageBody({ identity, logout }: { identity: DashboardIdentity; 
 
 export default function StaffDashboardPage() {
   return (
-    <DashboardLoginGate>
+    <AppIdentityGate>
       {(identity, logout) => <DashboardPageBody identity={identity} logout={logout} />}
-    </DashboardLoginGate>
+    </AppIdentityGate>
   );
 }
