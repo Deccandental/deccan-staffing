@@ -19,6 +19,7 @@ import {
   loadGrowthBonusDaysOverrides, GrowthBonusQuarter,
 } from "@/lib/growthBonus";
 import { PvBonusQuarter, loadPvBonusYear } from "@/lib/pvBonus";
+import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
 const REASON_LABELS: Record<string, string> = {
@@ -78,6 +79,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [yearPayrollEntries, setYearPayrollEntries] = useState<PayrollEntry[]>([]);
   const [bonusReceivedThisYear, setBonusReceivedThisYear] = useState(0);
   const [pvQuarters, setPvQuarters] = useState<PvBonusQuarter[]>([]);
+  const [hygieneEntries, setHygieneEntries] = useState<HygieneBonusEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [showCertForm, setShowCertForm] = useState(false);
@@ -110,9 +112,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       loadPayrollEntriesInRange(yearStart, yearEnd),
       loadGrowthBonusPayments(selectedId),
       loadPvBonusYear(selectedId, bonusYear),
+      loadHygieneBonusEntries(selectedId, yearStart, yearEnd),
     ]).then(([
       shiftData, leaveData, certData, eventData, titles,
-      q1, q2, q3, q4, d1, d2, d3, d4, entries, payments, pvYear,
+      q1, q2, q3, q4, d1, d2, d3, d4, entries, payments, pvYear, hygieneYear,
     ]) => {
       if (cancelled) return;
       setShifts(shiftData);
@@ -124,6 +127,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       setYearDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
       setYearPayrollEntries(entries);
       setPvQuarters(pvYear);
+      setHygieneEntries(hygieneYear);
       setBonusReceivedThisYear(payments.filter((p) => p.date.startsWith(String(bonusYear))).reduce((sum, p) => sum + p.amount, 0));
       setLoading(false);
     });
@@ -135,6 +139,11 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   // Computes what this specific employee earned for a given quarter, by
   // splitting that quarter's pool across every eligible employee — mirrors
   // the same logic used in the Payroll Dashboard's Growth Bonus tab.
+  const isHygienist = selectedEmployee && (selectedEmployee.role === "Hygienist" || selectedEmployee.skills.includes("Hygienist"));
+  const hygieneEarned = hygieneEntries.reduce((sum, e) => sum + e.patientCount * HYGIENE_BONUS_PER_PATIENT, 0);
+  const hygienePaid = hygieneEntries.reduce((sum, e) => sum + e.amountPaid, 0);
+  const hygieneBalance = hygieneEarned - hygienePaid;
+
   function bonusForQuarter(q: 1 | 2 | 3 | 4): { calc: ReturnType<typeof computeQuarterCalc>; myBonus: number } | null {
     const qData = yearQuartersData[q];
     if (!qData || !selectedEmployee) return null;
@@ -322,10 +331,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                         <span className="font-medium text-slate-700">{QUARTER_LABELS[q.quarter]}</span>
                         <div className="flex items-center gap-3">
                           <span className="text-slate-400 text-xs">{percent}%: ${owed.toLocaleString()}</span>
-                          {q.paid ? (
-                            <span className="text-emerald-700 font-semibold">✓ Paid (${q.amountPaid.toLocaleString()})</span>
-                          ) : balance > 0 ? (
-                            <span className="text-amber-600 font-semibold">Owed: ${balance.toLocaleString()}</span>
+                          {balance > 0 ? (
+                            <span className="text-amber-600 font-semibold">Bonus: ${balance.toLocaleString()}</span>
+                          ) : q.totalIncome > 0 ? (
+                            <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
                           ) : (
                             <span className="text-slate-400">Not started</span>
                           )}
@@ -333,6 +342,22 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {isHygienist && (
+              <div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow">
+                <h2 className="font-bold text-slate-700 mb-3">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
+                <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
+                  <span className="text-slate-500">Earned ${hygieneEarned.toLocaleString()} · Paid ${hygienePaid.toLocaleString()}</span>
+                  {hygieneBalance > 0 ? (
+                    <span className="text-amber-600 font-semibold">Bonus: ${hygieneBalance.toLocaleString()}</span>
+                  ) : hygieneEarned > 0 ? (
+                    <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
+                  ) : (
+                    <span className="text-slate-400">Not started</span>
+                  )}
                 </div>
               </div>
             )}
