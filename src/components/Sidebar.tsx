@@ -35,6 +35,12 @@ const navGroups = [
       { label: "Events", href: "/events", icon: "📌" },
     ],
   },
+  {
+    label: "Certifications 🔒",
+    items: [
+      { label: "Certifications", href: "/certifications", icon: "📄" },
+    ],
+  },
 ];
 
 function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
