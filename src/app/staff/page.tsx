@@ -40,6 +40,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   growthBonusEligible: false,
   growthBonusMultiplier: 1,
   pvBonusEligible: false,
+  netProductionBonusPercent: 30,
   defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
 };
 
@@ -98,6 +99,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       hireDate: emp.hireDate ?? "", growthBonusEligible: emp.growthBonusEligible ?? false,
       growthBonusMultiplier: emp.growthBonusMultiplier ?? 1,
       pvBonusEligible: emp.pvBonusEligible ?? false,
+      netProductionBonusPercent: emp.netProductionBonusPercent ?? 30,
       defaultSchedule: { ...emp.defaultSchedule }
     });
   }
@@ -344,8 +346,17 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                     <p className="text-xs text-gray-400 mt-1">Owner, contractors (e.g. Dr. Ho), and temps stay unchecked — they're not part of this program.</p>
                     <label className="flex items-center gap-2 cursor-pointer mt-3">
                       <input type="checkbox" checked={form.pvBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, pvBonusEligible: e.target.checked }))} />
-                      <span className="text-sm font-medium text-gray-700">Eligible for PV-style Bonus (% of own income, tracked separately)</span>
+                      <span className="text-sm font-medium text-gray-700">Eligible for Net Production Based Bonus</span>
                     </label>
+                    {form.pvBonusEligible && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <label className="text-xs text-gray-500">Percentage of net production</label>
+                        <input type="number" step="1" value={form.netProductionBonusPercent ?? 30}
+                          onChange={(e) => setForm((f) => ({ ...f, netProductionBonusPercent: Number(e.target.value) }))}
+                          className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none" />
+                        <span className="text-xs text-gray-500">%</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
