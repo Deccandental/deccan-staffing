@@ -1,3 +1,4 @@
+"use client";
 import { Sidebar } from "@/components/Sidebar";
 import ScheduleBuilder from "@/components/ScheduleBuilder";
 import AppIdentityGate from "@/components/AppIdentityGate";
