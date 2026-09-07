@@ -21,8 +21,8 @@ import {
   getQuarterDateRange, getCurrentQuarter, loadGrowthBonusPayments, addGrowthBonusPayment,
   loadGrowthBonusDaysOverrides, saveGrowthBonusDaysOverride,
 } from "@/lib/growthBonus";
-import { PvBonusQuarter, loadPvBonusQuarter, savePvBonusQuarter } from "@/lib/pvBonus";
-import { HoBonusMonth, loadHoBonusMonth, loadHoBonusMonths, saveHoBonusMonth } from "@/lib/hoBonus";
+import { PvBonusQuarter, loadPvBonusYear, savePvBonusQuarter } from "@/lib/pvBonus";
+import { HoBonusMonth, loadHoBonusMonths, saveHoBonusMonth } from "@/lib/hoBonus";
 
 const HYGIENE_BONUS_PER_PATIENT = 15;
 
@@ -779,83 +779,116 @@ function GrowthBonusPanel() {
 }
 
 function PvBonusPanel() {
-  const initial = getCurrentQuarter();
-  const [year, setYear] = useState(initial.year);
-  const [quarter, setQuarter] = useState<1 | 2 | 3 | 4>(initial.quarter);
-  const [form, setForm] = useState<PvBonusQuarter>({ year: initial.year, quarter: initial.quarter, totalIncome: 0, amountPaid: 0, notes: "" });
+  const currentYear = new Date().getFullYear();
+  const [years, setYears] = useState<number[]>([currentYear]);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set([currentYear]));
+  const [rows, setRows] = useState<Record<number, PvBonusQuarter[]>>({});
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [savedMsg, setSavedMsg] = useState("");
+  const [savingYear, setSavingYear] = useState<number | null>(null);
+  const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
+  const [newYearInput, setNewYearInput] = useState("");
 
-  useEffect(() => { refresh(); }, [year, quarter]);
+  useEffect(() => { loadYears(years); }, []);
 
-  async function refresh() {
+  async function loadYears(ys: number[]) {
     setLoading(true);
-    const q = await loadPvBonusQuarter(year, quarter);
-    setForm(q);
+    const results = await Promise.all(ys.map((y) => loadPvBonusYear(y)));
+    setRows((r) => { const next = { ...r }; ys.forEach((y, i) => { next[y] = results[i]; }); return next; });
     setLoading(false);
   }
 
-  async function handleSave() {
-    setSaving(true);
-    await savePvBonusQuarter(form);
-    setSaving(false);
-    setSavedMsg("Saved.");
+  function toggleExpanded(y: number) {
+    setExpanded((s) => { const next = new Set(s); if (next.has(y)) next.delete(y); else next.add(y); return next; });
   }
 
-  const owed30 = form.totalIncome * 0.3;
-  const balance = owed30 - form.amountPaid;
+  function addYear() {
+    const y = Number(newYearInput);
+    if (!y || years.includes(y)) return;
+    setYears((ys) => [...ys, y]);
+    setExpanded((s) => new Set(s).add(y));
+    setNewYearInput("");
+    loadYears([y]);
+  }
+
+  function updateCell(year: number, quarter: number, field: "totalIncome" | "amountPaid" | "notes", value: number | string) {
+    setRows((r) => ({ ...r, [year]: (r[year] ?? []).map((q) => q.quarter === quarter ? { ...q, [field]: value } : q) }));
+  }
+
+  async function handleSaveYear(year: number) {
+    setSavingYear(year);
+    await Promise.all((rows[year] ?? []).map((q) => savePvBonusQuarter(q)));
+    setSavingYear(null);
+    setSavedMsg((m) => ({ ...m, [year]: "Saved." }));
+  }
+
+  const sortedYears = [...years].sort((a, b) => b - a);
+  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+
+  if (loading && Object.keys(rows).length === 0) return <p className="text-slate-400 text-sm">Loading…</p>;
 
   return (
-    <div className="max-w-2xl space-y-4">
-      <div className="flex items-center gap-3">
-        <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
-          className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-        <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden">
-          {([1, 2, 3, 4] as const).map((q) => (
-            <button key={q} onClick={() => setQuarter(q)} className="px-3 py-1.5 text-sm font-semibold transition"
-              style={quarter === q ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
-              {QUARTER_LABELS[q]}
-            </button>
-          ))}
-        </div>
+    <div className="max-w-4xl space-y-4">
+      <div className="flex items-center gap-2">
+        <input type="number" value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
+          className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+        <button onClick={addYear} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+          + Add Year
+        </button>
       </div>
 
-      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
-        <div className="rounded-xl bg-white shadow-sm p-4 space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="block text-xs text-slate-400 mb-0.5">Total Income (from Open Dental)</label>
-              <input type="number" value={form.totalIncome} onChange={(e) => setForm((f) => ({ ...f, totalIncome: Number(e.target.value) }))}
-                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-0.5">Amount Paid This Quarter</label>
-              <input type="number" value={form.amountPaid} onChange={(e) => setForm((f) => ({ ...f, amountPaid: Number(e.target.value) }))}
-                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-            </div>
-          </div>
-          <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
-            <div>30% of income: <strong>${owed30.toLocaleString()}</strong></div>
-            <div className={balance > 0 ? "text-amber-600 font-semibold" : balance < 0 ? "text-red-500 font-semibold" : "text-slate-500"}>
-              {balance > 0 ? `Still owed: $${balance.toLocaleString()}` : balance < 0 ? `Overpaid by: $${Math.abs(balance).toLocaleString()}` : "Fully paid"}
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-0.5">Notes (deductions, corrections, etc.)</label>
-            <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={4}
-              placeholder="e.g. Adjusted for procedure billed under wrong provider..."
-              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none resize-none" />
-          </div>
-          <div className="flex items-center gap-3">
-            <button onClick={handleSave} disabled={saving}
-              className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
-              {saving ? "Saving…" : "Save"}
+      {sortedYears.map((year) => {
+        const yearRows = rows[year] ?? [];
+        const isExpanded = expanded.has(year);
+        return (
+          <div key={year} className="rounded-xl bg-white shadow-sm overflow-hidden">
+            <button onClick={() => toggleExpanded(year)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
+              <span className="font-bold text-slate-700">{year}</span>
+              <span className="text-slate-300 text-xs">{isExpanded ? "▲" : "▼"}</span>
             </button>
-            {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
+            {isExpanded && (
+              <div className="border-t border-slate-100">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse min-w-[700px]">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                        <th className="px-3 py-2 font-medium">Quarter</th>
+                        <th className="px-2 py-2 font-medium">Total Income</th>
+                        <th className="px-2 py-2 font-medium">30%</th>
+                        <th className="px-2 py-2 font-medium">Paid</th>
+                        <th className="px-2 py-2 font-medium">Balance</th>
+                        <th className="px-3 py-2 font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {yearRows.map((q) => {
+                        const owed = q.totalIncome * 0.3;
+                        const balance = owed - q.amountPaid;
+                        return (
+                          <tr key={q.quarter} className="border-b border-slate-50 last:border-0">
+                            <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{QUARTER_LABELS[q.quarter as 1 | 2 | 3 | 4]}</td>
+                            <td className="px-2 py-2"><input type="number" value={q.totalIncome} onChange={(e) => updateCell(year, q.quarter, "totalIncome", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
+                            <td className="px-2 py-2 text-slate-500">${owed.toLocaleString()}</td>
+                            <td className="px-2 py-2"><input type="number" value={q.amountPaid} onChange={(e) => updateCell(year, q.quarter, "amountPaid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
+                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${balance.toLocaleString()}</td>
+                            <td className="px-2 py-2"><input type="text" value={q.notes} onChange={(e) => updateCell(year, q.quarter, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex items-center gap-3 p-3">
+                  <button onClick={() => handleSaveYear(year)} disabled={savingYear === year}
+                    className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                    {savingYear === year ? "Saving…" : "Save"}
+                  </button>
+                  {savedMsg[year] && <span className="text-xs text-slate-400">{savedMsg[year]}</span>}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }
@@ -863,100 +896,123 @@ function PvBonusPanel() {
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 function HoBonusPanel() {
-  const today = new Date();
-  const [year, setYear] = useState(today.getFullYear());
-  const [month, setMonth] = useState(today.getMonth() + 1);
-  const [form, setForm] = useState<HoBonusMonth>({ year: today.getFullYear(), month: today.getMonth() + 1, production: 0, paid: 0, notes: "" });
-  const [yearMonths, setYearMonths] = useState<HoBonusMonth[]>([]);
+  const currentYear = new Date().getFullYear();
+  const [years, setYears] = useState<number[]>([currentYear]);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set([currentYear]));
+  const [rows, setRows] = useState<Record<number, HoBonusMonth[]>>({});
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [savedMsg, setSavedMsg] = useState("");
+  const [savingYear, setSavingYear] = useState<number | null>(null);
+  const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
+  const [newYearInput, setNewYearInput] = useState("");
 
-  useEffect(() => { refresh(); }, [year, month]);
+  useEffect(() => { loadYears(years); }, []);
 
-  async function refresh() {
+  async function loadYears(ys: number[]) {
     setLoading(true);
-    const [m, months] = await Promise.all([loadHoBonusMonth(year, month), loadHoBonusMonths(year)]);
-    setForm(m);
-    setYearMonths(months);
+    const results = await Promise.all(ys.map((y) => loadHoBonusMonths(y)));
+    setRows((r) => { const next = { ...r }; ys.forEach((y, i) => { next[y] = results[i]; }); return next; });
     setLoading(false);
   }
 
-  async function handleSave() {
-    setSaving(true);
-    await saveHoBonusMonth(form);
-    setSaving(false);
-    setSavedMsg("Saved.");
-    await refresh();
+  function toggleExpanded(y: number) {
+    setExpanded((s) => { const next = new Set(s); if (next.has(y)) next.delete(y); else next.add(y); return next; });
   }
 
-  const owed40 = form.production * 0.4;
-  const balance = owed40 - form.paid;
+  function addYear() {
+    const y = Number(newYearInput);
+    if (!y || years.includes(y)) return;
+    setYears((ys) => [...ys, y]);
+    setExpanded((s) => new Set(s).add(y));
+    setNewYearInput("");
+    loadYears([y]);
+  }
 
-  const yearTotals = yearMonths.reduce((acc, m) => ({
-    income: acc.income + m.production, owed: acc.owed + m.production * 0.4, paid: acc.paid + m.paid,
-  }), { income: 0, owed: 0, paid: 0 });
+  function updateCell(year: number, month: number, field: "production" | "paid" | "notes", value: number | string) {
+    setRows((r) => ({ ...r, [year]: (r[year] ?? []).map((m) => m.month === month ? { ...m, [field]: value } : m) }));
+  }
+
+  async function handleSaveYear(year: number) {
+    setSavingYear(year);
+    await Promise.all((rows[year] ?? []).map((m) => saveHoBonusMonth(m)));
+    setSavingYear(null);
+    setSavedMsg((m) => ({ ...m, [year]: "Saved." }));
+  }
+
+  const sortedYears = [...years].sort((a, b) => b - a);
+  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+
+  if (loading && Object.keys(rows).length === 0) return <p className="text-slate-400 text-sm">Loading…</p>;
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="max-w-4xl space-y-4">
       <p className="text-sm text-slate-500">Production-based — 40% of that month's production, paid out over the following month's pay periods.</p>
-      <div className="flex items-center gap-3">
-        <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
-          className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-        <select value={month} onChange={(e) => setMonth(Number(e.target.value))}
-          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
-          {MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
-        </select>
+      <div className="flex items-center gap-2">
+        <input type="number" value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
+          className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+        <button onClick={addYear} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+          + Add Year
+        </button>
       </div>
 
-      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
-        <>
-          <div className="rounded-xl bg-white shadow-sm p-4 space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="block text-xs text-slate-400 mb-0.5">Production for {MONTH_NAMES[month - 1]} {year}</label>
-                <input type="number" value={form.production} onChange={(e) => setForm((f) => ({ ...f, production: Number(e.target.value) }))}
-                  className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+      {sortedYears.map((year) => {
+        const yearRows = rows[year] ?? [];
+        const isExpanded = expanded.has(year);
+        const yearTotals = yearRows.reduce((acc, m) => ({
+          income: acc.income + m.production, owed: acc.owed + m.production * 0.4, paid: acc.paid + m.paid,
+        }), { income: 0, owed: 0, paid: 0 });
+        return (
+          <div key={year} className="rounded-xl bg-white shadow-sm overflow-hidden">
+            <button onClick={() => toggleExpanded(year)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
+              <span className="font-bold text-slate-700">{year}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400 hidden sm:inline">Income ${yearTotals.income.toLocaleString()} · 40% ${yearTotals.owed.toLocaleString()} · Paid ${yearTotals.paid.toLocaleString()}</span>
+                <span className="text-slate-300 text-xs">{isExpanded ? "▲" : "▼"}</span>
               </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-0.5">Paid</label>
-                <input type="number" value={form.paid} onChange={(e) => setForm((f) => ({ ...f, paid: Number(e.target.value) }))}
-                  className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            </button>
+            {isExpanded && (
+              <div className="border-t border-slate-100">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse min-w-[700px]">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                        <th className="px-3 py-2 font-medium">Month</th>
+                        <th className="px-2 py-2 font-medium">Production</th>
+                        <th className="px-2 py-2 font-medium">40%</th>
+                        <th className="px-2 py-2 font-medium">Paid</th>
+                        <th className="px-2 py-2 font-medium">Balance</th>
+                        <th className="px-3 py-2 font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {yearRows.map((m) => {
+                        const owed = m.production * 0.4;
+                        const balance = owed - m.paid;
+                        return (
+                          <tr key={m.month} className="border-b border-slate-50 last:border-0">
+                            <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]}</td>
+                            <td className="px-2 py-2"><input type="number" value={m.production} onChange={(e) => updateCell(year, m.month, "production", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
+                            <td className="px-2 py-2 text-slate-500">${owed.toLocaleString()}</td>
+                            <td className="px-2 py-2"><input type="number" value={m.paid} onChange={(e) => updateCell(year, m.month, "paid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
+                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${balance.toLocaleString()}</td>
+                            <td className="px-2 py-2"><input type="text" value={m.notes} onChange={(e) => updateCell(year, m.month, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex items-center gap-3 p-3">
+                  <button onClick={() => handleSaveYear(year)} disabled={savingYear === year}
+                    className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                    {savingYear === year ? "Saving…" : "Save"}
+                  </button>
+                  {savedMsg[year] && <span className="text-xs text-slate-400">{savedMsg[year]}</span>}
+                </div>
               </div>
-            </div>
-
-            <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
-              <div>40%: <strong>${owed40.toLocaleString()}</strong></div>
-              <div className={balance > 0 ? "text-amber-600 font-semibold" : balance < 0 ? "text-red-500 font-semibold" : "text-slate-500"}>
-                {balance > 0 ? `Owed: $${balance.toLocaleString()}` : balance < 0 ? `Overpaid by: $${Math.abs(balance).toLocaleString()}` : "Fully paid"}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs text-slate-400 mb-0.5">Notes</label>
-              <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={3}
-                placeholder="Any adjustments..." className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none resize-none" />
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button onClick={handleSave} disabled={saving}
-                className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
-                {saving ? "Saving…" : "Save"}
-              </button>
-              {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
-            </div>
+            )}
           </div>
-
-          <div className="rounded-xl bg-white shadow-sm p-4">
-            <h2 className="font-bold text-slate-700 mb-2 text-sm">{year} Totals</h2>
-            <div className="grid grid-cols-3 gap-3 text-sm">
-              <div><span className="text-slate-400 text-xs block">Income</span><strong>${yearTotals.income.toLocaleString()}</strong></div>
-              <div><span className="text-slate-400 text-xs block">40%</span><strong>${yearTotals.owed.toLocaleString()}</strong></div>
-              <div><span className="text-slate-400 text-xs block">Paid</span><strong>${yearTotals.paid.toLocaleString()}</strong></div>
-            </div>
-          </div>
-        </>
-      )}
+        );
+      })}
     </div>
   );
 }
