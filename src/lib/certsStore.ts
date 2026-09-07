@@ -7,8 +7,7 @@ export interface Certification {
   ownerType: CertOwnerType;
   employeeId: number | null;
   title: string;
-  issuingAuthority: string;
-  expirationDate: string; // YYYY-MM-DD
+  expirationDate: string | null; // YYYY-MM-DD, or null if this cert never expires
   fileUrl: string;
   fileName: string;
   remindersSent: Record<string, boolean>;
@@ -19,8 +18,7 @@ export interface NewCertInput {
   ownerType: CertOwnerType;
   employeeId: number | null;
   title: string;
-  issuingAuthority: string;
-  expirationDate: string;
+  expirationDate: string | null;
   fileUrl: string;
   fileName: string;
 }
@@ -31,13 +29,22 @@ function fromRow(row: any): Certification {
     ownerType: row.owner_type,
     employeeId: row.employee_id ?? null,
     title: row.title,
-    issuingAuthority: row.issuing_authority ?? "",
-    expirationDate: row.expiration_date,
+    expirationDate: row.expiration_date ?? null,
     fileUrl: row.file_url,
     fileName: row.file_name ?? "",
     remindersSent: row.reminders_sent ?? {},
     createdAt: row.created_at,
   };
+}
+
+// Distinct document names already on file, so the form can offer them as a
+// dropdown instead of free text — keeps "CPR Certification" from also
+// showing up as "CPR Cert" or "cpr certification" elsewhere.
+export async function loadDistinctTitles(): Promise<string[]> {
+  const { data, error } = await supabase.from("certifications").select("title");
+  if (error) { console.error("loadDistinctTitles error:", error); return []; }
+  const set = new Set<string>((data ?? []).map((r: any) => r.title).filter(Boolean));
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 
 const MAX_FILE_SIZE_MB = 10;
@@ -128,7 +135,6 @@ export async function createCertification(input: NewCertInput): Promise<Certific
       owner_type: input.ownerType,
       employee_id: input.employeeId,
       title: input.title,
-      issuing_authority: input.issuingAuthority,
       expiration_date: input.expirationDate,
       file_url: input.fileUrl,
       file_name: input.fileName,
@@ -147,7 +153,6 @@ export async function updateCertification(id: string, input: NewCertInput): Prom
     owner_type: input.ownerType,
     employee_id: input.employeeId,
     title: input.title,
-    issuing_authority: input.issuingAuthority,
     expiration_date: input.expirationDate,
     file_url: input.fileUrl,
     file_name: input.fileName,
