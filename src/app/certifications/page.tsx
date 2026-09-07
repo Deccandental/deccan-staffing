@@ -211,12 +211,11 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
     let fileUrl = "";
     let fileName = "";
     if (file) {
-      if (file) {
-  const uploaded = await uploadCertFile(file);
-  if ("error" in uploaded) { setError(uploaded.error); setSaving(false); return; }
-  fileUrl = uploaded.url;
-  fileName = uploaded.name;
-} else if (editingId) {
+      const uploaded = await uploadCertFile(file);
+      if ("error" in uploaded) { setError(uploaded.error); setSaving(false); return; }
+      fileUrl = uploaded.url;
+      fileName = uploaded.name;
+    } else if (editingId) {
       const existing = (identity.mode === "manager" ? allCerts : myCerts).find((c) => c.id === editingId);
       fileUrl = existing?.fileUrl ?? "";
       fileName = existing?.fileName ?? "";
