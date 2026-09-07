@@ -41,6 +41,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   growthBonusMultiplier: 1,
   pvBonusEligible: false,
   netProductionBonusPercent: 30,
+  hoBonusEligible: false,
   defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
 };
 
@@ -100,6 +101,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       growthBonusMultiplier: emp.growthBonusMultiplier ?? 1,
       pvBonusEligible: emp.pvBonusEligible ?? false,
       netProductionBonusPercent: emp.netProductionBonusPercent ?? 30,
+      hoBonusEligible: emp.hoBonusEligible ?? false,
       defaultSchedule: { ...emp.defaultSchedule }
     });
   }
@@ -357,6 +359,10 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                         <span className="text-xs text-gray-500">%</span>
                       </div>
                     )}
+                    <label className="flex items-center gap-2 cursor-pointer mt-3">
+                      <input type="checkbox" checked={form.hoBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, hoBonusEligible: e.target.checked }))} />
+                      <span className="text-sm font-medium text-gray-700">Eligible for Dr. Ho-style Bonus (monthly, paid the following month)</span>
+                    </label>
                   </div>
                 </div>
 
