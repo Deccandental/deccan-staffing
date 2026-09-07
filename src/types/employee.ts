@@ -51,6 +51,17 @@ export interface Employee {
   // office itself is open that day (e.g. "works remote every Tuesday" even
   // on Tuesdays the office is closed). Same shape as defaultSchedule.
   remoteDays?: WeekdaySchedule;
+  // Hire date — used to compute the "first 5 months of employment" grace
+  // period for the quarterly Growth Bonus (new hires aren't eligible yet).
+  hireDate?: string;
+  // Opt-in flag for the quarterly Growth Bonus pool. Off by default — the
+  // owner, independent contractors (e.g. Dr. Ho, who has her own separate
+  // arrangement), and temps are never part of this program.
+  growthBonusEligible?: boolean;
+  // Per-person point multiplier used when splitting the bonus pool by days
+  // worked (e.g. Office Manager 1.2, Patient Scheduler 1.1, reduced 0.5).
+  // Only meaningful when growthBonusEligible is true. Defaults to 1.
+  growthBonusMultiplier?: number;
   // When true, this person is inactive — hidden from every "pick who's
   // working / assign this to" list (Schedule Builder, swap menus, Events
   // invite list, PIN logins, etc.) but their existing records (leave
