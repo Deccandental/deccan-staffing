@@ -821,6 +821,8 @@ function GrowthBonusPanel() {
 
 function PvBonusPanel() {
   const currentYear = new Date().getFullYear();
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [employeeId, setEmployeeId] = useState<number | null>(null);
   const [years, setYears] = useState<number[]>([currentYear]);
   const [expanded, setExpanded] = useState<Set<number>>(new Set([currentYear]));
   const [rows, setRows] = useState<Record<number, PvBonusQuarter[]>>({});
@@ -829,11 +831,21 @@ function PvBonusPanel() {
   const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
   const [newYearInput, setNewYearInput] = useState("");
 
-  useEffect(() => { loadYears(years); }, []);
+  useEffect(() => {
+    loadStaff().then((s) => {
+      setStaff(s);
+      const eligible = s.filter((e) => e.pvBonusEligible);
+      if (eligible.length > 0) setEmployeeId(eligible[0].id);
+      else setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => { if (employeeId != null) loadYears(years); }, [employeeId]);
 
   async function loadYears(ys: number[]) {
+    if (employeeId == null) return;
     setLoading(true);
-    const results = await Promise.all(ys.map((y) => loadPvBonusYear(y)));
+    const results = await Promise.all(ys.map((y) => loadPvBonusYear(employeeId, y)));
     setRows((r) => { const next = { ...r }; ys.forEach((y, i) => { next[y] = results[i]; }); return next; });
     setLoading(false);
   }
@@ -851,7 +863,7 @@ function PvBonusPanel() {
     loadYears([y]);
   }
 
-  function updateCell(year: number, quarter: number, field: "totalIncome" | "amountPaid" | "notes", value: number | string) {
+  function updateCell(year: number, quarter: number, field: "totalIncome" | "amountPaid" | "notes" | "paid", value: number | string | boolean) {
     setRows((r) => ({ ...r, [year]: (r[year] ?? []).map((q) => q.quarter === quarter ? { ...q, [field]: value } : q) }));
   }
 
@@ -862,14 +874,21 @@ function PvBonusPanel() {
     setSavedMsg((m) => ({ ...m, [year]: "Saved." }));
   }
 
+  const eligibleStaff = staff.filter((e) => e.pvBonusEligible);
   const sortedYears = [...years].sort((a, b) => b - a);
   const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
 
-  if (loading && Object.keys(rows).length === 0) return <p className="text-slate-400 text-sm">Loading…</p>;
+  if (eligibleStaff.length === 0 && !loading) {
+    return <p className="text-sm text-slate-400">No one is marked "Eligible for PV-style Bonus" yet — set that on the Staff page first.</p>;
+  }
 
   return (
     <div className="max-w-4xl space-y-4">
       <div className="flex items-center gap-2">
+        <select value={employeeId ?? ""} onChange={(e) => setEmployeeId(Number(e.target.value))}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {eligibleStaff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
         <input type="number" value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
           className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
         <button onClick={addYear} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
@@ -877,7 +896,7 @@ function PvBonusPanel() {
         </button>
       </div>
 
-      {sortedYears.map((year) => {
+      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : sortedYears.map((year) => {
         const yearRows = rows[year] ?? [];
         const isExpanded = expanded.has(year);
         return (
@@ -889,14 +908,15 @@ function PvBonusPanel() {
             {isExpanded && (
               <div className="border-t border-slate-100">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm border-collapse min-w-[700px]">
+                  <table className="w-full text-sm border-collapse min-w-[760px]">
                     <thead>
                       <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
                         <th className="px-3 py-2 font-medium">Quarter</th>
                         <th className="px-2 py-2 font-medium">Total Income</th>
                         <th className="px-2 py-2 font-medium">30%</th>
-                        <th className="px-2 py-2 font-medium">Paid</th>
+                        <th className="px-2 py-2 font-medium">Paid Amount</th>
                         <th className="px-2 py-2 font-medium">Balance</th>
+                        <th className="px-2 py-2 font-medium">Paid?</th>
                         <th className="px-3 py-2 font-medium">Notes</th>
                       </tr>
                     </thead>
@@ -911,6 +931,9 @@ function PvBonusPanel() {
                             <td className="px-2 py-2 text-slate-500">${owed.toLocaleString()}</td>
                             <td className="px-2 py-2"><input type="number" value={q.amountPaid} onChange={(e) => updateCell(year, q.quarter, "amountPaid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
                             <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${balance.toLocaleString()}</td>
+                            <td className="px-2 py-2 text-center">
+                              <input type="checkbox" checked={q.paid} onChange={(e) => updateCell(year, q.quarter, "paid", e.target.checked)} />
+                            </td>
                             <td className="px-2 py-2"><input type="text" value={q.notes} onChange={(e) => updateCell(year, q.quarter, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
                           </tr>
                         );
