@@ -29,6 +29,7 @@ export interface Employee {
   canAdmin?: boolean;
   canManageLeave?: boolean;
   canManageEvents?: boolean;
+  canManageCerts?: boolean;
   defaultSchedule: {
     monday: boolean;
     tuesday: boolean;
