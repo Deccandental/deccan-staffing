@@ -33,6 +33,9 @@ function rowToEmployee(row: any): Employee {
     sickBalanceHours: row.sick_balance_hours ?? 0,
     excludeFromPayroll: row.exclude_from_payroll ?? false,
     remoteDays: remoteDays ?? undefined,
+    hireDate: row.hire_date ?? undefined,
+    growthBonusEligible: row.growth_bonus_eligible ?? false,
+    growthBonusMultiplier: row.growth_bonus_multiplier ?? 1,
     archived: row.archived ?? false,
     defaultSchedule,
   };
@@ -52,6 +55,7 @@ export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee |
     can_manage_certs: emp.canManageCerts ?? false, can_manage_payroll: emp.canManagePayroll ?? false, archived: emp.archived ?? false,
     pto_balance_hours: emp.ptoBalanceHours ?? 0, sick_balance_hours: emp.sickBalanceHours ?? 0, exclude_from_payroll: emp.excludeFromPayroll ?? false,
     default_schedule: emp.defaultSchedule, remote_days: emp.remoteDays ?? null,
+    hire_date: emp.hireDate || null, growth_bonus_eligible: emp.growthBonusEligible ?? false, growth_bonus_multiplier: emp.growthBonusMultiplier ?? 1,
   }).select().single();
   if (error) { console.error("addEmployee error:", error); return null; }
   return rowToEmployee(data);
@@ -65,6 +69,7 @@ export async function updateEmployee(emp: Employee): Promise<void> {
     can_manage_certs: emp.canManageCerts ?? false, can_manage_payroll: emp.canManagePayroll ?? false, archived: emp.archived ?? false,
     pto_balance_hours: emp.ptoBalanceHours ?? 0, sick_balance_hours: emp.sickBalanceHours ?? 0, exclude_from_payroll: emp.excludeFromPayroll ?? false,
     default_schedule: emp.defaultSchedule, remote_days: emp.remoteDays ?? null,
+    hire_date: emp.hireDate || null, growth_bonus_eligible: emp.growthBonusEligible ?? false, growth_bonus_multiplier: emp.growthBonusMultiplier ?? 1,
   }).eq("id", emp.id);
   if (error) console.error("updateEmployee error:", error);
 }
