@@ -2,55 +2,67 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 
-const navGroups = [
-  {
-    label: "Open Access",
-    items: [
-      { label: "Calendar", href: "/", icon: "📅" },
-      { label: "Leave Request", href: "/leave", icon: "📝" },
-      { label: "Staff Dashboard", href: "/staff-dashboard", icon: "🗂️" },
-    ],
-  },
-  {
-    label: "Admin 🔒",
-    items: [
-      { label: "Schedule Builder", href: "/schedule-builder", icon: "✏️" },
-      { label: "Availability", href: "/availability", icon: "🏥" },
-      { label: "Staff", href: "/staff", icon: "👥" },
-      { label: "Temp Staff", href: "/temps", icon: "🔄" },
-      { label: "Holidays & Closures", href: "/holidays", icon: "🏖️" },
-    ],
-  },
-  {
-    label: "Leave Management 🔒",
-    items: [
-      { label: "Manage Leave", href: "/leave/manage", icon: "🔐" },
-    ],
-  },
-  {
-    label: "Events 🔒",
-    items: [
-      { label: "Events", href: "/events", icon: "📌" },
-    ],
-  },
-  {
-    label: "Certifications 🔒",
-    items: [
-      { label: "Certifications", href: "/certifications", icon: "📄" },
-    ],
-  },
-  {
-    label: "Payroll 🔒",
-    items: [
-      { label: "Payroll Dashboard", href: "/payroll", icon: "💵" },
-    ],
-  },
+// Kept as a raw string (not imported from AppIdentityGate) to avoid a
+// circular import, since AppIdentityGate itself renders <Sidebar />.
+const IDENTITY_SESSION_KEY = "dd_identity";
+
+type PermissionLevel =
+  | "public"          // no login needed at all
+  | "any"             // any logged-in identity (self-service pages)
+  | "canAdmin"
+  | "canManageLeave"
+  | "canManageEvents"
+  | "canManagePayroll";
+
+interface StoredIdentity {
+  canAdmin?: boolean;
+  canManageLeave?: boolean;
+  canManageEvents?: boolean;
+  canManageCerts?: boolean;
+  canManagePayroll?: boolean;
+}
+
+const navItems: { label: string; href: string; icon: string; permission: PermissionLevel }[] = [
+  { label: "Calendar", href: "/", icon: "📅", permission: "public" },
+  { label: "Leave Request", href: "/leave", icon: "📝", permission: "any" },
+  { label: "Staff Dashboard", href: "/staff-dashboard", icon: "🗂️", permission: "any" },
+  { label: "Certifications", href: "/certifications", icon: "📄", permission: "any" },
+  { label: "Schedule Builder", href: "/schedule-builder", icon: "✏️", permission: "canAdmin" },
+  { label: "Availability", href: "/availability", icon: "🏥", permission: "canAdmin" },
+  { label: "Staff", href: "/staff", icon: "👥", permission: "canAdmin" },
+  { label: "Temp Staff", href: "/temps", icon: "🔄", permission: "canAdmin" },
+  { label: "Holidays & Closures", href: "/holidays", icon: "🏖️", permission: "canAdmin" },
+  { label: "Manage Leave", href: "/leave/manage", icon: "🔐", permission: "canManageLeave" },
+  { label: "Events", href: "/events", icon: "📌", permission: "canManageEvents" },
+  { label: "Payroll Dashboard", href: "/payroll", icon: "💵", permission: "canManagePayroll" },
 ];
 
+function useIdentity(): StoredIdentity | null {
+  const [identity, setIdentity] = useState<StoredIdentity | null>(null);
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(IDENTITY_SESSION_KEY);
+      if (saved) setIdentity(JSON.parse(saved));
+    } catch {
+      // sessionStorage unavailable — treat as not logged in
+    }
+  }, []);
+  return identity;
+}
+
+function hasAccess(permission: PermissionLevel, identity: StoredIdentity | null): boolean {
+  if (permission === "public") return true;
+  if (!identity) return false;
+  if (permission === "any") return true;
+  return !!identity[permission];
+}
+
 function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  const identity = useIdentity();
+
   return (
     <>
       <div className="px-5 py-5 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
@@ -62,47 +74,43 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
-        {navGroups.map((group) => (
-          <div key={group.label}>
-            <div className="text-xs font-bold uppercase tracking-widest mb-1.5 px-3" style={{ color: "rgba(255,255,255,0.28)" }}>
-              {group.label}
-            </div>
-            <div className="space-y-0.5">
-              {group.items.map((item) => {
-                const active = pathname === item.href;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={onNavigate}
-                    className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150"
-                    style={active
-                      ? { background: "#e8622a", color: "white", boxShadow: "0 4px 14px rgba(232, 98, 42, 0.35)" }
-                      : { color: "rgba(255,255,255,0.6)" }
-                    }
-                    onMouseEnter={(e) => {
-                      if (!active) {
-                        (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
-                        (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.95)";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!active) {
-                        (e.currentTarget as HTMLElement).style.background = "transparent";
-                        (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.6)";
-                      }
-                    }}
-                  >
-                    <span className="text-base leading-none w-5 text-center flex-shrink-0">{item.icon}</span>
-                    <span className="flex-1">{item.label}</span>
-                    {active && <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.85)" }} />}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+      <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-0.5">
+        {navItems.map((item) => {
+          const active = pathname === item.href;
+          const accessible = hasAccess(item.permission, identity);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={onNavigate}
+              className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150"
+              style={
+                active
+                  ? { background: "#e8622a", color: "white", boxShadow: "0 4px 14px rgba(232, 98, 42, 0.35)" }
+                  : accessible
+                  ? { color: "rgba(255,255,255,0.6)" }
+                  : { color: "rgba(255,255,255,0.25)" }
+              }
+              onMouseEnter={(e) => {
+                if (!active) {
+                  (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
+                  (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.4)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!active) {
+                  (e.currentTarget as HTMLElement).style.background = "transparent";
+                  (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)";
+                }
+              }}
+            >
+              <span className="text-base leading-none w-5 text-center flex-shrink-0" style={{ opacity: accessible ? 1 : 0.4 }}>{item.icon}</span>
+              <span className="flex-1">{item.label}</span>
+              {!accessible && <span className="text-xs flex-shrink-0" style={{ opacity: 0.5 }}>🔒</span>}
+              {active && <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.85)" }} />}
+            </Link>
+          );
+        })}
       </nav>
 
       <div className="px-5 py-4 flex-shrink-0" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
