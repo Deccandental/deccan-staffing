@@ -6,7 +6,10 @@ import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
 import { LeaveRequest } from "@/types/leave";
 import { loadLeaveRequests } from "@/lib/leaveStore";
-import { Certification, loadCertificationsForEmployee } from "@/lib/certsStore";
+import {
+  Certification, NewCertInput, loadCertificationsForEmployee, loadDistinctTitles,
+  createCertification, updateCertification, uploadCertFile,
+} from "@/lib/certsStore";
 import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
 import { UpcomingShift, loadUpcomingShiftsForEmployee } from "@/lib/staffSchedule";
 import DashboardLoginGate, { DashboardIdentity } from "@/components/DashboardLoginGate";
@@ -44,14 +47,30 @@ function certBadge(cert: Certification): { label: string; className: string } {
   return { label: "Current", className: "bg-green-100 text-green-700" };
 }
 
+interface CertFormState {
+  title: string;
+  expirationDate: string;
+}
+
+const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "" };
+
 function DashboardPageBody({ identity, logout }: { identity: DashboardIdentity; logout: () => void }) {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(identity.mode === "staff" ? identity.employeeId : null);
   const [shifts, setShifts] = useState<UpcomingShift[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [certs, setCerts] = useState<Certification[]>([]);
+  const [titleOptions, setTitleOptions] = useState<string[]>([]);
   const [events, setEvents] = useState<StaffEvent[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const [showCertForm, setShowCertForm] = useState(false);
+  const [editingCertId, setEditingCertId] = useState<string | null>(null);
+  const [certForm, setCertForm] = useState<CertFormState>(EMPTY_CERT_FORM);
+  const [useCustomTitle, setUseCustomTitle] = useState(false);
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const [certError, setCertError] = useState("");
+  const [certSaving, setCertSaving] = useState(false);
 
   useEffect(() => { loadStaff().then(setStaff); }, []);
 
@@ -65,18 +84,84 @@ function DashboardPageBody({ identity, logout }: { identity: DashboardIdentity; 
       loadLeaveRequests(),
       loadCertificationsForEmployee(selectedId),
       loadUpcomingEvents(todayStr),
-    ]).then(([shiftData, leaveData, certData, eventData]) => {
+      loadDistinctTitles(),
+    ]).then(([shiftData, leaveData, certData, eventData, titles]) => {
       if (cancelled) return;
       setShifts(shiftData);
       setLeaveRequests(leaveData.filter((r) => r.employeeId === selectedId));
       setCerts(certData);
       setEvents(eventData.filter((ev) => ev.inviteAll || ev.invitedStaffIds.includes(selectedId)));
+      setTitleOptions(titles);
       setLoading(false);
     });
     return () => { cancelled = true; };
   }, [selectedId]);
 
   const selectedEmployee = staff.find((e) => e.id === selectedId);
+
+  function openNewCert() {
+    setCertForm(EMPTY_CERT_FORM);
+    setEditingCertId(null);
+    setCertFile(null);
+    setCertError("");
+    setUseCustomTitle(titleOptions.length === 0);
+    setShowCertForm(true);
+  }
+
+  function startEditCert(cert: Certification) {
+    setCertForm({ title: cert.title, expirationDate: cert.expirationDate ?? "" });
+    setEditingCertId(cert.id);
+    setCertFile(null);
+    setCertError("");
+    setUseCustomTitle(!titleOptions.includes(cert.title));
+    setShowCertForm(true);
+  }
+
+  function closeCertForm() {
+    setShowCertForm(false);
+    setEditingCertId(null);
+    setCertForm(EMPTY_CERT_FORM);
+    setCertFile(null);
+    setCertError("");
+  }
+
+  async function handleSaveCert() {
+    if (selectedId == null) return;
+    setCertError("");
+    if (!certForm.title.trim()) { setCertError("Please enter a document name."); return; }
+    if (!editingCertId && !certFile) { setCertError("Please choose a file to upload."); return; }
+
+    setCertSaving(true);
+    let fileUrl = "";
+    let fileName = "";
+    if (certFile) {
+      const uploaded = await uploadCertFile(certFile);
+      if ("error" in uploaded) { setCertError(uploaded.error); setCertSaving(false); return; }
+      fileUrl = uploaded.url;
+      fileName = uploaded.name;
+    } else if (editingCertId) {
+      const existing = certs.find((c) => c.id === editingCertId);
+      fileUrl = existing?.fileUrl ?? "";
+      fileName = existing?.fileName ?? "";
+    }
+
+    const input: NewCertInput = {
+      ownerType: "personnel",
+      employeeId: selectedId,
+      title: certForm.title.trim(),
+      expirationDate: certForm.expirationDate || null,
+      fileUrl, fileName,
+    };
+
+    const saved = editingCertId ? await updateCertification(editingCertId, input) : await createCertification(input);
+    setCertSaving(false);
+    if (!saved) { setCertError("Something went wrong — not saved. Try again."); return; }
+
+    closeCertForm();
+    const [freshCerts, freshTitles] = await Promise.all([loadCertificationsForEmployee(selectedId), loadDistinctTitles()]);
+    setCerts(freshCerts);
+    setTitleOptions(freshTitles);
+  }
 
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
@@ -204,7 +289,60 @@ function DashboardPageBody({ identity, logout }: { identity: DashboardIdentity; 
             </div>
 
             <div className="rounded-2xl bg-white p-5 shadow">
-              <h2 className="font-bold text-slate-700 mb-3">📄 Certifications</h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-bold text-slate-700">📄 Certifications</h2>
+                {!showCertForm && (
+                  <button onClick={openNewCert} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                    + Add Certification
+                  </button>
+                )}
+              </div>
+
+              {showCertForm && (
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 mb-3 space-y-2">
+                  {certError && <p className="text-xs text-red-500">{certError}</p>}
+                  {!useCustomTitle ? (
+                    <select
+                      value={titleOptions.includes(certForm.title) ? certForm.title : ""}
+                      onChange={(e) => {
+                        if (e.target.value === "__new__") { setUseCustomTitle(true); setCertForm((f) => ({ ...f, title: "" })); }
+                        else setCertForm((f) => ({ ...f, title: e.target.value }));
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none">
+                      <option value="">Select a document name...</option>
+                      {titleOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                      <option value="__new__">+ Add new document name...</option>
+                    </select>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input type="text" value={certForm.title} onChange={(e) => setCertForm((f) => ({ ...f, title: e.target.value }))}
+                        placeholder="e.g. CPR Certification" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                      {titleOptions.length > 0 && (
+                        <button type="button" onClick={() => { setUseCustomTitle(false); setCertForm((f) => ({ ...f, title: "" })); }}
+                          className="flex-shrink-0 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-500 hover:bg-white">
+                          Choose existing
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <input type="date" value={certForm.expirationDate} onChange={(e) => setCertForm((f) => ({ ...f, expirationDate: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  <p className="text-xs text-slate-400 -mt-1">Leave date blank if this never expires.</p>
+                  <input type="file" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" />
+                  {editingCertId && <p className="text-xs text-slate-400">Leave file blank to keep the existing one.</p>}
+                  <div className="flex gap-2">
+                    <button onClick={handleSaveCert} disabled={certSaving}
+                      className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                      {certSaving ? "Saving…" : editingCertId ? "Save Changes" : "Upload"}
+                    </button>
+                    <button onClick={closeCertForm} className="rounded-lg border border-slate-200 px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {certs.length === 0 ? (
                 <p className="text-sm text-slate-400">No certifications on file.</p>
               ) : (
@@ -220,6 +358,7 @@ function DashboardPageBody({ identity, logout }: { identity: DashboardIdentity; 
                               ? new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                               : "No expiration"}
                           </div>
+                          <button onClick={() => startEditCert(cert)} className="text-xs text-cyan-600 hover:underline mt-0.5">Edit</button>
                         </div>
                         <span className={`rounded-full px-2 py-0.5 text-xs font-semibold flex-shrink-0 ${badge.className}`}>{badge.label}</span>
                       </div>
