@@ -24,6 +24,7 @@ import {
 } from "@/lib/growthBonus";
 import { PvBonusQuarter, loadPvBonusYear, savePvBonusQuarter } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusMonths, saveHoBonusMonth } from "@/lib/hoBonus";
+import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
 
 const HYGIENE_BONUS_PER_PATIENT = 15;
 
@@ -84,7 +85,7 @@ function PayrollPageBody() {
   const [savedMsg, setSavedMsg] = useState<Record<string, string>>({});
   const [globalMsg, setGlobalMsg] = useState("");
   const [showAddPicker, setShowAddPicker] = useState(false);
-  const [mainTab, setMainTab] = useState<"payroll" | "growth" | "pv" | "ho">("payroll");
+  const [mainTab, setMainTab] = useState<"payroll" | "growth" | "pv" | "ho" | "hygiene">("payroll");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { refresh(); }, [period.start]);
@@ -448,11 +449,16 @@ function PayrollPageBody() {
             style={mainTab === "ho" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
             Dr. Ho
           </button>
+          <button onClick={() => setMainTab("hygiene")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "hygiene" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Hygiene Bonus
+          </button>
         </div>
 
         {mainTab === "growth" && <GrowthBonusPanel />}
         {mainTab === "pv" && <PvBonusPanel />}
         {mainTab === "ho" && <HoBonusPanel />}
+        {mainTab === "hygiene" && <HygieneBonusPanel />}
 
         {mainTab === "payroll" && (
         <>
@@ -1079,6 +1085,147 @@ function HoBonusPanel() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function HygieneBonusPanel() {
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [hygienistId, setHygienistId] = useState<number | null>(null);
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>([]);
+  const [overrides, setOverrides] = useState<Record<string, HygieneBonusEntry>>({});
+  const [rows, setRows] = useState<Record<string, { patientCount: number; amountPaid: number }>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  const isHygienistRole = (e: Employee) => e.role === "Hygienist" || e.skills.includes("Hygienist");
+
+  useEffect(() => {
+    loadStaff().then((s) => {
+      setStaff(s);
+      const hygienists = s.filter(isHygienistRole);
+      if (hygienists.length > 0) setHygienistId(hygienists[0].id);
+      else setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => { if (hygienistId != null) refresh(); }, [hygienistId, year]);
+
+  async function refresh() {
+    if (hygienistId == null) return;
+    setLoading(true);
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+    const [entries, overrideRows] = await Promise.all([
+      loadPayrollEntriesInRange(yearStart, yearEnd),
+      loadHygieneBonusEntries(hygienistId, yearStart, yearEnd),
+    ]);
+    setPayrollEntries(entries);
+    const overrideMap: Record<string, HygieneBonusEntry> = {};
+    overrideRows.forEach((o) => { overrideMap[o.payPeriodStart] = o; });
+    setOverrides(overrideMap);
+
+    const periods = getPayPeriodsInYear(year);
+    const nextRows: Record<string, { patientCount: number; amountPaid: number }> = {};
+    for (const p of periods) {
+      const override = overrideMap[p.start];
+      const payrollRow = entries.find((e) => e.personKey === `staff:${hygienistId}` && e.payPeriodStart === p.start);
+      nextRows[p.start] = {
+        patientCount: override?.patientCount ?? payrollRow?.hygienePatientCount ?? 0,
+        amountPaid: override?.amountPaid ?? 0,
+      };
+    }
+    setRows(nextRows);
+    setLoading(false);
+  }
+
+  function updateRow(payPeriodStart: string, field: "patientCount" | "amountPaid", value: number) {
+    setRows((r) => ({ ...r, [payPeriodStart]: { ...r[payPeriodStart], [field]: value } }));
+  }
+
+  async function handleSaveAll() {
+    if (hygienistId == null) return;
+    setSaving(true);
+    const periods = getPayPeriodsInYear(year);
+    await Promise.all(periods.map((p) => saveHygieneBonusEntry({
+      employeeId: hygienistId, payPeriodStart: p.start, payPeriodEnd: p.end,
+      patientCount: rows[p.start]?.patientCount ?? 0, amountPaid: rows[p.start]?.amountPaid ?? 0,
+    })));
+    setSaving(false);
+    setSavedMsg("Saved.");
+    await refresh();
+  }
+
+  const hygienists = staff.filter(isHygienistRole);
+  const periods = getPayPeriodsInYear(year);
+  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+
+  let runningEarned = 0;
+  let runningPaid = 0;
+
+  if (hygienists.length === 0 && !loading) {
+    return <p className="text-sm text-slate-400">No one is marked as a Hygienist yet on the Staff page.</p>;
+  }
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      <p className="text-sm text-slate-500">Patient count × ${HYGIENE_BONUS_PER_PATIENT}/patient — auto-fills from the Payroll tab's hygiene count, editable here too.</p>
+      <div className="flex items-center gap-2">
+        <select value={hygienistId ?? ""} onChange={(e) => setHygienistId(Number(e.target.value))}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {hygienists.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+        <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
+          className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+      </div>
+
+      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
+        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+          <div className="overflow-x-auto max-h-[32rem]">
+            <table className="w-full text-sm border-collapse min-w-[700px]">
+              <thead className="sticky top-0 bg-white">
+                <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                  <th className="px-3 py-2 font-medium">Pay Period</th>
+                  <th className="px-2 py-2 font-medium">Patients</th>
+                  <th className="px-2 py-2 font-medium">Earned</th>
+                  <th className="px-2 py-2 font-medium">Paid</th>
+                  <th className="px-2 py-2 font-medium">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {periods.map((p) => {
+                  const row = rows[p.start] ?? { patientCount: 0, amountPaid: 0 };
+                  const earned = row.patientCount * HYGIENE_BONUS_PER_PATIENT;
+                  runningEarned += earned;
+                  runningPaid += row.amountPaid;
+                  const balance = runningEarned - runningPaid;
+                  return (
+                    <tr key={p.start} className="border-b border-slate-50 last:border-0">
+                      <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{p.label}</td>
+                      <td className="px-2 py-2"><input type="number" value={row.patientCount} onChange={(e) => updateRow(p.start, "patientCount", Number(e.target.value))} className={`${cellClass} w-16`} /></td>
+                      <td className="px-2 py-2 text-slate-500">${earned.toLocaleString()}</td>
+                      <td className="px-2 py-2"><input type="number" value={row.amountPaid} onChange={(e) => updateRow(p.start, "amountPaid", Number(e.target.value))} className={`${cellClass} w-20`} /></td>
+                      <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${balance.toLocaleString()}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-3 p-3 border-t border-slate-100">
+            <button onClick={handleSaveAll} disabled={saving}
+              className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+              {saving ? "Saving…" : "Save All"}
+            </button>
+            {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
+            <span className="text-sm text-slate-500 ml-auto">
+              {year} balance: <strong className={runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${(runningEarned - runningPaid).toLocaleString()}</strong>
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
