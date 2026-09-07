@@ -410,7 +410,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                 {isPaidLeaveReason(form.reason) && totalDays > 0 && (
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Hours to be paid</label>
-                    <input type="number" value={form.paidHours} onChange={(e) => setForm((f) => ({ ...f, paidHours: Number(e.target.value) }))}
+                    <input type="number" onFocus={(e) => e.target.select()} value={form.paidHours} onChange={(e) => setForm((f) => ({ ...f, paidHours: Number(e.target.value) }))}
                       className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
                     <p className="text-xs text-gray-400 mt-1">Defaults to {form.isPartialDay ? "4" : "8"} hours per day — adjust to the exact hours you want paid.</p>
                     {selectedEmployee && (
