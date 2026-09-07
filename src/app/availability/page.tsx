@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { loadLeaveRequests } from "@/lib/leaveStore";
 import { LeaveRequest } from "@/types/leave";
 import { Sidebar } from "@/components/Sidebar";
-import PasscodeGate from "@/components/PasscodeGate";
+import AppIdentityGate from "@/components/AppIdentityGate";
+import AccessDenied from "@/components/AccessDenied";
 import { loadStaff } from "@/lib/staffStore";
 import { Employee } from "@/types/employee";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -271,8 +272,8 @@ function AvailabilityPageBody() {
 
 export default function AvailabilityPage() {
   return (
-    <PasscodeGate group="admin" subtitle="Enter your passcode to manage staff availability">
-      <AvailabilityPageBody />
-    </PasscodeGate>
+    <AppIdentityGate>
+      {(identity, logout) => identity.canAdmin ? <AvailabilityPageBody /> : <AccessDenied logout={logout} />}
+    </AppIdentityGate>
   );
 }
