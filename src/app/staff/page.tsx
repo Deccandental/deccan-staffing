@@ -39,6 +39,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   excludeFromPayroll: false,
   growthBonusEligible: false,
   growthBonusMultiplier: 1,
+  pvBonusEligible: false,
   defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
 };
 
@@ -96,6 +97,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       remoteDays: emp.remoteDays ? { ...emp.remoteDays } : undefined,
       hireDate: emp.hireDate ?? "", growthBonusEligible: emp.growthBonusEligible ?? false,
       growthBonusMultiplier: emp.growthBonusMultiplier ?? 1,
+      pvBonusEligible: emp.pvBonusEligible ?? false,
       defaultSchedule: { ...emp.defaultSchedule }
     });
   }
@@ -340,6 +342,10 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                       </div>
                     )}
                     <p className="text-xs text-gray-400 mt-1">Owner, contractors (e.g. Dr. Ho), and temps stay unchecked — they're not part of this program.</p>
+                    <label className="flex items-center gap-2 cursor-pointer mt-3">
+                      <input type="checkbox" checked={form.pvBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, pvBonusEligible: e.target.checked }))} />
+                      <span className="text-sm font-medium text-gray-700">Eligible for PV-style Bonus (% of own income, tracked separately)</span>
+                    </label>
                   </div>
                 </div>
 
