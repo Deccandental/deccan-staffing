@@ -11,6 +11,10 @@ function rowToEmployee(row: any): Employee {
       defaultSchedule = { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true };
     }
   }
+  let remoteDays = row.remote_days;
+  if (typeof remoteDays === "string") {
+    try { remoteDays = JSON.parse(remoteDays); } catch { remoteDays = undefined; }
+  }
   return {
     id: row.id,
     name: row.name,
@@ -28,6 +32,7 @@ function rowToEmployee(row: any): Employee {
     ptoBalanceHours: row.pto_balance_hours ?? 0,
     sickBalanceHours: row.sick_balance_hours ?? 0,
     excludeFromPayroll: row.exclude_from_payroll ?? false,
+    remoteDays: remoteDays ?? undefined,
     archived: row.archived ?? false,
     defaultSchedule,
   };
@@ -46,7 +51,7 @@ export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee |
     can_admin: emp.canAdmin ?? false, can_manage_leave: emp.canManageLeave ?? false, can_manage_events: emp.canManageEvents ?? false,
     can_manage_certs: emp.canManageCerts ?? false, can_manage_payroll: emp.canManagePayroll ?? false, archived: emp.archived ?? false,
     pto_balance_hours: emp.ptoBalanceHours ?? 0, sick_balance_hours: emp.sickBalanceHours ?? 0, exclude_from_payroll: emp.excludeFromPayroll ?? false,
-    default_schedule: emp.defaultSchedule,
+    default_schedule: emp.defaultSchedule, remote_days: emp.remoteDays ?? null,
   }).select().single();
   if (error) { console.error("addEmployee error:", error); return null; }
   return rowToEmployee(data);
@@ -59,7 +64,7 @@ export async function updateEmployee(emp: Employee): Promise<void> {
     can_admin: emp.canAdmin ?? false, can_manage_leave: emp.canManageLeave ?? false, can_manage_events: emp.canManageEvents ?? false,
     can_manage_certs: emp.canManageCerts ?? false, can_manage_payroll: emp.canManagePayroll ?? false, archived: emp.archived ?? false,
     pto_balance_hours: emp.ptoBalanceHours ?? 0, sick_balance_hours: emp.sickBalanceHours ?? 0, exclude_from_payroll: emp.excludeFromPayroll ?? false,
-    default_schedule: emp.defaultSchedule,
+    default_schedule: emp.defaultSchedule, remote_days: emp.remoteDays ?? null,
   }).eq("id", emp.id);
   if (error) console.error("updateEmployee error:", error);
 }
