@@ -1,4 +1,4 @@
-import { LeaveRequest, LeaveStatus } from "@/types/leave";
+import { LeaveRequest, LeaveStatus, LeaveReason } from "@/types/leave";
 import { supabase } from "./supabase";
 
 function rowToLeave(row: any): LeaveRequest {
