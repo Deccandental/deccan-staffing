@@ -66,6 +66,10 @@ export interface Employee {
   // income/production, tracked independently of the shared Growth Bonus
   // pool — e.g. Dr. PV, who is explicitly exempt from the Growth Bonus).
   pvBonusEligible?: boolean;
+  // The flat percentage of that person's own net production/income they're
+  // paid as a bonus (e.g. 30 for 30%). Only meaningful when pvBonusEligible
+  // is true — defaults to 30 if not set.
+  netProductionBonusPercent?: number;
   // When true, this person is inactive — hidden from every "pick who's
   // working / assign this to" list (Schedule Builder, swap menus, Events
   // invite list, PIN logins, etc.) but their existing records (leave
