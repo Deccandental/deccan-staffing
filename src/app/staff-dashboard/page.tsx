@@ -1,530 +1,1259 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Sidebar } from "@/components/Sidebar";
+import AppIdentityGate from "@/components/AppIdentityGate";
+import AccessDenied from "@/components/AccessDenied";
 import { Employee } from "@/types/employee";
-import { loadStaff } from "@/lib/staffStore";
+import { loadStaff, setLeaveBalance } from "@/lib/staffStore";
 import { LeaveRequest } from "@/types/leave";
 import { loadLeaveRequests } from "@/lib/leaveStore";
+import { Holiday, loadHolidays } from "@/lib/holidays";
+import { TempStaff } from "@/app/temps/page";
+import { getTempAssignmentsForMonth } from "@/lib/tempAssignments";
+import { supabase } from "@/lib/supabase";
+import { PayrollEntry, loadPayrollEntries, loadPayrollEntriesInRange, savePayrollEntry } from "@/lib/payrollStore";
+import { PayPeriod, getPayPeriodForDate, stepPayPeriod } from "@/lib/payPeriods";
+import { getScheduledEmployeeIdsInRange } from "@/lib/staffSchedule";
 import {
-  Certification, NewCertInput, loadCertificationsForEmployee, loadDistinctTitles,
-  createCertification, updateCertification, uploadCertFile,
-} from "@/lib/certsStore";
-import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
-import { UpcomingShift, loadUpcomingShiftsForEmployee } from "@/lib/staffSchedule";
-import { PayrollEntry, loadPayrollEntriesInRange } from "@/lib/payrollStore";
-import {
-  getCurrentQuarter, computeQuarterCalc, loadGrowthBonusQuarter, loadGrowthBonusPayments,
-  isEligibleForQuarter, computeDaysWorkedInQuarter, splitBonusPool, getQuarterDateRange,
-  loadGrowthBonusDaysOverrides, GrowthBonusQuarter,
+  GrowthBonusQuarter, GrowthBonusPayment, loadGrowthBonusQuarter, saveGrowthBonusQuarter,
+  computeQuarterCalc, isEligibleForQuarter, computeDaysWorkedInQuarter, splitBonusPool,
+  getQuarterDateRange, getCurrentQuarter, loadGrowthBonusPayments, addGrowthBonusPayment,
+  updateGrowthBonusPayment, deleteGrowthBonusPayment,
+  loadGrowthBonusDaysOverrides, saveGrowthBonusDaysOverride,
 } from "@/lib/growthBonus";
-import { PvBonusQuarter, loadPvBonusYear } from "@/lib/pvBonus";
-import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
+import { PvBonusQuarter, loadPvBonusYear, savePvBonusQuarter } from "@/lib/pvBonus";
+import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth } from "@/lib/hoBonus";
+import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
 import { formatMoney } from "@/lib/format";
-import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
-const REASON_LABELS: Record<string, string> = {
-  sick: "Sick Leave", pto: "PTO / Vacation", leave: "Personal Leave", other: "Other",
-};
+const HYGIENE_BONUS_PER_PATIENT = 15;
 
-const LEAVE_STATUS_STYLES: Record<string, string> = {
-  pending: "bg-amber-100 text-amber-700",
-  approved: "bg-green-100 text-green-700",
-  denied: "bg-red-100 text-red-700",
-  cancelled: "bg-slate-100 text-slate-400",
-};
-
-const ROLE_ICONS: Record<UpcomingShift["role"], string> = {
-  Dentist: "🦷", Assistant: "🤝", "Front Desk": "🖥️", Hygienist: "✨", Floater: "🔄",
-};
-
-const QUARTER_LABELS: Record<1 | 2 | 3 | 4, string> = { 1: "Q1 (Jan–Mar)", 2: "Q2 (Apr–Jun)", 3: "Q3 (Jul–Sep)", 4: "Q4 (Oct–Dec)" };
-
-function daysUntil(dateStr: string): number {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const target = new Date(y, m - 1, d).getTime();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((target - today.getTime()) / 86400000);
+interface PersonRow {
+  personKey: string;
+  personName: string;
+  isTemp: boolean;
+  employee?: Employee;
 }
 
-function certBadge(cert: Certification): { label: string; className: string } {
-  if (!cert.expirationDate) return { label: "No expiration", className: "bg-slate-100 text-slate-500" };
-  const days = daysUntil(cert.expirationDate);
-  if (days < 0) return { label: "Expired", className: "bg-red-100 text-red-700" };
-  if (days <= 7) return { label: `Expires in ${days}d`, className: "bg-red-100 text-red-700" };
-  if (days <= 30) return { label: `Expires in ${days}d`, className: "bg-amber-100 text-amber-700" };
-  if (days <= 60) return { label: `Expires in ${days}d`, className: "bg-yellow-100 text-yellow-700" };
-  return { label: "Current", className: "bg-green-100 text-green-700" };
+interface RowFields {
+  hoursWorked: number;
+  overtimeHours: number;
+  ptoHours: number;
+  sickHours: number;
+  paidHolidayHours: number;
+  paidMeetingHours: number;
+  bonusAmount: number;
+  hygienePatientCount: number;
+  notes: string;
+  skipped: boolean;
 }
 
-interface CertFormState {
-  title: string;
-  expirationDate: string;
+const EMPTY_ROW: RowFields = {
+  hoursWorked: 0, overtimeHours: 0, ptoHours: 0, sickHours: 0,
+  paidHolidayHours: 0, paidMeetingHours: 0, bonusAmount: 0, hygienePatientCount: 0, notes: "", skipped: false,
+};
+
+function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
+  return aStart <= bEnd && aEnd >= bStart;
 }
 
-const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "" };
+async function loadTemps(): Promise<TempStaff[]> {
+  const { data, error } = await supabase.from("temps").select("*");
+  if (error) { console.error("loadTemps error:", error); return []; }
+  return (data ?? []).map((row) => ({
+    id: row.id, name: row.name, phone: row.phone ?? "", email: row.email ?? "",
+    role: row.role, skills: row.skills ?? [], rating: row.rating ?? 0,
+    notes: row.notes ?? "", addedAt: row.added_at,
+  }));
+}
 
-function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
-  const isManager = identity.canAdmin;
+function PayrollPageBody() {
+  const [period, setPeriod] = useState<PayPeriod>(() => getPayPeriodForDate(new Date()));
   const [staff, setStaff] = useState<Employee[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(identity.mode === "staff" ? (identity.employeeId ?? null) : null);
-  const [shifts, setShifts] = useState<UpcomingShift[]>([]);
+  const [temps, setTemps] = useState<TempStaff[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
-  const [certs, setCerts] = useState<Certification[]>([]);
-  const [titleOptions, setTitleOptions] = useState<string[]>([]);
-  const [events, setEvents] = useState<StaffEvent[]>([]);
-  const [bonusYear] = useState(new Date().getFullYear());
-  const [yearQuartersData, setYearQuartersData] = useState<Record<number, GrowthBonusQuarter>>({});
-  const [yearDaysOverrides, setYearDaysOverrides] = useState<Record<number, Record<number, number>>>({});
-  const [yearPayrollEntries, setYearPayrollEntries] = useState<PayrollEntry[]>([]);
-  const [bonusReceivedThisYear, setBonusReceivedThisYear] = useState(0);
-  const [pvQuarters, setPvQuarters] = useState<PvBonusQuarter[]>([]);
-  const [hygieneEntries, setHygieneEntries] = useState<HygieneBonusEntry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [savedEntries, setSavedEntries] = useState<Record<string, PayrollEntry>>({});
+  const [scheduledStaffIds, setScheduledStaffIds] = useState<Set<number>>(new Set());
+  const [scheduledTempIds, setScheduledTempIds] = useState<Set<string>>(new Set());
+  const [manuallyAdded, setManuallyAdded] = useState<Set<string>>(new Set());
+  const [rows, setRows] = useState<Record<string, RowFields>>({});
+  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [savedMsg, setSavedMsg] = useState<Record<string, string>>({});
+  const [globalMsg, setGlobalMsg] = useState("");
+  const [showAddPicker, setShowAddPicker] = useState(false);
+  const [mainTab, setMainTab] = useState<"payroll" | "growth" | "pv" | "ho" | "hygiene">("payroll");
+  const [loading, setLoading] = useState(true);
 
-  const [showCertForm, setShowCertForm] = useState(false);
-  const [editingCertId, setEditingCertId] = useState<string | null>(null);
-  const [certForm, setCertForm] = useState<CertFormState>(EMPTY_CERT_FORM);
-  const [useCustomTitle, setUseCustomTitle] = useState(false);
-  const [certFile, setCertFile] = useState<File | null>(null);
-  const [certError, setCertError] = useState("");
-  const [certSaving, setCertSaving] = useState(false);
+  useEffect(() => { refresh(); }, [period.start]);
 
-  useEffect(() => { loadStaff().then(setStaff); }, []);
+  async function refresh() {
+    setLoading(true);
+    const y = Number(period.start.slice(0, 4));
+    const m = Number(period.start.slice(5, 7));
+    const [s, t, lr, h, entries, schedIds, tempAssignments] = await Promise.all([
+      loadStaff(), loadTemps(), loadLeaveRequests(), loadHolidays(), loadPayrollEntries(period.start),
+      getScheduledEmployeeIdsInRange(period.start, period.end),
+      getTempAssignmentsForMonth(y, m),
+    ]);
+    setStaff(s);
+    setTemps(t);
+    setLeaveRequests(lr);
+    setHolidays(h);
+    setScheduledStaffIds(schedIds);
+    setScheduledTempIds(new Set(tempAssignments.filter((a) => a.date >= period.start && a.date <= period.end).map((a) => a.tempId)));
+    setManuallyAdded(new Set());
+    const entryMap: Record<string, PayrollEntry> = {};
+    for (const e of entries) entryMap[e.personKey] = e;
+    setSavedEntries(entryMap);
+    setLoading(false);
+  }
+
+  const employeeRows: PersonRow[] = useMemo(() => {
+    return staff
+      .filter((e) => !e.excludeFromPayroll)
+      .filter((e) => scheduledStaffIds.has(e.id) || manuallyAdded.has(`staff:${e.id}`) || savedEntries[`staff:${e.id}`])
+      .map((e) => ({ personKey: `staff:${e.id}`, personName: e.name, isTemp: false, employee: e }))
+      .sort((a, b) => a.personName.localeCompare(b.personName));
+  }, [staff, scheduledStaffIds, manuallyAdded, savedEntries]);
+
+  const tempRows: PersonRow[] = useMemo(() => {
+    return temps
+      .filter((t) => scheduledTempIds.has(t.id) || manuallyAdded.has(`temp:${t.id}`) || savedEntries[`temp:${t.id}`])
+      .map((t) => ({ personKey: `temp:${t.id}`, personName: t.name, isTemp: true }))
+      .sort((a, b) => a.personName.localeCompare(b.personName));
+  }, [temps, scheduledTempIds, manuallyAdded, savedEntries]);
+
+  const addablePeople: PersonRow[] = useMemo(() => {
+    const shown = new Set([...employeeRows, ...tempRows].map((p) => p.personKey));
+    const staffOptions = staff
+      .filter((e) => !e.excludeFromPayroll && !shown.has(`staff:${e.id}`))
+      .map((e) => ({ personKey: `staff:${e.id}`, personName: e.name + (e.archived ? " (archived)" : ""), isTemp: false, employee: e }));
+    const tempOptions = temps
+      .filter((t) => !shown.has(`temp:${t.id}`))
+      .map((t) => ({ personKey: `temp:${t.id}`, personName: t.name, isTemp: true }));
+    return [...staffOptions, ...tempOptions].sort((a, b) => a.personName.localeCompare(b.personName));
+  }, [staff, temps, employeeRows, tempRows]);
+
+  function sumApprovedHours(employeeId: number, reason: "pto" | "sick"): number {
+    return leaveRequests
+      .filter((r) => r.employeeId === employeeId && r.status === "approved" && r.reason === reason)
+      .filter((r) => overlaps(r.startDate, r.endDate, period.start, period.end))
+      .reduce((sum, r) => sum + (r.paidHours ?? r.totalDays * 8), 0);
+  }
+
+  const holidayHoursInPeriod = useMemo(() => {
+    const count = holidays.filter((h) => h.type === "holiday" && h.date >= period.start && h.date <= period.end).length;
+    return count * 8;
+  }, [holidays, period]);
 
   useEffect(() => {
-    if (selectedId == null) return;
-    let cancelled = false;
-    setLoading(true);
-    const todayStr = new Date().toISOString().split("T")[0];
-    const yearStart = `${bonusYear}-01-01`;
-    const yearEnd = `${bonusYear}-12-31`;
-    Promise.all([
-      loadUpcomingShiftsForEmployee(selectedId),
-      loadLeaveRequests(),
-      loadCertificationsForEmployee(selectedId),
-      loadUpcomingEvents(todayStr),
-      loadDistinctTitles(),
-      loadGrowthBonusQuarter(bonusYear, 1), loadGrowthBonusQuarter(bonusYear, 2),
-      loadGrowthBonusQuarter(bonusYear, 3), loadGrowthBonusQuarter(bonusYear, 4),
-      loadGrowthBonusDaysOverrides(bonusYear, 1), loadGrowthBonusDaysOverrides(bonusYear, 2),
-      loadGrowthBonusDaysOverrides(bonusYear, 3), loadGrowthBonusDaysOverrides(bonusYear, 4),
-      loadPayrollEntriesInRange(yearStart, yearEnd),
-      loadGrowthBonusPayments(selectedId),
-      loadPvBonusYear(selectedId, bonusYear),
-      loadHygieneBonusEntries(selectedId, yearStart, yearEnd),
-    ]).then(([
-      shiftData, leaveData, certData, eventData, titles,
-      q1, q2, q3, q4, d1, d2, d3, d4, entries, payments, pvYear, hygieneYear,
-    ]) => {
-      if (cancelled) return;
-      setShifts(shiftData);
-      setLeaveRequests(leaveData.filter((r) => r.employeeId === selectedId));
-      setCerts(certData);
-      setEvents(eventData.filter((ev) => ev.inviteAll || ev.invitedStaffIds.includes(selectedId)));
-      setTitleOptions(titles);
-      setYearQuartersData({ 1: q1, 2: q2, 3: q3, 4: q4 });
-      setYearDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
-      setYearPayrollEntries(entries);
-      setPvQuarters(pvYear);
-      setHygieneEntries(hygieneYear);
-      setBonusReceivedThisYear(payments.filter((p) => p.date.startsWith(String(bonusYear))).reduce((sum, p) => sum + p.amount, 0));
-      setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [selectedId]);
-
-  const selectedEmployee = staff.find((e) => e.id === selectedId);
-
-  // Computes what this specific employee earned for a given quarter, by
-  // splitting that quarter's pool across every eligible employee — mirrors
-  // the same logic used in the Payroll Dashboard's Growth Bonus tab.
-  const isHygienist = selectedEmployee && (selectedEmployee.role === "Hygienist" || selectedEmployee.skills.includes("Hygienist"));
-  const hygieneEarned = hygieneEntries.reduce((sum, e) => sum + e.patientCount * HYGIENE_BONUS_PER_PATIENT, 0);
-  const hygienePaid = hygieneEntries.reduce((sum, e) => sum + e.amountPaid, 0);
-  const hygieneBalance = hygieneEarned - hygienePaid;
-
-  function bonusForQuarter(q: 1 | 2 | 3 | 4): { calc: ReturnType<typeof computeQuarterCalc>; myBonus: number } | null {
-    const qData = yearQuartersData[q];
-    if (!qData || !selectedEmployee) return null;
-    const calc = computeQuarterCalc(qData);
-    const { start, end } = getQuarterDateRange(bonusYear, q);
-    const eligible = staff.filter((e) => isEligibleForQuarter(e, end));
-    const overridesForQ = yearDaysOverrides[q] ?? {};
-    const rows = eligible.map((e) => ({
-      employee: e,
-      days: overridesForQ[e.id] ?? computeDaysWorkedInQuarter(e.id, start, end, yearPayrollEntries),
-    }));
-    const split = calc.eligible ? splitBonusPool(calc.bonusPool, rows) : [];
-    const mine = split.find((r) => r.employee.id === selectedEmployee.id);
-    return { calc, myBonus: mine?.bonus ?? 0 };
-  }
-
-  const currentQuarter = getCurrentQuarter().quarter;
-  const currentQuarterData = yearQuartersData[currentQuarter];
-  const currentCalc = currentQuarterData ? computeQuarterCalc(currentQuarterData) : null;
-  const requiredProduction = currentQuarterData ? Math.max(currentQuarterData.bamThreshold, currentQuarterData.netProductionPriorYear * 1.2) : 0;
-  const bonusProgressPct = currentQuarterData && requiredProduction > 0
-    ? Math.min(100, Math.round((currentQuarterData.netProductionCurrent / requiredProduction) * 100)) : 0;
-  const bonusUnlocked = !!currentCalc?.eligible;
-
-  function openNewCert() {
-    setCertForm(EMPTY_CERT_FORM);
-    setEditingCertId(null);
-    setCertFile(null);
-    setCertError("");
-    setUseCustomTitle(titleOptions.length === 0);
-    setShowCertForm(true);
-  }
-
-  function startEditCert(cert: Certification) {
-    setCertForm({ title: cert.title, expirationDate: cert.expirationDate ?? "" });
-    setEditingCertId(cert.id);
-    setCertFile(null);
-    setCertError("");
-    setUseCustomTitle(!titleOptions.includes(cert.title));
-    setShowCertForm(true);
-  }
-
-  function closeCertForm() {
-    setShowCertForm(false);
-    setEditingCertId(null);
-    setCertForm(EMPTY_CERT_FORM);
-    setCertFile(null);
-    setCertError("");
-  }
-
-  async function handleSaveCert() {
-    if (selectedId == null) return;
-    setCertError("");
-    if (!certForm.title.trim()) { setCertError("Please enter a document name."); return; }
-    if (!editingCertId && !certFile) { setCertError("Please choose a file to upload."); return; }
-
-    setCertSaving(true);
-    let fileUrl = "";
-    let fileName = "";
-    if (certFile) {
-      const uploaded = await uploadCertFile(certFile);
-      if ("error" in uploaded) { setCertError(uploaded.error); setCertSaving(false); return; }
-      fileUrl = uploaded.url;
-      fileName = uploaded.name;
-    } else if (editingCertId) {
-      const existing = certs.find((c) => c.id === editingCertId);
-      fileUrl = existing?.fileUrl ?? "";
-      fileName = existing?.fileName ?? "";
+    if (loading) return;
+    const next: Record<string, RowFields> = {};
+    for (const p of [...employeeRows, ...tempRows]) {
+      const saved = savedEntries[p.personKey];
+      if (saved) {
+        next[p.personKey] = {
+          hoursWorked: saved.hoursWorked, overtimeHours: saved.overtimeHours,
+          ptoHours: saved.ptoHours, sickHours: saved.sickHours,
+          paidHolidayHours: saved.paidHolidayHours, paidMeetingHours: saved.paidMeetingHours,
+          bonusAmount: saved.bonusAmount, hygienePatientCount: saved.hygienePatientCount,
+          notes: saved.notes, skipped: saved.skipped ?? false,
+        };
+      } else {
+        next[p.personKey] = {
+          ...EMPTY_ROW,
+          ptoHours: p.employee ? sumApprovedHours(p.employee.id, "pto") : 0,
+          sickHours: p.employee ? sumApprovedHours(p.employee.id, "sick") : 0,
+          paidHolidayHours: p.employee ? holidayHoursInPeriod : 0,
+        };
+      }
     }
+    setRows(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, savedEntries, employeeRows.length, tempRows.length]);
 
-    const input: NewCertInput = {
-      ownerType: "personnel",
-      employeeId: selectedId,
-      title: certForm.title.trim(),
-      expirationDate: certForm.expirationDate || null,
-      fileUrl, fileName,
-    };
+  function updateRow(personKey: string, field: keyof RowFields, value: number | string | boolean) {
+    setRows((r) => ({ ...r, [personKey]: { ...r[personKey], [field]: value } }));
+  }
 
-    const saved = editingCertId ? await updateCertification(editingCertId, input) : await createCertification(input);
-    setCertSaving(false);
-    if (!saved) { setCertError("Something went wrong — not saved. Try again."); return; }
+  function toggleSkip(personKey: string) {
+    setRows((r) => ({ ...r, [personKey]: { ...r[personKey], skipped: !r[personKey]?.skipped } }));
+  }
 
-    closeCertForm();
-    const [freshCerts, freshTitles] = await Promise.all([loadCertificationsForEmployee(selectedId), loadDistinctTitles()]);
-    setCerts(freshCerts);
-    setTitleOptions(freshTitles);
+  function recomputeAuto(p: PersonRow) {
+    if (!p.employee) return;
+    setRows((r) => ({
+      ...r,
+      [p.personKey]: {
+        ...r[p.personKey],
+        ptoHours: sumApprovedHours(p.employee!.id, "pto"),
+        sickHours: sumApprovedHours(p.employee!.id, "sick"),
+        paidHolidayHours: holidayHoursInPeriod,
+      },
+    }));
+  }
+
+  async function saveOne(p: PersonRow): Promise<boolean> {
+    const fields = rows[p.personKey] ?? EMPTY_ROW;
+    const saved = await savePayrollEntry({
+      payPeriodStart: period.start, payPeriodEnd: period.end,
+      personKey: p.personKey, personName: p.personName,
+      ...fields,
+    });
+    if (saved) setSavedEntries((e) => ({ ...e, [p.personKey]: saved }));
+    return !!saved;
+  }
+
+  async function handleSave(p: PersonRow) {
+    setSavingKey(p.personKey);
+    const ok = await saveOne(p);
+    setSavingKey(null);
+    setSavedMsg((m) => ({ ...m, [p.personKey]: ok ? "Saved." : "Not saved — try again." }));
+  }
+
+  async function handleSaveAll() {
+    setSavingAll(true);
+    setGlobalMsg("");
+    const all = [...employeeRows, ...tempRows];
+    const results = await Promise.all(all.map((p) => saveOne(p)));
+    setSavingAll(false);
+    const failed = results.filter((ok) => !ok).length;
+    setGlobalMsg(failed === 0 ? `Saved ${all.length} people.` : `Saved ${all.length - failed} of ${all.length} — ${failed} failed, try again.`);
+  }
+
+  async function handleBalanceChange(employee: Employee, field: "pto" | "sick", hours: number) {
+    await setLeaveBalance(employee.id, field, hours);
+    await refresh();
+  }
+
+  function handleAddPerson(p: PersonRow) {
+    setManuallyAdded((s) => new Set(s).add(p.personKey));
+    setShowAddPicker(false);
+  }
+
+  const isHygienist = (e?: Employee) => e && (e.role === "Hygienist" || e.skills.includes("Hygienist"));
+
+  function TableSection({ title, people }: { title: string; people: PersonRow[] }) {
+    if (people.length === 0) {
+      return (
+        <div>
+          <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">{title}</h2>
+          <p className="text-sm text-slate-400">Nobody in this group for this period.</p>
+        </div>
+      );
+    }
+    return (
+      <div>
+        <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">{title}</h2>
+        <div className="overflow-x-auto rounded-xl bg-white shadow-sm">
+          <table className="w-full text-sm border-collapse min-w-[900px]">
+            <thead>
+              <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-2 py-2 font-medium w-20">Hours</th>
+                <th className="px-2 py-2 font-medium w-16">OT</th>
+                <th className="px-2 py-2 font-medium w-16">PTO</th>
+                <th className="px-2 py-2 font-medium w-16">Sick</th>
+                <th className="px-2 py-2 font-medium w-16">Hol.</th>
+                <th className="px-2 py-2 font-medium w-16">Mtg</th>
+                <th className="px-2 py-2 font-medium w-20">Bonus $</th>
+                <th className="px-2 py-2 font-medium w-16">Hyg Pts</th>
+                <th className="px-3 py-2 font-medium">Notes</th>
+                <th className="px-2 py-2 font-medium w-20"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {people.map((p) => {
+                const fields = rows[p.personKey] ?? EMPTY_ROW;
+                const skipped = fields.skipped;
+                const cellClass = "w-full rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none disabled:bg-slate-50 disabled:text-slate-300";
+                return (
+                  <tr key={p.personKey} className={`border-b border-slate-50 last:border-0 ${skipped ? "opacity-50" : ""}`}>
+                    <td className="px-3 py-1.5 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                          style={{ backgroundColor: p.employee?.color ?? "#6b7280" }}>
+                          {p.personName.charAt(0)}
+                        </div>
+                        <span className="font-medium text-slate-700">{p.personName}</span>
+                      </div>
+                    </td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5">
+                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-1 py-1.5">
+                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-1 py-1.5">
+                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5">
+                      {isHygienist(p.employee) ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))} className={cellClass} title={`$${(fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT).toFixed(2)} bonus`} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-2 py-1.5"><input type="text" disabled={skipped} value={fields.notes} onChange={(e) => updateRow(p.personKey, "notes", e.target.value)} className={cellClass + " min-w-[100px]"} /></td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      <button onClick={() => toggleSkip(p.personKey)} className={`text-xs font-medium px-2 py-1 rounded ${skipped ? "bg-slate-100 text-slate-500" : "text-slate-400 hover:bg-slate-100"}`}>
+                        {skipped ? "Unskip" : "Skip"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderCard(p: PersonRow) {
+    const fields = rows[p.personKey] ?? EMPTY_ROW;
+    const expanded = expandedKey === p.personKey;
+    const hygieneBonus = fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT;
+    return (
+      <div key={p.personKey} className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <button onClick={() => setExpandedKey(expanded ? null : p.personKey)}
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
+          <div className="flex items-center gap-2.5">
+            <div className="h-7 w-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+              style={{ backgroundColor: p.employee?.color ?? "#6b7280" }}>
+              {p.personName.charAt(0)}
+            </div>
+            <span className="text-sm font-semibold text-slate-700">{p.personName}</span>
+            <span className="text-xs text-slate-400">{p.employee?.role ?? "Temp"}</span>
+          </div>
+          <span className="text-slate-300 text-xs">{expanded ? "▲" : "▼"}</span>
+        </button>
+
+        {expanded && (
+          <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
+            {p.employee && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">PTO Balance (hrs)</label>
+                  <input type="number" onFocus={(e) => e.target.select()} defaultValue={p.employee.ptoBalanceHours ?? 0}
+                    onBlur={(e) => handleBalanceChange(p.employee!, "pto", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">Sick Balance (hrs)</label>
+                  <input type="number" onFocus={(e) => e.target.select()} defaultValue={p.employee.sickBalanceHours ?? 0}
+                    onBlur={(e) => handleBalanceChange(p.employee!, "sick", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">Hours Worked</label>
+                <input type="number" onFocus={(e) => e.target.select()} value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">OT Hours</label>
+                <input type="number" onFocus={(e) => e.target.select()} value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">Bonus ($)</label>
+                <input type="number" onFocus={(e) => e.target.select()} value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+              </div>
+            </div>
+
+            {p.employee && (
+              <div>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs text-slate-400">PTO / Sick / Holiday (this period)</span>
+                  <button onClick={() => recomputeAuto(p)} className="text-xs text-orange-500 hover:underline">↺ recompute</button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-0.5">Paid Meeting/Day-off Hours</label>
+              <input type="number" onFocus={(e) => e.target.select()} value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))}
+                className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+            </div>
+
+            {isHygienist(p.employee) && (
+              <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-2.5 flex items-center gap-3">
+                <div>
+                  <label className="block text-xs text-emerald-700 mb-0.5">Hygiene Patients</label>
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))}
+                    className="w-20 rounded-lg border border-emerald-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+                <span className="text-sm text-emerald-700">× ${HYGIENE_BONUS_PER_PATIENT} = <strong>${hygieneBonus.toFixed(2)}</strong></span>
+              </div>
+            )}
+
+            <input type="text" value={fields.notes} onChange={(e) => updateRow(p.personKey, "notes", e.target.value)}
+              placeholder="Notes (optional)" className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+
+            <div className="flex items-center gap-3">
+              <button onClick={() => handleSave(p)} disabled={savingKey === p.personKey}
+                className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50"
+                style={{ backgroundColor: "#e8622a" }}>
+                {savingKey === p.personKey ? "Saving…" : "Save"}
+              </button>
+              <button onClick={() => toggleSkip(p.personKey)} className="text-xs text-slate-400 hover:text-slate-600 underline">
+                {fields.skipped ? "Unskip (will be paid)" : "Skip (not paid this period)"}
+              </button>
+              {savedMsg[p.personKey] && <span className="text-xs text-slate-400">{savedMsg[p.personKey]}</span>}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
       <Sidebar />
       <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
-        <header className="mb-6 flex items-start justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-3xl font-bold">Staff Dashboard</h1>
-            <p className="mt-1 text-slate-500">Upcoming shifts, leave requests, and certifications in one place.</p>
-          </div>
-          <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm text-sm">
-            <span className="text-gray-400">
-              {isManager ? "👔 Manager view" : `👤 ${identity.employeeName ?? ""}`}
-            </span>
-            <button onClick={logout} className="text-xs font-semibold text-gray-400 hover:text-red-500 underline">
-              Not you?
-            </button>
-          </div>
+        <header className="mb-4">
+          <h1 className="text-2xl font-bold">Payroll Dashboard</h1>
         </header>
 
-        {isManager && (
-          <div className="mb-6 max-w-sm">
-            <label className="block text-xs font-semibold text-slate-500 mb-1">View staff member</label>
-            <select value={selectedId ?? ""} onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : null)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:outline-none">
-              <option value="">Select a staff member...</option>
-              {staff.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}{e.archived ? " (archived)" : ""}</option>)}
-            </select>
-          </div>
-        )}
+        <div className="mb-4 flex rounded-lg border border-slate-200 bg-white overflow-hidden w-fit">
+          <button onClick={() => setMainTab("payroll")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "payroll" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Payroll
+          </button>
+          <button onClick={() => setMainTab("growth")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "growth" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Growth Bonus
+          </button>
+          <button onClick={() => setMainTab("pv")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "pv" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Net Production Bonus
+          </button>
+          <button onClick={() => setMainTab("ho")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "ho" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Dr. Ho
+          </button>
+          <button onClick={() => setMainTab("hygiene")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "hygiene" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Hygiene Bonus
+          </button>
+        </div>
 
-        {selectedId == null ? (
-          <div className="rounded-2xl bg-white p-10 text-center shadow max-w-lg">
-            <p className="text-slate-400">Select a staff member above to view their dashboard.</p>
+        {mainTab === "growth" && <GrowthBonusPanel />}
+        {mainTab === "pv" && <PvBonusPanel />}
+        {mainTab === "ho" && <HoBonusPanel />}
+        {mainTab === "hygiene" && <HygieneBonusPanel />}
+
+        {mainTab === "payroll" && (
+        <>
+        <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setPeriod((p) => stepPayPeriod(p, -1))} className="rounded-lg border px-3 py-1.5 text-slate-500 hover:bg-slate-50 transition bg-white">←</button>
+            <span className="font-bold min-w-[200px] text-center">{period.label}</span>
+            <button onClick={() => setPeriod((p) => stepPayPeriod(p, 1))} className="rounded-lg border px-3 py-1.5 text-slate-500 hover:bg-slate-50 transition bg-white">→</button>
           </div>
-        ) : loading ? (
-          <div className="rounded-2xl bg-white p-10 text-center shadow max-w-lg">
-            <p className="text-slate-400">Loading…</p>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden">
+              <button onClick={() => setViewMode("table")} className="px-3 py-1.5 text-sm font-semibold transition"
+                style={viewMode === "table" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                Table
+              </button>
+              <button onClick={() => setViewMode("cards")} className="px-3 py-1.5 text-sm font-semibold transition"
+                style={viewMode === "cards" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                Cards
+              </button>
+            </div>
+            <div className="relative">
+              <button onClick={() => setShowAddPicker((s) => !s)}
+                className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                + Add Person
+              </button>
+              {showAddPicker && (
+                <div className="absolute right-0 mt-1 w-64 max-h-72 overflow-y-auto rounded-lg bg-white shadow-lg border border-slate-200 z-10">
+                  {addablePeople.length === 0 ? (
+                    <p className="text-xs text-slate-400 p-3">Everyone's already listed.</p>
+                  ) : addablePeople.map((p) => (
+                    <button key={p.personKey} onClick={() => handleAddPerson(p)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition border-b border-slate-50 last:border-0">
+                      {p.personName}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
+        </div>
+
+        {loading ? (
+          <p className="text-slate-400 text-sm">Loading…</p>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-2 max-w-5xl">
-            {selectedEmployee && (
-              <div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow flex items-center gap-3">
-                <div className="h-12 w-12 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
-                  style={{ backgroundColor: selectedEmployee.color }}>
-                  {selectedEmployee.name.charAt(0)}
-                </div>
-                <div>
-                  <div className="font-bold text-lg text-slate-700">{selectedEmployee.name}</div>
-                  <div className="text-sm text-slate-400">{selectedEmployee.specialty ?? selectedEmployee.role}{selectedEmployee.email ? ` · ${selectedEmployee.email}` : ""}</div>
-                </div>
-              </div>
-            )}
-
-            {selectedEmployee?.growthBonusEligible && (
-              <div className="lg:col-span-2 rounded-2xl p-5 shadow" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)" }}>
-                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                  <h2 className="font-bold text-slate-700">
-                    {bonusUnlocked ? "🎉 " : "🚀 "}{QUARTER_LABELS[currentQuarter]} {bonusYear} Bonus Progress{bonusUnlocked ? " — unlocked!" : ""}
-                  </h2>
-                  <span className="text-sm text-slate-600">Received this year: <strong>${formatMoney(bonusReceivedThisYear)}</strong></span>
-                </div>
-                <div className="w-full h-3 rounded-full bg-white overflow-hidden">
-                  <div className="h-full rounded-full transition-all" style={{ width: `${bonusProgressPct}%`, backgroundColor: bonusUnlocked ? "#10b981" : "#f59e0b" }} />
-                </div>
-                <p className="text-xs text-slate-500 mt-1">{bonusProgressPct}% of the way to this quarter's production target{bonusUnlocked ? " — already there!" : ""}</p>
-
-                <div className="mt-3 pt-3 border-t border-white/60 space-y-1.5">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{bonusYear} so far</p>
-                  {([1, 2, 3, 4] as const).filter((q) => q <= currentQuarter).map((q) => {
-                    const result = bonusForQuarter(q);
-                    if (!result) return null;
-                    return (
-                      <div key={q} className="flex items-center justify-between text-sm bg-white/60 rounded-lg px-3 py-1.5">
-                        <span className="font-medium text-slate-700">{QUARTER_LABELS[q]}</span>
-                        {result.calc.eligible ? (
-                          <span className="text-emerald-700 font-semibold">✓ Unlocked — you earned ${formatMoney(result.myBonus)}</span>
-                        ) : (
-                          <span className="text-slate-400">Not met</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {selectedEmployee?.pvBonusEligible && (
-              <div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow">
-                <h2 className="font-bold text-slate-700 mb-3">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
-                <div className="space-y-1.5">
-                  {pvQuarters.map((q) => {
-                    const percent = selectedEmployee.netProductionBonusPercent ?? 30;
-                    const owed = q.totalIncome * (percent / 100);
-                    const balance = owed - q.amountPaid;
-                    return (
-                      <div key={q.quarter} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
-                        <span className="font-medium text-slate-700">{QUARTER_LABELS[q.quarter]}</span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-slate-400 text-xs">{percent}%: ${formatMoney(owed)}</span>
-                          {balance > 0 ? (
-                            <span className="text-amber-600 font-semibold">Bonus: ${formatMoney(balance)}</span>
-                          ) : q.totalIncome > 0 ? (
-                            <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
-                          ) : (
-                            <span className="text-slate-400">Not started</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {isHygienist && (
-              <div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow">
-                <h2 className="font-bold text-slate-700 mb-3">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
-                <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
-                  <span className="text-slate-500">Earned ${formatMoney(hygieneEarned)} · Paid ${formatMoney(hygienePaid)}</span>
-                  {hygieneBalance > 0 ? (
-                    <span className="text-amber-600 font-semibold">Bonus: ${formatMoney(hygieneBalance)}</span>
-                  ) : hygieneEarned > 0 ? (
-                    <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
-                  ) : (
-                    <span className="text-slate-400">Not started</span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="rounded-2xl bg-white p-5 shadow">
-              <h2 className="font-bold text-slate-700 mb-3">📅 Upcoming Shifts (next 3 weeks)</h2>
-              {shifts.length === 0 ? (
-                <p className="text-sm text-slate-400">No upcoming shifts scheduled.</p>
-              ) : (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {shifts.map((s, i) => (
-                    <div key={i} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm">
-                      <div>
-                        <span className="font-medium text-slate-700">
-                          {new Date(s.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                        </span>
-                        {s.detail && <span className="text-slate-400 ml-2 text-xs">{s.detail}</span>}
-                      </div>
-                      <span className="text-xs font-semibold text-slate-500">{ROLE_ICONS[s.role]} {s.role}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl bg-white p-5 shadow">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-bold text-slate-700">📝 Leave Requests</h2>
-                <a href="/leave" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
-                  + Submit Leave Request
-                </a>
-              </div>
-              {leaveRequests.length === 0 ? (
-                <p className="text-sm text-slate-400">No leave requests on file.</p>
-              ) : (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {leaveRequests.map((req) => (
-                    <div key={req.id} className="rounded-xl bg-slate-50 px-3 py-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-slate-700">
-                          {new Date(req.startDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                          {req.startDate !== req.endDate && ` – ${new Date(req.endDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
-                        </span>
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${LEAVE_STATUS_STYLES[req.status]}`}>
-                          {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
-                        </span>
-                      </div>
-                      <div className="text-xs text-slate-400 mt-0.5">{REASON_LABELS[req.reason] ?? req.reason} · {req.totalDays} day{req.totalDays !== 1 ? "s" : ""}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl bg-white p-5 shadow">
-              <h2 className="font-bold text-slate-700 mb-3">📌 Events</h2>
-              {events.length === 0 ? (
-                <p className="text-sm text-slate-400">No upcoming events.</p>
-              ) : (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {events.map((ev) => (
-                    <div key={ev.id} className="rounded-xl px-3 py-2" style={{ background: ev.mandatory ? "#fef2f2" : "#faf5ff" }}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium" style={{ color: ev.mandatory ? "#dc2626" : "#7c3aed" }}>{ev.title}</span>
-                        {ev.mandatory && <span className="rounded-full bg-red-100 text-red-600 text-xs font-semibold px-2 py-0.5 flex-shrink-0">Mandatory</span>}
-                      </div>
-                      <div className="text-xs text-slate-500 mt-0.5">
-                        {new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                        {ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : ""}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl bg-white p-5 shadow">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-bold text-slate-700">📄 Certifications</h2>
-                {!showCertForm && (
-                  <button onClick={openNewCert} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
-                    + Add Certification
+          <div className={viewMode === "table" ? "space-y-6" : "space-y-6 max-w-3xl"}>
+            {viewMode === "table" ? (
+              <>
+                <TableSection title="Employees" people={employeeRows} />
+                <TableSection title="Temps" people={tempRows} />
+                <div className="flex items-center gap-3">
+                  <button onClick={handleSaveAll} disabled={savingAll}
+                    className="rounded-lg px-5 py-2 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50"
+                    style={{ backgroundColor: "#e8622a" }}>
+                    {savingAll ? "Saving…" : `Save All (${employeeRows.length + tempRows.length})`}
                   </button>
-                )}
-              </div>
-
-              {showCertForm && (
-                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 mb-3 space-y-2">
-                  {certError && <p className="text-xs text-red-500">{certError}</p>}
-                  {!useCustomTitle ? (
-                    <select
-                      value={titleOptions.includes(certForm.title) ? certForm.title : ""}
-                      onChange={(e) => {
-                        if (e.target.value === "__new__") { setUseCustomTitle(true); setCertForm((f) => ({ ...f, title: "" })); }
-                        else setCertForm((f) => ({ ...f, title: e.target.value }));
-                      }}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none">
-                      <option value="">Select a document name...</option>
-                      {titleOptions.map((t) => <option key={t} value={t}>{t}</option>)}
-                      <option value="__new__">+ Add new document name...</option>
-                    </select>
-                  ) : (
-                    <div className="flex gap-2">
-                      <input type="text" value={certForm.title} onChange={(e) => setCertForm((f) => ({ ...f, title: e.target.value }))}
-                        placeholder="e.g. CPR Certification" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                      {titleOptions.length > 0 && (
-                        <button type="button" onClick={() => { setUseCustomTitle(false); setCertForm((f) => ({ ...f, title: "" })); }}
-                          className="flex-shrink-0 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-500 hover:bg-white">
-                          Choose existing
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  <input type="date" value={certForm.expirationDate} onChange={(e) => setCertForm((f) => ({ ...f, expirationDate: e.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                  <p className="text-xs text-slate-400 -mt-1">Leave date blank if this never expires.</p>
-                  <input type="file" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" />
-                  {editingCertId && <p className="text-xs text-slate-400">Leave file blank to keep the existing one.</p>}
-                  <div className="flex gap-2">
-                    <button onClick={handleSaveCert} disabled={certSaving}
-                      className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
-                      {certSaving ? "Saving…" : editingCertId ? "Save Changes" : "Upload"}
-                    </button>
-                    <button onClick={closeCertForm} className="rounded-lg border border-slate-200 px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50">
-                      Cancel
-                    </button>
+                  {globalMsg && <span className="text-xs text-slate-400">{globalMsg}</span>}
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Employees</h2>
+                  <div className="space-y-2">
+                    {employeeRows.length === 0 ? <p className="text-sm text-slate-400">No employees scheduled this period.</p> : employeeRows.map(renderCard)}
                   </div>
                 </div>
-              )}
-
-              {certs.length === 0 ? (
-                <p className="text-sm text-slate-400">No certifications on file.</p>
-              ) : (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {certs.map((cert) => {
-                    const badge = certBadge(cert);
-                    return (
-                      <div key={cert.id} className="rounded-xl bg-slate-50 px-3 py-2 flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium text-slate-700 truncate">{cert.title}</div>
-                          <div className="text-xs text-slate-400">
-                            {cert.expirationDate
-                              ? new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                              : "No expiration"}
-                          </div>
-                          <button onClick={() => startEditCert(cert)} className="text-xs text-cyan-600 hover:underline mt-0.5">Edit</button>
-                        </div>
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold flex-shrink-0 ${badge.className}`}>{badge.label}</span>
-                      </div>
-                    );
-                  })}
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Temps</h2>
+                  <div className="space-y-2">
+                    {tempRows.length === 0 ? <p className="text-sm text-slate-400">No temps assigned this period.</p> : tempRows.map(renderCard)}
+                  </div>
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
+        )}
+        </>
         )}
       </div>
     </main>
   );
 }
 
-export default function StaffDashboardPage() {
+const QUARTER_LABELS: Record<1 | 2 | 3 | 4, string> = { 1: "Q1 (Jan–Mar)", 2: "Q2 (Apr–Jun)", 3: "Q3 (Jul–Sep)", 4: "Q4 (Oct–Dec)" };
+
+function GrowthBonusPanel() {
+  const initial = getCurrentQuarter();
+  const [year, setYear] = useState(initial.year);
+  const [quarter, setQuarter] = useState<1 | 2 | 3 | 4>(initial.quarter);
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [yearQuarters, setYearQuarters] = useState<Record<number, GrowthBonusQuarter>>({});
+  const [yearEntries, setYearEntries] = useState<PayrollEntry[]>([]);
+  const [daysOverrides, setDaysOverrides] = useState<Record<number, Record<number, number>>>({});
+  const [payments, setPayments] = useState<GrowthBonusPayment[]>([]);
+  const [form, setForm] = useState({ bamThreshold: 378000, netProductionCurrent: 0, netProductionPriorYear: 0 });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+  const [payingFor, setPayingFor] = useState<number | null>(null);
+  const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().split("T")[0], amount: "", notes: "" });
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editPaymentForm, setEditPaymentForm] = useState({ date: "", amount: "", notes: "" });
+
+  useEffect(() => { refresh(); }, [year]);
+
+  useEffect(() => {
+    const q = yearQuarters[quarter];
+    if (q) setForm({ bamThreshold: q.bamThreshold, netProductionCurrent: q.netProductionCurrent, netProductionPriorYear: q.netProductionPriorYear });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quarter, yearQuarters]);
+
+  async function refresh() {
+    setLoading(true);
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+    const [s, q1, q2, q3, q4, entries, pays, d1, d2, d3, d4] = await Promise.all([
+      loadStaff(),
+      loadGrowthBonusQuarter(year, 1), loadGrowthBonusQuarter(year, 2), loadGrowthBonusQuarter(year, 3), loadGrowthBonusQuarter(year, 4),
+      loadPayrollEntriesInRange(yearStart, yearEnd),
+      loadGrowthBonusPayments(),
+      loadGrowthBonusDaysOverrides(year, 1), loadGrowthBonusDaysOverrides(year, 2),
+      loadGrowthBonusDaysOverrides(year, 3), loadGrowthBonusDaysOverrides(year, 4),
+    ]);
+    setStaff(s);
+    setYearQuarters({ 1: q1, 2: q2, 3: q3, 4: q4 });
+    setYearEntries(entries);
+    setDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
+    setPayments(pays.filter((p) => p.date >= yearStart && p.date <= yearEnd));
+    setLoading(false);
+  }
+
+  async function handleSaveQuarter() {
+    setSaving(true);
+    await saveGrowthBonusQuarter({ year, quarter, ...form });
+    setSaving(false);
+    setSavedMsg("Saved.");
+    await refresh();
+  }
+
+  function splitForQuarter(q: 1 | 2 | 3 | 4, qData: GrowthBonusQuarter | undefined) {
+    if (!qData) return { calc: null as ReturnType<typeof computeQuarterCalc> | null, split: [] as ReturnType<typeof splitBonusPool> };
+    const calc = computeQuarterCalc(qData);
+    const { start, end } = getQuarterDateRange(year, q);
+    const eligible = staff.filter((e) => isEligibleForQuarter(e, end));
+    const overridesForQ = daysOverrides[q] ?? {};
+    const rows = eligible.map((e) => ({
+      employee: e,
+      days: overridesForQ[e.id] ?? computeDaysWorkedInQuarter(e.id, start, end, yearEntries),
+    }));
+    const split = calc.eligible ? splitBonusPool(calc.bonusPool, rows) : rows.map((r) => ({ employee: r.employee, days: r.days, multiplier: r.employee.growthBonusMultiplier ?? 1, points: 0, bonus: 0 }));
+    return { calc, split };
+  }
+
+  const { calc, split } = splitForQuarter(quarter, yearQuarters[quarter]);
+  const requiredProduction = calc ? Math.max(form.bamThreshold, form.netProductionPriorYear * 1.2) : 0;
+  const progressPct = requiredProduction > 0 ? Math.min(100, Math.round((form.netProductionCurrent / requiredProduction) * 100)) : 0;
+  const progressColor = calc?.eligible ? "#10b981" : progressPct >= 70 ? "#f59e0b" : progressPct >= 40 ? "#fb923c" : "#f87171";
+
+  async function handleDaysEdit(employeeId: number, days: number) {
+    await saveGrowthBonusDaysOverride(year, quarter, employeeId, days);
+    await refresh();
+  }
+
+  // YTD earned per employee: sum this year's quarters that actually qualified.
+  const ytdEarned: Record<number, number> = {};
+  ([1, 2, 3, 4] as const).forEach((q) => {
+    const { split: qSplit } = splitForQuarter(q, yearQuarters[q]);
+    qSplit.forEach((row) => { ytdEarned[row.employee.id] = (ytdEarned[row.employee.id] ?? 0) + row.bonus; });
+  });
+  const ytdPaid: Record<number, number> = {};
+  payments.forEach((p) => { ytdPaid[p.employeeId] = (ytdPaid[p.employeeId] ?? 0) + p.amount; });
+
+  async function handleAddPayment(employeeId: number) {
+    const amount = Number(paymentForm.amount);
+    if (!amount || amount <= 0) return;
+    await addGrowthBonusPayment({ employeeId, date: paymentForm.date, amount, notes: paymentForm.notes });
+    setPayingFor(null);
+    setPaymentForm({ date: new Date().toISOString().split("T")[0], amount: "", notes: "" });
+    await refresh();
+  }
+
+  function startEditPayment(p: GrowthBonusPayment) {
+    setEditingPaymentId(p.id);
+    setEditPaymentForm({ date: p.date, amount: String(p.amount), notes: p.notes });
+  }
+
+  async function handleUpdatePayment(id: string) {
+    const amount = Number(editPaymentForm.amount);
+    if (!amount || amount <= 0) return;
+    await updateGrowthBonusPayment(id, { date: editPaymentForm.date, amount, notes: editPaymentForm.notes });
+    setEditingPaymentId(null);
+    await refresh();
+  }
+
+  async function handleDeletePayment(id: string) {
+    if (!confirm("Delete this logged payment? This can't be undone.")) return;
+    await deleteGrowthBonusPayment(id);
+    await refresh();
+  }
+
+  if (loading) return <p className="text-slate-400 text-sm">Loading…</p>;
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      <div className="flex items-center gap-3">
+        <input type="number" onFocus={(e) => e.target.select()} value={year} onChange={(e) => setYear(Number(e.target.value))}
+          className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+        <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden">
+          {([1, 2, 3, 4] as const).map((q) => (
+            <button key={q} onClick={() => setQuarter(q)} className="px-3 py-1.5 text-sm font-semibold transition"
+              style={quarter === q ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+              {QUARTER_LABELS[q]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl bg-white shadow-sm p-4 space-y-3">
+        <h2 className="font-bold text-slate-700 text-lg">{QUARTER_LABELS[quarter]} {year} Bonus</h2>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-0.5">Net Production ({year})</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={form.netProductionCurrent} onChange={(e) => setForm((f) => ({ ...f, netProductionCurrent: Number(e.target.value) }))}
+              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-0.5">Net Production ({year - 1}, same quarter)</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={form.netProductionPriorYear} onChange={(e) => setForm((f) => ({ ...f, netProductionPriorYear: Number(e.target.value) }))}
+              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-0.5">BAM Threshold</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={form.bamThreshold} onChange={(e) => setForm((f) => ({ ...f, bamThreshold: Number(e.target.value) }))}
+              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={handleSaveQuarter} disabled={saving}
+            className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+          {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
+        </div>
+
+        <div>
+          <div className="w-full h-3 rounded-full bg-slate-100 overflow-hidden">
+            <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: progressColor }} />
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            {progressPct}% of the way to this quarter's bonus target (${formatMoney(requiredProduction)}){calc?.eligible ? " — target met! 🎉" : ""}
+          </p>
+        </div>
+
+        {calc && (
+          <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
+            <div>Delta: <strong>${formatMoney(calc.delta)}</strong> · Growth: <strong>{(calc.growthPct * 100).toFixed(1)}%</strong></div>
+            <div className="flex gap-4 text-xs">
+              <span className={calc.meetsBam ? "text-green-600" : "text-red-500"}>{calc.meetsBam ? "✓" : "✗"} Exceeds BAM</span>
+              <span className={calc.meetsGrowth ? "text-green-600" : "text-red-500"}>{calc.meetsGrowth ? "✓" : "✗"} 20%+ growth</span>
+            </div>
+            {calc.eligible ? (
+              <div className="text-emerald-700 font-semibold">🎉 Bonus pool: ${formatMoney(calc.bonusPool)} (at {(calc.tierPct * 100).toFixed(0)}% rate)</div>
+            ) : (
+              <div className="text-slate-400">No bonus pool this quarter — thresholds not met.</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <h2 className="px-4 pt-3 font-bold text-slate-700 text-sm">{QUARTER_LABELS[quarter]} {year} — Bonus Split</h2>
+        <p className="px-4 pt-1 text-xs text-slate-400">"Days" auto-fills from Payroll hours once that's in use for a period — you can also type a number directly (e.g. for quarters before Payroll was tracked).</p>
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+              <th className="px-3 py-2 font-medium">Name</th>
+              <th className="px-2 py-2 font-medium">Days</th>
+              <th className="px-2 py-2 font-medium">Mult.</th>
+              <th className="px-2 py-2 font-medium">Points</th>
+              <th className="px-2 py-2 font-medium">This Qtr</th>
+              <th className="px-2 py-2 font-medium">Earned YTD</th>
+              <th className="px-2 py-2 font-medium">Paid YTD</th>
+              <th className="px-2 py-2 font-medium">Balance</th>
+              <th className="px-2 py-2 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {split.length === 0 ? (
+              <tr><td colSpan={9} className="px-3 py-4 text-slate-400 text-sm">No one is eligible yet for this quarter.</td></tr>
+            ) : split.map((row) => {
+              const earned = ytdEarned[row.employee.id] ?? 0;
+              const paid = ytdPaid[row.employee.id] ?? 0;
+              const balance = earned - paid;
+              return (
+                <tr key={row.employee.id} className="border-b border-slate-50 last:border-0">
+                  <td className="px-3 py-2 font-medium text-slate-700">{row.employee.name}</td>
+                  <td className="px-2 py-2">
+                    <input type="number" onFocus={(e) => e.target.select()} defaultValue={row.days} onBlur={(e) => handleDaysEdit(row.employee.id, Number(e.target.value))}
+                      className="w-16 rounded border border-slate-200 px-1.5 py-0.5 text-xs focus:outline-none" />
+                  </td>
+                  <td className="px-2 py-2">{row.multiplier}</td>
+                  <td className="px-2 py-2">{row.points}</td>
+                  <td className="px-2 py-2 font-semibold">${formatMoney(row.bonus)}</td>
+                  <td className="px-2 py-2">${formatMoney(earned)}</td>
+                  <td className="px-2 py-2">${formatMoney(paid)}</td>
+                  <td className={`px-2 py-2 font-semibold ${balance > 0 ? "text-amber-600" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                  <td className="px-2 py-2">
+                    {payingFor === row.employee.id ? (
+                      <div className="flex items-center gap-1">
+                        <input type="date" value={paymentForm.date} onChange={(e) => setPaymentForm((f) => ({ ...f, date: e.target.value }))}
+                          className="rounded border border-slate-200 px-1 py-0.5 text-xs w-28" />
+                        <input type="number" onFocus={(e) => e.target.select()} placeholder="$" value={paymentForm.amount} onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                          className="rounded border border-slate-200 px-1 py-0.5 text-xs w-16" />
+                        <button onClick={() => handleAddPayment(row.employee.id)} className="text-xs text-white px-2 py-0.5 rounded" style={{ backgroundColor: "#e8622a" }}>Log</button>
+                        <button onClick={() => setPayingFor(null)} className="text-xs text-slate-400">✕</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setPayingFor(row.employee.id)} className="text-xs text-orange-500 hover:underline">+ Log payment</button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="rounded-xl bg-white shadow-sm p-4">
+        <h2 className="font-bold text-slate-700 mb-2 text-sm">Payment log ({year})</h2>
+        {payments.length === 0 ? <p className="text-sm text-slate-400">No payments logged yet.</p> : (
+          <div className="space-y-1 text-sm max-h-64 overflow-y-auto">
+            {payments.map((p) => {
+              const emp = staff.find((e) => e.id === p.employeeId);
+              if (editingPaymentId === p.id) {
+                return (
+                  <div key={p.id} className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-500">{emp?.name ?? "Unknown"}</span>
+                    <input type="date" value={editPaymentForm.date} onChange={(e) => setEditPaymentForm((f) => ({ ...f, date: e.target.value }))}
+                      className="rounded border border-slate-200 px-1 py-0.5 text-xs w-28" />
+                    <input type="number" onFocus={(e) => e.target.select()} placeholder="$" value={editPaymentForm.amount} onChange={(e) => setEditPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                      className="rounded border border-slate-200 px-1 py-0.5 text-xs w-20" />
+                    <input type="text" placeholder="Notes" value={editPaymentForm.notes} onChange={(e) => setEditPaymentForm((f) => ({ ...f, notes: e.target.value }))}
+                      className="rounded border border-slate-200 px-1 py-0.5 text-xs flex-1 min-w-[100px]" />
+                    <button onClick={() => handleUpdatePayment(p.id)} className="text-xs text-white px-2 py-0.5 rounded" style={{ backgroundColor: "#e8622a" }}>Save</button>
+                    <button onClick={() => setEditingPaymentId(null)} className="text-xs text-slate-400">Cancel</button>
+                  </div>
+                );
+              }
+              return (
+                <div key={p.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 gap-2">
+                  <span className="truncate">{emp?.name ?? "Unknown"} — {new Date(p.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{p.notes ? ` · ${p.notes}` : ""}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="font-semibold">${formatMoney(p.amount)}</span>
+                    <button onClick={() => startEditPayment(p)} className="text-xs text-orange-500 hover:underline">Edit</button>
+                    <button onClick={() => handleDeletePayment(p.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PvBonusPanel() {
+  const currentYear = new Date().getFullYear();
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [employeeId, setEmployeeId] = useState<number | null>(null);
+  const [years, setYears] = useState<number[]>([currentYear]);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set([currentYear]));
+  const [rows, setRows] = useState<Record<number, PvBonusQuarter[]>>({});
+  const [loading, setLoading] = useState(true);
+  const [savingYear, setSavingYear] = useState<number | null>(null);
+  const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
+  const [newYearInput, setNewYearInput] = useState("");
+
+  useEffect(() => {
+    loadStaff().then((s) => {
+      setStaff(s);
+      const eligible = s.filter((e) => e.pvBonusEligible);
+      if (eligible.length > 0) setEmployeeId(eligible[0].id);
+      else setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => { if (employeeId != null) loadYears(years); }, [employeeId]);
+
+  async function loadYears(ys: number[]) {
+    if (employeeId == null) return;
+    setLoading(true);
+    const results = await Promise.all(ys.map((y) => loadPvBonusYear(employeeId, y)));
+    setRows((r) => { const next = { ...r }; ys.forEach((y, i) => { next[y] = results[i]; }); return next; });
+    setLoading(false);
+  }
+
+  function toggleExpanded(y: number) {
+    setExpanded((s) => { const next = new Set(s); if (next.has(y)) next.delete(y); else next.add(y); return next; });
+  }
+
+  function addYear() {
+    const y = Number(newYearInput);
+    if (!y || years.includes(y)) return;
+    setYears((ys) => [...ys, y]);
+    setExpanded((s) => new Set(s).add(y));
+    setNewYearInput("");
+    loadYears([y]);
+  }
+
+  function updateCell(year: number, quarter: number, field: "totalIncome" | "amountPaid" | "notes" | "paid", value: number | string | boolean) {
+    setRows((r) => ({ ...r, [year]: (r[year] ?? []).map((q) => q.quarter === quarter ? { ...q, [field]: value } : q) }));
+  }
+
+  async function handleSaveYear(year: number) {
+    setSavingYear(year);
+    await Promise.all((rows[year] ?? []).map((q) => savePvBonusQuarter(q)));
+    setSavingYear(null);
+    setSavedMsg((m) => ({ ...m, [year]: "Saved." }));
+  }
+
+  const eligibleStaff = staff.filter((e) => e.pvBonusEligible);
+  const selectedEmployee = staff.find((e) => e.id === employeeId);
+  const percent = selectedEmployee?.netProductionBonusPercent ?? 30;
+  const sortedYears = [...years].sort((a, b) => b - a);
+  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+
+  if (eligibleStaff.length === 0 && !loading) {
+    return <p className="text-sm text-slate-400">No one is marked "Eligible for Net Production Based Bonus" yet — set that on the Staff page first.</p>;
+  }
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      <div className="flex items-center gap-2">
+        <select value={employeeId ?? ""} onChange={(e) => setEmployeeId(Number(e.target.value))}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {eligibleStaff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+        <input type="number" onFocus={(e) => e.target.select()} value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
+          className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+        <button onClick={addYear} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+          + Add Year
+        </button>
+      </div>
+
+      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : sortedYears.map((year) => {
+        const yearRows = rows[year] ?? [];
+        const isExpanded = expanded.has(year);
+        return (
+          <div key={year} className="rounded-xl bg-white shadow-sm overflow-hidden">
+            <button onClick={() => toggleExpanded(year)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
+              <span className="font-bold text-slate-700">{year}</span>
+              <span className="text-slate-300 text-xs">{isExpanded ? "▲" : "▼"}</span>
+            </button>
+            {isExpanded && (
+              <div className="border-t border-slate-100">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse min-w-[760px]">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                        <th className="px-3 py-2 font-medium">Quarter</th>
+                        <th className="px-2 py-2 font-medium">Total Income</th>
+                        <th className="px-2 py-2 font-medium">{percent}%</th>
+                        <th className="px-2 py-2 font-medium">Paid Amount</th>
+                        <th className="px-2 py-2 font-medium">Balance</th>
+                        <th className="px-2 py-2 font-medium">Paid?</th>
+                        <th className="px-3 py-2 font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {yearRows.map((q) => {
+                        const owed = q.totalIncome * (percent / 100);
+                        const balance = owed - q.amountPaid;
+                        return (
+                          <tr key={q.quarter} className="border-b border-slate-50 last:border-0">
+                            <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{QUARTER_LABELS[q.quarter as 1 | 2 | 3 | 4]}</td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={q.totalIncome} onChange={(e) => updateCell(year, q.quarter, "totalIncome", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
+                            <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={q.amountPaid} onChange={(e) => updateCell(year, q.quarter, "amountPaid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
+                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                            <td className="px-2 py-2 text-center">
+                              <input type="checkbox" checked={q.paid} onChange={(e) => updateCell(year, q.quarter, "paid", e.target.checked)} />
+                            </td>
+                            <td className="px-2 py-2"><input type="text" value={q.notes} onChange={(e) => updateCell(year, q.quarter, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex items-center gap-3 p-3">
+                  <button onClick={() => handleSaveYear(year)} disabled={savingYear === year}
+                    className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                    {savingYear === year ? "Saving…" : "Save"}
+                  </button>
+                  {savedMsg[year] && <span className="text-xs text-slate-400">{savedMsg[year]}</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function HoBonusPanel() {
+  const currentYear = new Date().getFullYear();
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [employeeId, setEmployeeId] = useState<number | null>(null);
+  const [years, setYears] = useState<number[]>([currentYear]);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set([currentYear]));
+  const [rows, setRows] = useState<Record<number, HoBonusMonth[]>>({});
+  const [loading, setLoading] = useState(true);
+  const [savingYear, setSavingYear] = useState<number | null>(null);
+  const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
+  const [newYearInput, setNewYearInput] = useState("");
+
+  useEffect(() => {
+    loadStaff().then((s) => {
+      setStaff(s);
+      const eligible = s.filter((e) => e.hoBonusEligible);
+      if (eligible.length > 0) setEmployeeId(eligible[0].id);
+      else setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => { if (employeeId != null) loadYears(years); }, [employeeId]);
+
+  async function loadYears(ys: number[]) {
+    if (employeeId == null) return;
+    setLoading(true);
+    const results = await Promise.all(ys.map((y) => loadHoBonusPayoutYear(employeeId, y)));
+    setRows((r) => { const next = { ...r }; ys.forEach((y, i) => { next[y] = results[i]; }); return next; });
+    setLoading(false);
+  }
+
+  function toggleExpanded(y: number) {
+    setExpanded((s) => { const next = new Set(s); if (next.has(y)) next.delete(y); else next.add(y); return next; });
+  }
+
+  function addYear() {
+    const y = Number(newYearInput);
+    if (!y || years.includes(y)) return;
+    setYears((ys) => [...ys, y]);
+    setExpanded((s) => new Set(s).add(y));
+    setNewYearInput("");
+    loadYears([y]);
+  }
+
+  function updateCell(year: number, month: number, field: "production" | "paid" | "notes", value: number | string) {
+    setRows((r) => ({ ...r, [year]: (r[year] ?? []).map((m) => m.month === month ? { ...m, [field]: value } : m) }));
+  }
+
+  async function handleSaveYear(year: number) {
+    setSavingYear(year);
+    await Promise.all((rows[year] ?? []).map((m) => saveHoBonusMonth(m)));
+    setSavingYear(null);
+    setSavedMsg((m) => ({ ...m, [year]: "Saved." }));
+  }
+
+  const eligibleStaff = staff.filter((e) => e.hoBonusEligible);
+  const sortedYears = [...years].sort((a, b) => b - a);
+  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+
+  if (eligibleStaff.length === 0 && !loading) {
+    return <p className="text-sm text-slate-400">No one is marked "Eligible for Dr. Ho-style Bonus" yet — set that on the Staff page first.</p>;
+  }
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      <p className="text-sm text-slate-500">Production-based — 40% of that month's production, paid out over the following month's pay periods. Each year's table starts with December of the prior year (paid out the following January) through November.</p>
+      <div className="flex items-center gap-2">
+        <select value={employeeId ?? ""} onChange={(e) => setEmployeeId(Number(e.target.value))}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {eligibleStaff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+        <input type="number" onFocus={(e) => e.target.select()} value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
+          className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+        <button onClick={addYear} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+          + Add Year
+        </button>
+      </div>
+
+      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : sortedYears.map((year) => {
+        const yearRows = rows[year] ?? [];
+        const isExpanded = expanded.has(year);
+        const yearTotals = yearRows.reduce((acc, m) => ({
+          income: acc.income + m.production, owed: acc.owed + m.production * 0.4, paid: acc.paid + m.paid,
+        }), { income: 0, owed: 0, paid: 0 });
+        return (
+          <div key={year} className="rounded-xl bg-white shadow-sm overflow-hidden">
+            <button onClick={() => toggleExpanded(year)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
+              <span className="font-bold text-slate-700">{year}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400 hidden sm:inline">Income ${formatMoney(yearTotals.income)} · 40% ${formatMoney(yearTotals.owed)} · Paid ${formatMoney(yearTotals.paid)}</span>
+                <span className="text-slate-300 text-xs">{isExpanded ? "▲" : "▼"}</span>
+              </div>
+            </button>
+            {isExpanded && (
+              <div className="border-t border-slate-100">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse min-w-[700px]">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                        <th className="px-3 py-2 font-medium">Month</th>
+                        <th className="px-2 py-2 font-medium">Production</th>
+                        <th className="px-2 py-2 font-medium">40%</th>
+                        <th className="px-2 py-2 font-medium">Paid</th>
+                        <th className="px-2 py-2 font-medium">Balance</th>
+                        <th className="px-3 py-2 font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {yearRows.map((m) => {
+                        const owed = m.production * 0.4;
+                        const balance = owed - m.paid;
+                        return (
+                          <tr key={m.month} className="border-b border-slate-50 last:border-0">
+                            <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={m.production} onChange={(e) => updateCell(year, m.month, "production", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
+                            <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={m.paid} onChange={(e) => updateCell(year, m.month, "paid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
+                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                            <td className="px-2 py-2"><input type="text" value={m.notes} onChange={(e) => updateCell(year, m.month, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex items-center gap-3 p-3">
+                  <button onClick={() => handleSaveYear(year)} disabled={savingYear === year}
+                    className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                    {savingYear === year ? "Saving…" : "Save"}
+                  </button>
+                  {savedMsg[year] && <span className="text-xs text-slate-400">{savedMsg[year]}</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HygieneBonusPanel() {
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [hygienistId, setHygienistId] = useState<number | null>(null);
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>([]);
+  const [overrides, setOverrides] = useState<Record<string, HygieneBonusEntry>>({});
+  const [rows, setRows] = useState<Record<string, { patientCount: number; amountPaid: number }>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  const isHygienistRole = (e: Employee) => e.role === "Hygienist" || e.skills.includes("Hygienist");
+
+  useEffect(() => {
+    loadStaff().then((s) => {
+      setStaff(s);
+      const hygienists = s.filter(isHygienistRole);
+      if (hygienists.length > 0) setHygienistId(hygienists[0].id);
+      else setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => { if (hygienistId != null) refresh(); }, [hygienistId, year]);
+
+  async function refresh() {
+    if (hygienistId == null) return;
+    setLoading(true);
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+    const [entries, overrideRows] = await Promise.all([
+      loadPayrollEntriesInRange(yearStart, yearEnd),
+      loadHygieneBonusEntries(hygienistId, yearStart, yearEnd),
+    ]);
+    setPayrollEntries(entries);
+    const overrideMap: Record<string, HygieneBonusEntry> = {};
+    overrideRows.forEach((o) => { overrideMap[o.payPeriodStart] = o; });
+    setOverrides(overrideMap);
+
+    const periods = getPayPeriodsInYear(year);
+    const nextRows: Record<string, { patientCount: number; amountPaid: number }> = {};
+    for (const p of periods) {
+      const override = overrideMap[p.start];
+      const payrollRow = entries.find((e) => e.personKey === `staff:${hygienistId}` && e.payPeriodStart === p.start);
+      nextRows[p.start] = {
+        patientCount: override?.patientCount ?? payrollRow?.hygienePatientCount ?? 0,
+        amountPaid: override?.amountPaid ?? 0,
+      };
+    }
+    setRows(nextRows);
+    setLoading(false);
+  }
+
+  function updateRow(payPeriodStart: string, field: "patientCount" | "amountPaid", value: number) {
+    setRows((r) => ({ ...r, [payPeriodStart]: { ...r[payPeriodStart], [field]: value } }));
+  }
+
+  async function handleSaveAll() {
+    if (hygienistId == null) return;
+    setSaving(true);
+    const periods = getPayPeriodsInYear(year);
+    await Promise.all(periods.map((p) => saveHygieneBonusEntry({
+      employeeId: hygienistId, payPeriodStart: p.start, payPeriodEnd: p.end,
+      patientCount: rows[p.start]?.patientCount ?? 0, amountPaid: rows[p.start]?.amountPaid ?? 0,
+    })));
+    setSaving(false);
+    setSavedMsg("Saved.");
+    await refresh();
+  }
+
+  const hygienists = staff.filter(isHygienistRole);
+  const periods = getPayPeriodsInYear(year);
+  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+
+  let runningEarned = 0;
+  let runningPaid = 0;
+
+  if (hygienists.length === 0 && !loading) {
+    return <p className="text-sm text-slate-400">No one is marked as a Hygienist yet on the Staff page.</p>;
+  }
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      <p className="text-sm text-slate-500">Patient count × ${HYGIENE_BONUS_PER_PATIENT}/patient — auto-fills from the Payroll tab's hygiene count, editable here too.</p>
+      <div className="flex items-center gap-2">
+        <select value={hygienistId ?? ""} onChange={(e) => setHygienistId(Number(e.target.value))}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {hygienists.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+        <input type="number" onFocus={(e) => e.target.select()} value={year} onChange={(e) => setYear(Number(e.target.value))}
+          className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+      </div>
+
+      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
+        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+          <div className="overflow-x-auto max-h-[32rem]">
+            <table className="w-full text-sm border-collapse min-w-[700px]">
+              <thead className="sticky top-0 bg-white">
+                <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                  <th className="px-3 py-2 font-medium">Pay Period</th>
+                  <th className="px-2 py-2 font-medium">Patients</th>
+                  <th className="px-2 py-2 font-medium">Earned</th>
+                  <th className="px-2 py-2 font-medium">Paid</th>
+                  <th className="px-2 py-2 font-medium">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {periods.map((p) => {
+                  const row = rows[p.start] ?? { patientCount: 0, amountPaid: 0 };
+                  const earned = row.patientCount * HYGIENE_BONUS_PER_PATIENT;
+                  runningEarned += earned;
+                  runningPaid += row.amountPaid;
+                  const balance = runningEarned - runningPaid;
+                  return (
+                    <tr key={p.start} className="border-b border-slate-50 last:border-0">
+                      <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{p.label}</td>
+                      <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={row.patientCount} onChange={(e) => updateRow(p.start, "patientCount", Number(e.target.value))} className={`${cellClass} w-16`} /></td>
+                      <td className="px-2 py-2 text-slate-500">${formatMoney(earned)}</td>
+                      <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={row.amountPaid} onChange={(e) => updateRow(p.start, "amountPaid", Number(e.target.value))} className={`${cellClass} w-20`} /></td>
+                      <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-3 p-3 border-t border-slate-100">
+            <button onClick={handleSaveAll} disabled={saving}
+              className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+              {saving ? "Saving…" : "Save All"}
+            </button>
+            {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
+            <span className="text-sm text-slate-500 ml-auto">
+              {year} balance: <strong className={runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${formatMoney(runningEarned - runningPaid)}</strong>
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function PayrollPage() {
   return (
     <AppIdentityGate>
-      {(identity, logout) => <DashboardPageBody identity={identity} logout={logout} />}
+      {(identity, logout) => identity.canManagePayroll ? <PayrollPageBody /> : <AccessDenied logout={logout} />}
     </AppIdentityGate>
   );
 }
