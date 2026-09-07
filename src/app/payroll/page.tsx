@@ -283,21 +283,21 @@ function PayrollPageBody() {
                         <span className="font-medium text-slate-700">{p.personName}</span>
                       </div>
                     </td>
-                    <td className="px-1 py-1.5"><input type="number" disabled={skipped} value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))} className={cellClass} /></td>
-                    <td className="px-1 py-1.5"><input type="number" disabled={skipped} value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))} className={cellClass} /></td>
                     <td className="px-1 py-1.5">
-                      {p.employee ? <input type="number" disabled={skipped} value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
                     </td>
                     <td className="px-1 py-1.5">
-                      {p.employee ? <input type="number" disabled={skipped} value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
                     </td>
                     <td className="px-1 py-1.5">
-                      {p.employee ? <input type="number" disabled={skipped} value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
                     </td>
-                    <td className="px-1 py-1.5"><input type="number" disabled={skipped} value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))} className={cellClass} /></td>
-                    <td className="px-1 py-1.5"><input type="number" disabled={skipped} value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))} className={cellClass} /></td>
                     <td className="px-1 py-1.5">
-                      {isHygienist(p.employee) ? <input type="number" disabled={skipped} value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))} className={cellClass} title={`$${(fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT).toFixed(2)} bonus`} /> : <span className="text-slate-300 text-xs">—</span>}
+                      {isHygienist(p.employee) ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))} className={cellClass} title={`$${(fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT).toFixed(2)} bonus`} /> : <span className="text-slate-300 text-xs">—</span>}
                     </td>
                     <td className="px-2 py-1.5"><input type="text" disabled={skipped} value={fields.notes} onChange={(e) => updateRow(p.personKey, "notes", e.target.value)} className={cellClass + " min-w-[100px]"} /></td>
                     <td className="px-2 py-1.5 whitespace-nowrap">
@@ -340,13 +340,13 @@ function PayrollPageBody() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs text-slate-400 mb-0.5">PTO Balance (hrs)</label>
-                  <input type="number" defaultValue={p.employee.ptoBalanceHours ?? 0}
+                  <input type="number" onFocus={(e) => e.target.select()} defaultValue={p.employee.ptoBalanceHours ?? 0}
                     onBlur={(e) => handleBalanceChange(p.employee!, "pto", Number(e.target.value))}
                     className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs text-slate-400 mb-0.5">Sick Balance (hrs)</label>
-                  <input type="number" defaultValue={p.employee.sickBalanceHours ?? 0}
+                  <input type="number" onFocus={(e) => e.target.select()} defaultValue={p.employee.sickBalanceHours ?? 0}
                     onBlur={(e) => handleBalanceChange(p.employee!, "sick", Number(e.target.value))}
                     className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
                 </div>
@@ -356,17 +356,17 @@ function PayrollPageBody() {
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="block text-xs text-slate-400 mb-0.5">Hours Worked</label>
-                <input type="number" value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))}
+                <input type="number" onFocus={(e) => e.target.select()} value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))}
                   className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
               </div>
               <div>
                 <label className="block text-xs text-slate-400 mb-0.5">OT Hours</label>
-                <input type="number" value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))}
+                <input type="number" onFocus={(e) => e.target.select()} value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))}
                   className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
               </div>
               <div>
                 <label className="block text-xs text-slate-400 mb-0.5">Bonus ($)</label>
-                <input type="number" value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))}
+                <input type="number" onFocus={(e) => e.target.select()} value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))}
                   className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
               </div>
             </div>
@@ -378,11 +378,11 @@ function PayrollPageBody() {
                   <button onClick={() => recomputeAuto(p)} className="text-xs text-orange-500 hover:underline">↺ recompute</button>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  <input type="number" value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))}
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))}
                     className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
-                  <input type="number" value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))}
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))}
                     className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
-                  <input type="number" value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))}
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))}
                     className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
                 </div>
               </div>
@@ -390,7 +390,7 @@ function PayrollPageBody() {
 
             <div>
               <label className="block text-xs text-slate-400 mb-0.5">Paid Meeting/Day-off Hours</label>
-              <input type="number" value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))}
+              <input type="number" onFocus={(e) => e.target.select()} value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))}
                 className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
             </div>
 
@@ -398,7 +398,7 @@ function PayrollPageBody() {
               <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-2.5 flex items-center gap-3">
                 <div>
                   <label className="block text-xs text-emerald-700 mb-0.5">Hygiene Patients</label>
-                  <input type="number" value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))}
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))}
                     className="w-20 rounded-lg border border-emerald-200 px-2 py-1 text-sm focus:outline-none" />
                 </div>
                 <span className="text-sm text-emerald-700">× ${HYGIENE_BONUS_PER_PATIENT} = <strong>${hygieneBonus.toFixed(2)}</strong></span>
@@ -665,7 +665,7 @@ function GrowthBonusPanel() {
   return (
     <div className="max-w-4xl space-y-6">
       <div className="flex items-center gap-3">
-        <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
+        <input type="number" onFocus={(e) => e.target.select()} value={year} onChange={(e) => setYear(Number(e.target.value))}
           className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
         <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden">
           {([1, 2, 3, 4] as const).map((q) => (
@@ -682,17 +682,17 @@ function GrowthBonusPanel() {
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <label className="block text-xs text-slate-400 mb-0.5">Net Production ({year})</label>
-            <input type="number" value={form.netProductionCurrent} onChange={(e) => setForm((f) => ({ ...f, netProductionCurrent: Number(e.target.value) }))}
+            <input type="number" onFocus={(e) => e.target.select()} value={form.netProductionCurrent} onChange={(e) => setForm((f) => ({ ...f, netProductionCurrent: Number(e.target.value) }))}
               className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-0.5">Net Production ({year - 1}, same quarter)</label>
-            <input type="number" value={form.netProductionPriorYear} onChange={(e) => setForm((f) => ({ ...f, netProductionPriorYear: Number(e.target.value) }))}
+            <input type="number" onFocus={(e) => e.target.select()} value={form.netProductionPriorYear} onChange={(e) => setForm((f) => ({ ...f, netProductionPriorYear: Number(e.target.value) }))}
               className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-0.5">BAM Threshold</label>
-            <input type="number" value={form.bamThreshold} onChange={(e) => setForm((f) => ({ ...f, bamThreshold: Number(e.target.value) }))}
+            <input type="number" onFocus={(e) => e.target.select()} value={form.bamThreshold} onChange={(e) => setForm((f) => ({ ...f, bamThreshold: Number(e.target.value) }))}
               className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
         </div>
@@ -757,7 +757,7 @@ function GrowthBonusPanel() {
                 <tr key={row.employee.id} className="border-b border-slate-50 last:border-0">
                   <td className="px-3 py-2 font-medium text-slate-700">{row.employee.name}</td>
                   <td className="px-2 py-2">
-                    <input type="number" defaultValue={row.days} onBlur={(e) => handleDaysEdit(row.employee.id, Number(e.target.value))}
+                    <input type="number" onFocus={(e) => e.target.select()} defaultValue={row.days} onBlur={(e) => handleDaysEdit(row.employee.id, Number(e.target.value))}
                       className="w-16 rounded border border-slate-200 px-1.5 py-0.5 text-xs focus:outline-none" />
                   </td>
                   <td className="px-2 py-2">{row.multiplier}</td>
@@ -771,7 +771,7 @@ function GrowthBonusPanel() {
                       <div className="flex items-center gap-1">
                         <input type="date" value={paymentForm.date} onChange={(e) => setPaymentForm((f) => ({ ...f, date: e.target.value }))}
                           className="rounded border border-slate-200 px-1 py-0.5 text-xs w-28" />
-                        <input type="number" placeholder="$" value={paymentForm.amount} onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                        <input type="number" onFocus={(e) => e.target.select()} placeholder="$" value={paymentForm.amount} onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))}
                           className="rounded border border-slate-200 px-1 py-0.5 text-xs w-16" />
                         <button onClick={() => handleAddPayment(row.employee.id)} className="text-xs text-white px-2 py-0.5 rounded" style={{ backgroundColor: "#e8622a" }}>Log</button>
                         <button onClick={() => setPayingFor(null)} className="text-xs text-slate-400">✕</button>
@@ -799,7 +799,7 @@ function GrowthBonusPanel() {
                     <span className="text-xs text-slate-500">{emp?.name ?? "Unknown"}</span>
                     <input type="date" value={editPaymentForm.date} onChange={(e) => setEditPaymentForm((f) => ({ ...f, date: e.target.value }))}
                       className="rounded border border-slate-200 px-1 py-0.5 text-xs w-28" />
-                    <input type="number" placeholder="$" value={editPaymentForm.amount} onChange={(e) => setEditPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                    <input type="number" onFocus={(e) => e.target.select()} placeholder="$" value={editPaymentForm.amount} onChange={(e) => setEditPaymentForm((f) => ({ ...f, amount: e.target.value }))}
                       className="rounded border border-slate-200 px-1 py-0.5 text-xs w-20" />
                     <input type="text" placeholder="Notes" value={editPaymentForm.notes} onChange={(e) => setEditPaymentForm((f) => ({ ...f, notes: e.target.value }))}
                       className="rounded border border-slate-200 px-1 py-0.5 text-xs flex-1 min-w-[100px]" />
@@ -898,7 +898,7 @@ function PvBonusPanel() {
           className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
           {eligibleStaff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
         </select>
-        <input type="number" value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
+        <input type="number" onFocus={(e) => e.target.select()} value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
           className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
         <button onClick={addYear} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
           + Add Year
@@ -936,9 +936,9 @@ function PvBonusPanel() {
                         return (
                           <tr key={q.quarter} className="border-b border-slate-50 last:border-0">
                             <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{QUARTER_LABELS[q.quarter as 1 | 2 | 3 | 4]}</td>
-                            <td className="px-2 py-2"><input type="number" value={q.totalIncome} onChange={(e) => updateCell(year, q.quarter, "totalIncome", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={q.totalIncome} onChange={(e) => updateCell(year, q.quarter, "totalIncome", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
                             <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
-                            <td className="px-2 py-2"><input type="number" value={q.amountPaid} onChange={(e) => updateCell(year, q.quarter, "amountPaid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={q.amountPaid} onChange={(e) => updateCell(year, q.quarter, "amountPaid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
                             <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
                             <td className="px-2 py-2 text-center">
                               <input type="checkbox" checked={q.paid} onChange={(e) => updateCell(year, q.quarter, "paid", e.target.checked)} />
@@ -1020,7 +1020,7 @@ function HoBonusPanel() {
     <div className="max-w-4xl space-y-4">
       <p className="text-sm text-slate-500">Production-based — 40% of that month's production, paid out over the following month's pay periods. Each year's table starts with December of the prior year (paid out the following January) through November.</p>
       <div className="flex items-center gap-2">
-        <input type="number" value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
+        <input type="number" onFocus={(e) => e.target.select()} value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
           className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
         <button onClick={addYear} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
           + Add Year
@@ -1063,9 +1063,9 @@ function HoBonusPanel() {
                         return (
                           <tr key={m.month} className="border-b border-slate-50 last:border-0">
                             <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
-                            <td className="px-2 py-2"><input type="number" value={m.production} onChange={(e) => updateCell(year, m.month, "production", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={m.production} onChange={(e) => updateCell(year, m.month, "production", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
                             <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
-                            <td className="px-2 py-2"><input type="number" value={m.paid} onChange={(e) => updateCell(year, m.month, "paid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={m.paid} onChange={(e) => updateCell(year, m.month, "paid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
                             <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
                             <td className="px-2 py-2"><input type="text" value={m.notes} onChange={(e) => updateCell(year, m.month, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
                           </tr>
@@ -1178,7 +1178,7 @@ function HygieneBonusPanel() {
           className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
           {hygienists.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
         </select>
-        <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
+        <input type="number" onFocus={(e) => e.target.select()} value={year} onChange={(e) => setYear(Number(e.target.value))}
           className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
       </div>
 
@@ -1205,9 +1205,9 @@ function HygieneBonusPanel() {
                   return (
                     <tr key={p.start} className="border-b border-slate-50 last:border-0">
                       <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{p.label}</td>
-                      <td className="px-2 py-2"><input type="number" value={row.patientCount} onChange={(e) => updateRow(p.start, "patientCount", Number(e.target.value))} className={`${cellClass} w-16`} /></td>
+                      <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={row.patientCount} onChange={(e) => updateRow(p.start, "patientCount", Number(e.target.value))} className={`${cellClass} w-16`} /></td>
                       <td className="px-2 py-2 text-slate-500">${formatMoney(earned)}</td>
-                      <td className="px-2 py-2"><input type="number" value={row.amountPaid} onChange={(e) => updateRow(p.start, "amountPaid", Number(e.target.value))} className={`${cellClass} w-20`} /></td>
+                      <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={row.amountPaid} onChange={(e) => updateRow(p.start, "amountPaid", Number(e.target.value))} className={`${cellClass} w-20`} /></td>
                       <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
                     </tr>
                   );
