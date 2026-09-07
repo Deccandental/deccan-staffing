@@ -19,6 +19,7 @@ import {
   GrowthBonusQuarter, GrowthBonusPayment, loadGrowthBonusQuarter, saveGrowthBonusQuarter,
   computeQuarterCalc, isEligibleForQuarter, computeDaysWorkedInQuarter, splitBonusPool,
   getQuarterDateRange, getCurrentQuarter, loadGrowthBonusPayments, addGrowthBonusPayment,
+  updateGrowthBonusPayment, deleteGrowthBonusPayment,
   loadGrowthBonusDaysOverrides, saveGrowthBonusDaysOverride,
 } from "@/lib/growthBonus";
 import { PvBonusQuarter, loadPvBonusYear, savePvBonusQuarter } from "@/lib/pvBonus";
@@ -552,6 +553,8 @@ function GrowthBonusPanel() {
   const [savedMsg, setSavedMsg] = useState("");
   const [payingFor, setPayingFor] = useState<number | null>(null);
   const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().split("T")[0], amount: "", notes: "" });
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editPaymentForm, setEditPaymentForm] = useState({ date: "", amount: "", notes: "" });
 
   useEffect(() => { refresh(); }, [year]);
 
@@ -628,6 +631,25 @@ function GrowthBonusPanel() {
     await addGrowthBonusPayment({ employeeId, date: paymentForm.date, amount, notes: paymentForm.notes });
     setPayingFor(null);
     setPaymentForm({ date: new Date().toISOString().split("T")[0], amount: "", notes: "" });
+    await refresh();
+  }
+
+  function startEditPayment(p: GrowthBonusPayment) {
+    setEditingPaymentId(p.id);
+    setEditPaymentForm({ date: p.date, amount: String(p.amount), notes: p.notes });
+  }
+
+  async function handleUpdatePayment(id: string) {
+    const amount = Number(editPaymentForm.amount);
+    if (!amount || amount <= 0) return;
+    await updateGrowthBonusPayment(id, { date: editPaymentForm.date, amount, notes: editPaymentForm.notes });
+    setEditingPaymentId(null);
+    await refresh();
+  }
+
+  async function handleDeletePayment(id: string) {
+    if (!confirm("Delete this logged payment? This can't be undone.")) return;
+    await deleteGrowthBonusPayment(id);
     await refresh();
   }
 
@@ -764,10 +786,29 @@ function GrowthBonusPanel() {
           <div className="space-y-1 text-sm max-h-64 overflow-y-auto">
             {payments.map((p) => {
               const emp = staff.find((e) => e.id === p.employeeId);
+              if (editingPaymentId === p.id) {
+                return (
+                  <div key={p.id} className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-500">{emp?.name ?? "Unknown"}</span>
+                    <input type="date" value={editPaymentForm.date} onChange={(e) => setEditPaymentForm((f) => ({ ...f, date: e.target.value }))}
+                      className="rounded border border-slate-200 px-1 py-0.5 text-xs w-28" />
+                    <input type="number" placeholder="$" value={editPaymentForm.amount} onChange={(e) => setEditPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                      className="rounded border border-slate-200 px-1 py-0.5 text-xs w-20" />
+                    <input type="text" placeholder="Notes" value={editPaymentForm.notes} onChange={(e) => setEditPaymentForm((f) => ({ ...f, notes: e.target.value }))}
+                      className="rounded border border-slate-200 px-1 py-0.5 text-xs flex-1 min-w-[100px]" />
+                    <button onClick={() => handleUpdatePayment(p.id)} className="text-xs text-white px-2 py-0.5 rounded" style={{ backgroundColor: "#e8622a" }}>Save</button>
+                    <button onClick={() => setEditingPaymentId(null)} className="text-xs text-slate-400">Cancel</button>
+                  </div>
+                );
+              }
               return (
-                <div key={p.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5">
-                  <span>{emp?.name ?? "Unknown"} — {new Date(p.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{p.notes ? ` · ${p.notes}` : ""}</span>
-                  <span className="font-semibold">${p.amount.toLocaleString()}</span>
+                <div key={p.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 gap-2">
+                  <span className="truncate">{emp?.name ?? "Unknown"} — {new Date(p.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{p.notes ? ` · ${p.notes}` : ""}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="font-semibold">${p.amount.toLocaleString()}</span>
+                    <button onClick={() => startEditPayment(p)} className="text-xs text-orange-500 hover:underline">Edit</button>
+                    <button onClick={() => handleDeletePayment(p.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                  </div>
                 </div>
               );
             })}
