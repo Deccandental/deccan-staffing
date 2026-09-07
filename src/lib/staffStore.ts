@@ -19,6 +19,10 @@ function rowToEmployee(row: any): Employee {
     color: row.color,
     skills: row.skills ?? [],
     email: row.email ?? "",
+    pin: row.pin ?? "",
+    canAdmin: row.can_admin ?? false,
+    canManageLeave: row.can_manage_leave ?? false,
+    canManageEvents: row.can_manage_events ?? false,
     defaultSchedule,
   };
 }
@@ -32,7 +36,8 @@ export async function loadStaff(): Promise<Employee[]> {
 export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee | null> {
   const { data, error } = await supabase.from("staff").insert({
     name: emp.name, role: emp.role, specialty: emp.specialty ?? null,
-    color: emp.color, skills: emp.skills, email: emp.email ?? "",
+    color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin || null,
+    can_admin: emp.canAdmin ?? false, can_manage_leave: emp.canManageLeave ?? false, can_manage_events: emp.canManageEvents ?? false,
     default_schedule: emp.defaultSchedule,
   }).select().single();
   if (error) { console.error("addEmployee error:", error); return null; }
@@ -42,7 +47,8 @@ export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee |
 export async function updateEmployee(emp: Employee): Promise<void> {
   const { error } = await supabase.from("staff").update({
     name: emp.name, role: emp.role, specialty: emp.specialty ?? null,
-    color: emp.color, skills: emp.skills, email: emp.email ?? "",
+    color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin || null,
+    can_admin: emp.canAdmin ?? false, can_manage_leave: emp.canManageLeave ?? false, can_manage_events: emp.canManageEvents ?? false,
     default_schedule: emp.defaultSchedule,
   }).eq("id", emp.id);
   if (error) console.error("updateEmployee error:", error);
