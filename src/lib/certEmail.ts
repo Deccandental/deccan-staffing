@@ -31,9 +31,11 @@ export async function sendCertEmail(cert: Certification, type: CertEmailType): P
   const recipients = await resolveRecipients(cert);
   if (recipients.length === 0) return false;
 
-  const expLabel = new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", {
-    weekday: "long", month: "long", day: "numeric", year: "numeric",
-  });
+  const expLabel = cert.expirationDate
+    ? new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", {
+        weekday: "long", month: "long", day: "numeric", year: "numeric",
+      })
+    : "No expiration date";
   const label = LABELS[type];
 
   try {
@@ -54,7 +56,6 @@ export async function sendCertEmail(cert: Certification, type: CertEmailType): P
               <p style="color:#888;font-size:13px;margin:0 0 12px">${cert.ownerType === "business" ? "Business license" : "Personnel certification"}</p>
               <table style="width:100%;border-collapse:collapse;margin:16px 0">
                 <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Expires</td><td style="padding:8px;border-bottom:1px solid #eee;font-weight:bold">${expLabel}</td></tr>
-                ${cert.issuingAuthority ? `<tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Issuing Authority</td><td style="padding:8px;border-bottom:1px solid #eee">${cert.issuingAuthority}</td></tr>` : ""}
               </table>
               <a href="${cert.fileUrl}" style="display:inline-block;background:#e8622a;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;margin-top:8px">View Document →</a>
               <p style="color:#888;font-size:12px;margin-top:24px">Deccan Dental Sleep Center</p>
