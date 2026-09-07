@@ -47,7 +47,7 @@ const ROLE_COLORS: Record<string, string> = {
   Hygienist: "bg-emerald-100 text-emerald-700",
 };
 
-function StaffPageBody() {
+function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [editing, setEditing] = useState<Employee | null>(null);
@@ -234,22 +234,29 @@ function StaffPageBody() {
                     <input type="email" value={form.email ?? ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
                       className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="staff@mydeccandental.com" />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-500 mb-1">Leave Request PIN</label>
-                    <div className="flex gap-2">
-                      <input value={form.pin ?? ""} onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
-                        inputMode="numeric" maxLength={4}
-                        className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm tracking-widest font-bold focus:outline-none" placeholder="4-digit PIN" />
-                      <button type="button" onClick={() => setForm((f) => ({ ...f, pin: String(Math.floor(1000 + Math.random() * 9000)) }))}
-                        className="flex-shrink-0 rounded-xl border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-500 hover:bg-gray-50">
-                        Random
-                      </button>
+                  {isSuperAdmin ? (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500 mb-1">Leave Request PIN</label>
+                      <div className="flex gap-2">
+                        <input value={form.pin ?? ""} onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                          inputMode="numeric" maxLength={4}
+                          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm tracking-widest font-bold focus:outline-none" placeholder="4-digit PIN" />
+                        <button type="button" onClick={() => setForm((f) => ({ ...f, pin: String(Math.floor(1000 + Math.random() * 9000)) }))}
+                          className="flex-shrink-0 rounded-xl border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-500 hover:bg-gray-50">
+                          Random
+                        </button>
+                      </div>
+                      {form.pin && staff.some((e) => e.pin === form.pin && e.id !== editing?.id) && (
+                        <p className="text-xs text-red-500 mt-1">⚠ Another staff member already has this PIN.</p>
+                      )}
+                      <p className="text-xs text-gray-400 mt-1">Used to log in on the Leave Request page. Leave blank to disable self-service login for this person.</p>
                     </div>
-                    {form.pin && staff.some((e) => e.pin === form.pin && e.id !== editing?.id) && (
-                      <p className="text-xs text-red-500 mt-1">⚠ Another staff member already has this PIN.</p>
-                    )}
-                    <p className="text-xs text-gray-400 mt-1">Used to log in on the Leave Request page. Leave blank to disable self-service login for this person.</p>
-                  </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500 mb-1">Leave Request PIN</label>
+                      <p className="text-xs text-gray-400 rounded-xl border border-gray-200 px-3 py-2.5">🔒 Only the super passcode can view or change PINs.</p>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Primary Role</label>
                     <select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as EmployeeRole, specialty: undefined }))}
@@ -259,32 +266,38 @@ function StaffPageBody() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-2">Access granted (using their PIN)</label>
-                  <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={form.canAdmin ?? false} onChange={(e) => setForm((f) => ({ ...f, canAdmin: e.target.checked }))} />
-                      <span className="text-sm text-gray-600">Admin (Schedule Builder, Availability, Staff, Temp Staff, Holidays)</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={form.canManageLeave ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageLeave: e.target.checked }))} />
-                      <span className="text-sm text-gray-600">Leave Management</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={form.canManageEvents ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageEvents: e.target.checked }))} />
-                      <span className="text-sm text-gray-600">Events</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={form.canManageCerts ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageCerts: e.target.checked }))} />
-                      <span className="text-sm text-gray-600">Certifications (all staff + business licenses)</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={form.canManagePayroll ?? false} onChange={(e) => setForm((f) => ({ ...f, canManagePayroll: e.target.checked }))} />
-                      <span className="text-sm text-gray-600">Payroll Dashboard</span>
-                    </label>
+                {isSuperAdmin ? (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-500 mb-2">Access granted (using their PIN)</label>
+                    <div className="flex flex-wrap gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={form.canAdmin ?? false} onChange={(e) => setForm((f) => ({ ...f, canAdmin: e.target.checked }))} />
+                        <span className="text-sm text-gray-600">Admin (Schedule Builder, Availability, Staff, Temp Staff, Holidays)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={form.canManageLeave ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageLeave: e.target.checked }))} />
+                        <span className="text-sm text-gray-600">Leave Management</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={form.canManageEvents ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageEvents: e.target.checked }))} />
+                        <span className="text-sm text-gray-600">Events</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={form.canManageCerts ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageCerts: e.target.checked }))} />
+                        <span className="text-sm text-gray-600">Certifications (all staff + business licenses)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={form.canManagePayroll ?? false} onChange={(e) => setForm((f) => ({ ...f, canManagePayroll: e.target.checked }))} />
+                        <span className="text-sm text-gray-600">Payroll Dashboard</span>
+                      </label>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">Their PIN unlocks these areas, in addition to the shared super passcode.</p>
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">Their PIN unlocks these areas, in addition to the shared super passcode.</p>
-                </div>
+                ) : (
+                  <div className="rounded-xl border border-gray-200 px-3 py-2.5">
+                    <p className="text-xs text-gray-400">🔒 Only the super passcode can view or change access permissions.</p>
+                  </div>
+                )}
 
                 <div>
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -536,7 +549,7 @@ function StaffPageBody() {
 export default function StaffPage() {
   return (
     <PasscodeGate group="admin" subtitle="Enter your passcode to manage staff">
-      <StaffPageBody />
+      {(unlockedVia) => <StaffPageBody isSuperAdmin={unlockedVia === "super"} />}
     </PasscodeGate>
   );
 }
