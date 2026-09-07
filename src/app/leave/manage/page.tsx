@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import PasscodeGate from "@/components/PasscodeGate";
+import AppIdentityGate from "@/components/AppIdentityGate";
+import AccessDenied from "@/components/AccessDenied";
 import { LeaveRequest, LeaveReason } from "@/types/leave";
 import { loadLeaveRequests, updateLeaveStatus, deleteLeaveRequest, countBusinessDays, isPaidLeaveReason } from "@/lib/leaveStore";
 import { setUnavailable, clearUnavailable } from "@/lib/overrides";
@@ -333,8 +334,8 @@ function LeaveManagePageBody() {
 
 export default function LeaveManagePage() {
   return (
-    <PasscodeGate group="leaveManage" subtitle="Enter your passcode to manage leave requests">
-      <LeaveManagePageBody />
-    </PasscodeGate>
+    <AppIdentityGate>
+      {(identity, logout) => identity.canManageLeave ? <LeaveManagePageBody /> : <AccessDenied logout={logout} />}
+    </AppIdentityGate>
   );
 }
