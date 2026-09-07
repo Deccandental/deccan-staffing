@@ -129,3 +129,79 @@ export async function loadUpcomingShiftsForEmployee(employeeId: number, daysAhea
 
   return shifts;
 }
+
+/**
+ * Returns the set of employee IDs who had ANY shift (dentist, assistant,
+ * front desk, hygienist, or floater) on any day within [startDate, endDate].
+ * Used to default the Payroll Dashboard's person list to people who were
+ * actually scheduled during a given pay period.
+ */
+export async function getScheduledEmployeeIdsInRange(startDate: string, endDate: string): Promise<Set<number>> {
+  const [staff, prefs, overrides, openTuesdays, holidays] = await Promise.all([
+    loadStaff(), loadPrefs(), getOverrides(), getOpenTuesdays(), loadHolidays(),
+  ]);
+
+  const monthsNeeded = new Set<string>();
+  const scan = new Date(startDate + "T00:00:00");
+  const endScan = new Date(endDate + "T00:00:00");
+  while (scan <= endScan) {
+    monthsNeeded.add(monthKey(scan.getFullYear(), scan.getMonth() + 1));
+    scan.setDate(scan.getDate() + 1);
+  }
+  const schedules: Record<string, MonthSchedule> = {};
+  await Promise.all(
+    Array.from(monthsNeeded).map(async (key) => {
+      const [y, m] = key.split("-").map(Number);
+      schedules[key] = await loadSchedule(y, m);
+    })
+  );
+
+  const ids = new Set<number>();
+  const cursor = new Date(startDate + "T00:00:00");
+  const endCursor = new Date(endDate + "T00:00:00");
+
+  while (cursor <= endCursor) {
+    const y = cursor.getFullYear();
+    const m = cursor.getMonth() + 1;
+    const dateStr = localDateStr(cursor);
+    const days = generateMonth(y, m, openTuesdays, holidays);
+    const dayInfo = days.find((d) => d.date === dateStr);
+
+    if (dayInfo?.isOpen) {
+      const daySched = schedules[monthKey(y, m)]?.[dateStr];
+      if (daySched && daySched.dentists.length > 0) {
+        const assignments = buildDailyAssignments(
+          staff, daySched.dentists, dateStr, prefs, overrides,
+          dayInfo.isTuesday && dayInfo.isOpenTuesday,
+          daySched.frontDeskRequired ?? 2,
+          daySched.hygienistsRequired ?? 1,
+          daySched.assistantCounts ?? {},
+          daySched.floaterAssistantId ?? null
+        );
+        const ao = daySched.assistantOverrides ?? {};
+        const ac = daySched.assistantCounts ?? {};
+
+        assignments.dentists.forEach(({ dentist, assistants }) => {
+          ids.add(dentist.id);
+          resolveDentistAssistants(dentist.id, assistants, ac, ao, staff).forEach((a) => { if (a) ids.add(a.id); });
+        });
+        assignments.frontDesk.forEach((e) => ids.add(e.id));
+
+        const ho = daySched.hygienistOverrides ?? {};
+        const hygSlotCount = daySched.hygienistsRequired ?? 1;
+        Array.from({ length: hygSlotCount }, (_, i) => {
+          if (i in ho) {
+            const ovId = ho[i];
+            return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
+          }
+          return assignments.hygienists[i] ?? null;
+        }).forEach((e) => { if (e) ids.add(e.id); });
+
+        if (daySched.floaterAssistantId != null) ids.add(daySched.floaterAssistantId);
+      }
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return ids;
+}
