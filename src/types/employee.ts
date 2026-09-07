@@ -30,6 +30,12 @@ export interface Employee {
   canManageLeave?: boolean;
   canManageEvents?: boolean;
   canManageCerts?: boolean;
+    // When true, this person is inactive — hidden from every "pick who's
+  // working / assign this to" list (Schedule Builder, swap menus, Events
+  // invite list, PIN logins, etc.) but their existing records (leave
+  // requests, certifications, past schedule assignments) still resolve
+  // their name correctly, since the row itself is never deleted.
+  archived?: boolean;
   defaultSchedule: {
     monday: boolean;
     tuesday: boolean;
