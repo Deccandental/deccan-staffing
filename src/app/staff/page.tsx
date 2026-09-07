@@ -26,6 +26,10 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   color: "#2563eb",
   skills: ["Assistant"],
   email: "",
+  pin: "",
+  canAdmin: false,
+  canManageLeave: false,
+  canManageEvents: false,
   defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
 };
 
@@ -73,6 +77,7 @@ function StaffPageBody() {
     setForm({
       name: emp.name, role: emp.role, specialty: emp.specialty,
       color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin ?? "",
+      canAdmin: emp.canAdmin ?? false, canManageLeave: emp.canManageLeave ?? false, canManageEvents: emp.canManageEvents ?? false,
       defaultSchedule: { ...emp.defaultSchedule }
     });
   }
@@ -198,6 +203,25 @@ function StaffPageBody() {
                       {ROLES.map((r) => <option key={r}>{r}</option>)}
                     </select>
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-2">Access granted (using their PIN)</label>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={form.canAdmin ?? false} onChange={(e) => setForm((f) => ({ ...f, canAdmin: e.target.checked }))} />
+                      <span className="text-sm text-gray-600">Admin (Schedule Builder, Availability, Staff, Temp Staff, Holidays)</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={form.canManageLeave ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageLeave: e.target.checked }))} />
+                      <span className="text-sm text-gray-600">Leave Management</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={form.canManageEvents ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageEvents: e.target.checked }))} />
+                      <span className="text-sm text-gray-600">Events</span>
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Their PIN unlocks these areas, in addition to the shared super passcode.</p>
                 </div>
 
                 {form.role === "Dentist" && (
