@@ -19,6 +19,7 @@ import {
   GrowthBonusQuarter, GrowthBonusPayment, loadGrowthBonusQuarter, saveGrowthBonusQuarter,
   computeQuarterCalc, isEligibleForQuarter, computeDaysWorkedInQuarter, splitBonusPool,
   getQuarterDateRange, getCurrentQuarter, loadGrowthBonusPayments, addGrowthBonusPayment,
+  loadGrowthBonusDaysOverrides, saveGrowthBonusDaysOverride,
 } from "@/lib/growthBonus";
 import { PvBonusQuarter, loadPvBonusQuarter, savePvBonusQuarter } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusMonth, loadHoBonusMonths, saveHoBonusMonth } from "@/lib/hoBonus";
@@ -543,6 +544,7 @@ function GrowthBonusPanel() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [yearQuarters, setYearQuarters] = useState<Record<number, GrowthBonusQuarter>>({});
   const [yearEntries, setYearEntries] = useState<PayrollEntry[]>([]);
+  const [daysOverrides, setDaysOverrides] = useState<Record<number, Record<number, number>>>({});
   const [payments, setPayments] = useState<GrowthBonusPayment[]>([]);
   const [form, setForm] = useState({ bamThreshold: 378000, netProductionCurrent: 0, netProductionPriorYear: 0 });
   const [loading, setLoading] = useState(true);
@@ -563,15 +565,18 @@ function GrowthBonusPanel() {
     setLoading(true);
     const yearStart = `${year}-01-01`;
     const yearEnd = `${year}-12-31`;
-    const [s, q1, q2, q3, q4, entries, pays] = await Promise.all([
+    const [s, q1, q2, q3, q4, entries, pays, d1, d2, d3, d4] = await Promise.all([
       loadStaff(),
       loadGrowthBonusQuarter(year, 1), loadGrowthBonusQuarter(year, 2), loadGrowthBonusQuarter(year, 3), loadGrowthBonusQuarter(year, 4),
       loadPayrollEntriesInRange(yearStart, yearEnd),
       loadGrowthBonusPayments(),
+      loadGrowthBonusDaysOverrides(year, 1), loadGrowthBonusDaysOverrides(year, 2),
+      loadGrowthBonusDaysOverrides(year, 3), loadGrowthBonusDaysOverrides(year, 4),
     ]);
     setStaff(s);
     setYearQuarters({ 1: q1, 2: q2, 3: q3, 4: q4 });
     setYearEntries(entries);
+    setDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
     setPayments(pays.filter((p) => p.date >= yearStart && p.date <= yearEnd));
     setLoading(false);
   }
@@ -589,12 +594,24 @@ function GrowthBonusPanel() {
     const calc = computeQuarterCalc(qData);
     const { start, end } = getQuarterDateRange(year, q);
     const eligible = staff.filter((e) => isEligibleForQuarter(e, end));
-    const rows = eligible.map((e) => ({ employee: e, days: computeDaysWorkedInQuarter(e.id, start, end, yearEntries) }));
+    const overridesForQ = daysOverrides[q] ?? {};
+    const rows = eligible.map((e) => ({
+      employee: e,
+      days: overridesForQ[e.id] ?? computeDaysWorkedInQuarter(e.id, start, end, yearEntries),
+    }));
     const split = calc.eligible ? splitBonusPool(calc.bonusPool, rows) : rows.map((r) => ({ employee: r.employee, days: r.days, multiplier: r.employee.growthBonusMultiplier ?? 1, points: 0, bonus: 0 }));
     return { calc, split };
   }
 
   const { calc, split } = splitForQuarter(quarter, yearQuarters[quarter]);
+  const requiredProduction = calc ? Math.max(form.bamThreshold, form.netProductionPriorYear * 1.2) : 0;
+  const progressPct = requiredProduction > 0 ? Math.min(100, Math.round((form.netProductionCurrent / requiredProduction) * 100)) : 0;
+  const progressColor = calc?.eligible ? "#10b981" : progressPct >= 70 ? "#f59e0b" : progressPct >= 40 ? "#fb923c" : "#f87171";
+
+  async function handleDaysEdit(employeeId: number, days: number) {
+    await saveGrowthBonusDaysOverride(year, quarter, employeeId, days);
+    await refresh();
+  }
 
   // YTD earned per employee: sum this year's quarters that actually qualified.
   const ytdEarned: Record<number, number> = {};
@@ -632,7 +649,7 @@ function GrowthBonusPanel() {
       </div>
 
       <div className="rounded-xl bg-white shadow-sm p-4 space-y-3">
-        <h2 className="font-bold text-slate-700">Quarter Production</h2>
+        <h2 className="font-bold text-slate-700 text-lg">{QUARTER_LABELS[quarter]} {year} Bonus</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <label className="block text-xs text-slate-400 mb-0.5">Net Production ({year})</label>
@@ -658,6 +675,15 @@ function GrowthBonusPanel() {
           {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
         </div>
 
+        <div>
+          <div className="w-full h-3 rounded-full bg-slate-100 overflow-hidden">
+            <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: progressColor }} />
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            {progressPct}% of the way to this quarter's bonus target (${requiredProduction.toLocaleString()}){calc?.eligible ? " — target met! 🎉" : ""}
+          </p>
+        </div>
+
         {calc && (
           <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
             <div>Delta: <strong>${calc.delta.toLocaleString()}</strong> · Growth: <strong>{(calc.growthPct * 100).toFixed(1)}%</strong></div>
@@ -675,6 +701,8 @@ function GrowthBonusPanel() {
       </div>
 
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <h2 className="px-4 pt-3 font-bold text-slate-700 text-sm">{QUARTER_LABELS[quarter]} {year} — Bonus Split</h2>
+        <p className="px-4 pt-1 text-xs text-slate-400">"Days" auto-fills from Payroll hours once that's in use for a period — you can also type a number directly (e.g. for quarters before Payroll was tracked).</p>
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
@@ -699,7 +727,10 @@ function GrowthBonusPanel() {
               return (
                 <tr key={row.employee.id} className="border-b border-slate-50 last:border-0">
                   <td className="px-3 py-2 font-medium text-slate-700">{row.employee.name}</td>
-                  <td className="px-2 py-2">{row.days}</td>
+                  <td className="px-2 py-2">
+                    <input type="number" defaultValue={row.days} onBlur={(e) => handleDaysEdit(row.employee.id, Number(e.target.value))}
+                      className="w-16 rounded border border-slate-200 px-1.5 py-0.5 text-xs focus:outline-none" />
+                  </td>
                   <td className="px-2 py-2">{row.multiplier}</td>
                   <td className="px-2 py-2">{row.points}</td>
                   <td className="px-2 py-2 font-semibold">${row.bonus.toLocaleString()}</td>
