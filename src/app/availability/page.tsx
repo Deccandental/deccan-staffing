@@ -51,7 +51,9 @@ function AvailabilityPageBody() {
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const days = loading ? [] : generateMonth(year, month, openTuesdays).filter((d) => d.isOpen);
+  // Closed Tuesdays are included alongside every open day — the office
+  // being closed doesn't mean nobody's working (e.g. a recurring remote day).
+  const days = loading ? [] : generateMonth(year, month, openTuesdays).filter((d) => d.isOpen || d.isTuesday);
 
   useEffect(() => {
     async function load() {
@@ -105,7 +107,8 @@ function AvailabilityPageBody() {
         </div>
         <p className="mb-6 text-slate-500">
           Click once for <strong>AM off</strong>, twice for <strong>PM off</strong>, three times for <strong>full day out</strong>, four times to clear.
-          Tuesdays only appear if marked open in <a href="/holidays" className="text-blue-500 underline">Holidays & Closures</a>.
+          Closed Tuesdays still show (shaded gray) so recurring remote work can be tracked even when the office itself is shut —
+          set recurring remote days per person on the <a href="/staff" className="text-blue-500 underline">Staff</a> page.
         </p>
 
         <div className="mb-6 flex flex-wrap items-center gap-4">
@@ -164,9 +167,10 @@ function AvailabilityPageBody() {
                         <tr className="bg-slate-50">
                           <th className="p-3 text-left font-semibold text-slate-500 w-36">Name</th>
                           {days.map((d) => (
-                            <th key={d.date} className={`p-2 text-center font-medium min-w-[44px] ${d.isTuesday ? "bg-blue-50" : ""}`}>
-                              <div className={`text-xs ${d.isTuesday ? "text-blue-400" : "text-slate-400"}`}>{d.weekday}</div>
-                              <div className={`text-xs font-bold ${d.isTuesday ? "text-blue-600" : "text-slate-600"}`}>{d.day}</div>
+                            <th key={d.date} className={`p-2 text-center font-medium min-w-[44px] ${d.isTuesday ? (d.isOpenTuesday ? "bg-blue-50" : "bg-slate-100") : ""}`}>
+                              <div className={`text-xs ${d.isTuesday ? (d.isOpenTuesday ? "text-blue-400" : "text-slate-400") : "text-slate-400"}`}>{d.weekday}</div>
+                              <div className={`text-xs font-bold ${d.isTuesday ? (d.isOpenTuesday ? "text-blue-600" : "text-slate-500") : "text-slate-600"}`}>{d.day}</div>
+                              {d.isTuesday && !d.isOpenTuesday && <div className="text-[9px] text-slate-400 leading-none mt-0.5">closed</div>}
                             </th>
                           ))}
                         </tr>
@@ -185,10 +189,14 @@ function AvailabilityPageBody() {
                               const schedKey = DAY_MAP[d.weekday];
                               const worksDefault = schedKey ? emp.defaultSchedule[schedKey] : false;
                               const isTuesdayOpen = d.isTuesday && d.isOpenTuesday;
-                              const shouldShow = worksDefault || isTuesdayOpen;
+                              // Any Tuesday (open or closed) is freely markable for everyone —
+                              // matches the existing precedent that open Tuesdays already ignore
+                              // each person's regular default schedule.
+                              const shouldShow = worksDefault || d.isTuesday;
                               const override = getOverride(emp.id, d.date);
                               const reasonStyle = REASONS.find((r) => r.key === override?.reason) ?? REASONS[1];
-                              const isRemote = override?.reason === "remote" && !override.halfDay;
+                              const remoteByDefault = !override && !!(schedKey && emp.remoteDays?.[schedKey]);
+                              const isRemote = (override?.reason === "remote" && !override.halfDay) || remoteByDefault;
 
                               const approvedReqForDate = leaveRequests.find(
                                 (r) => r.employeeId === emp.id &&
@@ -206,7 +214,9 @@ function AvailabilityPageBody() {
                               // changes to it belong in Manage Leave instead.
                               const isFullDayFromLeave = isFullDay && !!approvedReqForDate;
 
-                              const tooltip = isRemote
+                              const tooltip = remoteByDefault
+                                ? "Remote (recurring default). Click to mark something else for this day."
+                                : isRemote
                                 ? "Remote — working from home. Click to clear."
                                 : isFullDayFromLeave ? `${override?.reason} — from an approved leave request. Change it in Manage Leave.`
                                 : isFullDay ? `${override?.reason} — full day out. Click to clear.`
@@ -216,7 +226,7 @@ function AvailabilityPageBody() {
                                 : "Click: AM off → PM off → Full day → Clear";
 
                               return (
-                                <td key={d.date} className={`p-1 text-center ${d.isTuesday ? "bg-blue-50" : ""}`}>
+                                <td key={d.date} className={`p-1 text-center ${d.isTuesday ? (d.isOpenTuesday ? "bg-blue-50" : "bg-slate-100") : ""}`}>
                                   {!shouldShow ? (
                                     <div className="mx-auto h-8 w-8 flex items-center justify-center text-slate-200 text-xs">—</div>
                                   ) : isRemote ? (
