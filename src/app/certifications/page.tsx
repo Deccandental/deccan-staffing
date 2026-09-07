@@ -6,7 +6,7 @@ import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
 import {
   Certification, NewCertInput, CertOwnerType,
-  loadAllCertifications, loadCertificationsForEmployee,
+  loadAllCertifications, loadCertificationsForEmployee, loadDistinctTitles,
   createCertification, updateCertification, deleteCertification, uploadCertFile,
 } from "@/lib/certsStore";
 import CertsLoginGate, { CertsIdentity } from "@/components/CertsLoginGate";
@@ -15,15 +15,13 @@ interface FormState {
   ownerType: CertOwnerType;
   employeeId: string;
   title: string;
-  issuingAuthority: string;
-  expirationDate: string;
+  expirationDate: string; // empty string = no expiration
 }
 
 const EMPTY_FORM: FormState = {
   ownerType: "personnel",
   employeeId: "",
   title: "",
-  issuingAuthority: "",
   expirationDate: "",
 };
 
@@ -36,6 +34,7 @@ function daysUntil(dateStr: string): number {
 }
 
 function statusBadge(cert: Certification): { label: string; className: string } {
+  if (!cert.expirationDate) return { label: "No expiration", className: "bg-slate-100 text-slate-500" };
   const days = daysUntil(cert.expirationDate);
   if (days < 0) return { label: "Expired", className: "bg-red-100 text-red-700" };
   if (days <= 7) return { label: `Expires in ${days}d`, className: "bg-red-100 text-red-700" };
@@ -46,6 +45,7 @@ function statusBadge(cert: Certification): { label: string; className: string } 
 
 function CertForm({
   form, setForm, file, setFile, error, saving, staff, lockOwner, editingId, onSave, onCancel,
+  titleOptions, useCustomTitle, setUseCustomTitle,
 }: {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
@@ -58,6 +58,9 @@ function CertForm({
   editingId: string | null;
   onSave: () => void;
   onCancel: () => void;
+  titleOptions: string[];
+  useCustomTitle: boolean;
+  setUseCustomTitle: (v: boolean) => void;
 }) {
   return (
     <div className="rounded-2xl bg-white p-6 shadow max-w-2xl">
@@ -93,21 +96,40 @@ function CertForm({
       )}
 
       <div className="mb-4">
-        <label className="block text-xs font-semibold text-slate-500 mb-1">Title</label>
-        <input type="text" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-          placeholder="e.g. CPR Certification, State Dental License, Business Operating License"
-          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+        <label className="block text-xs font-semibold text-slate-500 mb-1">Document Name</label>
+        {!useCustomTitle ? (
+          <select
+            value={titleOptions.includes(form.title) ? form.title : ""}
+            onChange={(e) => {
+              if (e.target.value === "__new__") {
+                setUseCustomTitle(true);
+                setForm((f) => ({ ...f, title: "" }));
+              } else {
+                setForm((f) => ({ ...f, title: e.target.value }));
+              }
+            }}
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none">
+            <option value="">Select a document name...</option>
+            {titleOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+            <option value="__new__">+ Add new document name...</option>
+          </select>
+        ) : (
+          <div className="flex gap-2">
+            <input type="text" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="e.g. CPR Certification, State Dental License, Business Operating License"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+            {titleOptions.length > 0 && (
+              <button type="button" onClick={() => { setUseCustomTitle(false); setForm((f) => ({ ...f, title: "" })); }}
+                className="flex-shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
+                Choose existing
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mb-4">
-        <label className="block text-xs font-semibold text-slate-500 mb-1">Issuing Authority (optional)</label>
-        <input type="text" value={form.issuingAuthority} onChange={(e) => setForm((f) => ({ ...f, issuingAuthority: e.target.value }))}
-          placeholder="e.g. American Red Cross, State Board of Dentistry"
-          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-      </div>
-
-      <div className="mb-4">
-        <label className="block text-xs font-semibold text-slate-500 mb-1">Expiration Date</label>
+        <label className="block text-xs font-semibold text-slate-500 mb-1">Expiration Date (optional — leave blank if this never expires)</label>
         <input type="date" value={form.expirationDate} onChange={(e) => setForm((f) => ({ ...f, expirationDate: e.target.value }))}
           className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
       </div>
@@ -138,6 +160,8 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
   const [staff, setStaff] = useState<Employee[]>([]);
   const [myCerts, setMyCerts] = useState<Certification[]>([]);
   const [allCerts, setAllCerts] = useState<Certification[]>([]);
+  const [titleOptions, setTitleOptions] = useState<string[]>([]);
+  const [useCustomTitle, setUseCustomTitle] = useState(false);
   const [view, setView] = useState<"mine" | "all">("mine");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -152,6 +176,8 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
   async function refresh() {
     const s = await loadStaff();
     setStaff(s);
+    const titles = await loadDistinctTitles();
+    setTitleOptions(titles);
     if (identity.mode === "staff") {
       const mine = await loadCertificationsForEmployee(identity.employeeId);
       setMyCerts(mine);
@@ -167,6 +193,7 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
     setEditingId(null);
     setFile(null);
     setError("");
+    setUseCustomTitle(titleOptions.length === 0);
     setShowForm(true);
   }
 
@@ -175,6 +202,7 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
     setEditingId(null);
     setFile(null);
     setError("");
+    setUseCustomTitle(titleOptions.length === 0);
     setShowForm(true);
   }
 
@@ -183,12 +211,12 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
       ownerType: cert.ownerType,
       employeeId: cert.employeeId != null ? String(cert.employeeId) : "",
       title: cert.title,
-      issuingAuthority: cert.issuingAuthority,
-      expirationDate: cert.expirationDate,
+      expirationDate: cert.expirationDate ?? "",
     });
     setEditingId(cert.id);
     setFile(null);
     setError("");
+    setUseCustomTitle(!titleOptions.includes(cert.title));
     setShowForm(true);
   }
 
@@ -197,13 +225,13 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
     setEditingId(null);
     setFile(null);
     setError("");
+    setUseCustomTitle(false);
     setShowForm(false);
   }
 
   async function handleSave() {
     setError("");
-    if (!form.title.trim()) { setError("Please enter a title."); return; }
-    if (!form.expirationDate) { setError("Please select an expiration date."); return; }
+    if (!form.title.trim()) { setError("Please enter a document name."); return; }
     if (form.ownerType === "personnel" && !form.employeeId) { setError("Please select a staff member."); return; }
     if (!editingId && !file) { setError("Please choose a file to upload."); return; }
 
@@ -225,8 +253,7 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
       ownerType: form.ownerType,
       employeeId: form.ownerType === "personnel" ? Number(form.employeeId) : null,
       title: form.title.trim(),
-      issuingAuthority: form.issuingAuthority.trim(),
-      expirationDate: form.expirationDate,
+      expirationDate: form.expirationDate || null,
       fileUrl, fileName,
     };
 
@@ -306,7 +333,8 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
             )}
             {showForm && identity.mode === "staff" && (
               <CertForm form={form} setForm={setForm} file={file} setFile={setFile} error={error} saving={saving}
-                staff={staff} lockOwner editingId={editingId} onSave={handleSave} onCancel={closeForm} />
+                staff={staff} lockOwner editingId={editingId} onSave={handleSave} onCancel={closeForm}
+                titleOptions={titleOptions} useCustomTitle={useCustomTitle} setUseCustomTitle={setUseCustomTitle} />
             )}
             <div className="space-y-3">
               {myCerts.length === 0 ? (
@@ -321,9 +349,10 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
                         <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badge.className}`}>{badge.label}</span>
                       </div>
                       <div className="text-sm text-slate-500 mt-0.5">
-                        Expires {new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                        {cert.expirationDate
+                          ? `Expires ${new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`
+                          : "No expiration date"}
                       </div>
-                      {cert.issuingAuthority && <div className="text-xs text-slate-400 mt-0.5">{cert.issuingAuthority}</div>}
                       <a href={cert.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-600 hover:underline mt-1 inline-block">View file →</a>
                     </div>
                     <div className="flex flex-shrink-0 gap-2">
@@ -353,7 +382,8 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
             )}
             {showForm && (
               <CertForm form={form} setForm={setForm} file={file} setFile={setFile} error={error} saving={saving}
-                staff={staff} lockOwner={false} editingId={editingId} onSave={handleSave} onCancel={closeForm} />
+                staff={staff} lockOwner={false} editingId={editingId} onSave={handleSave} onCancel={closeForm}
+                titleOptions={titleOptions} useCustomTitle={useCustomTitle} setUseCustomTitle={setUseCustomTitle} />
             )}
             <div className="space-y-3">
               {allCerts.length === 0 ? (
@@ -371,9 +401,10 @@ function CertificationsPageBody({ identity, logout }: { identity: CertsIdentity;
                         </span>
                       </div>
                       <div className="text-sm text-slate-500 mt-0.5">
-                        Expires {new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                        {cert.expirationDate
+                          ? `Expires ${new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`
+                          : "No expiration date"}
                       </div>
-                      {cert.issuingAuthority && <div className="text-xs text-slate-400 mt-0.5">{cert.issuingAuthority}</div>}
                       <div className="flex items-center gap-3 mt-1">
                         <a href={cert.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-600 hover:underline">View file →</a>
                         <button onClick={() => handleSendNow(cert.id)} className="text-xs text-orange-500 hover:underline">Send reminder now</button>
