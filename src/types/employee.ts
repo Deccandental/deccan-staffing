@@ -70,6 +70,9 @@ export interface Employee {
   // paid as a bonus (e.g. 30 for 30%). Only meaningful when pvBonusEligible
   // is true — defaults to 30 if not set.
   netProductionBonusPercent?: number;
+  // Separate opt-in for a Dr. Ho-style bonus (a flat % of production, paid
+  // the following month, tracked monthly rather than quarterly).
+  hoBonusEligible?: boolean;
   // When true, this person is inactive — hidden from every "pick who's
   // working / assign this to" list (Schedule Builder, swap menus, Events
   // invite list, PIN logins, etc.) but their existing records (leave
