@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import PasscodeGate from "@/components/PasscodeGate";
+import AppIdentityGate from "@/components/AppIdentityGate";
+import AccessDenied from "@/components/AccessDenied";
 import { supabase } from "@/lib/supabase";
 import { addEmployee } from "@/lib/staffStore";
 import { EmployeeRole } from "@/types/employee";
@@ -436,8 +437,8 @@ function TempsPageBody() {
 
 export default function TempsPage() {
   return (
-    <PasscodeGate group="admin" subtitle="Enter your passcode to manage temp staff">
-      <TempsPageBody />
-    </PasscodeGate>
+    <AppIdentityGate>
+      {(identity, logout) => identity.canAdmin ? <TempsPageBody /> : <AccessDenied logout={logout} />}
+    </AppIdentityGate>
   );
 }
