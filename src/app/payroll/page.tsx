@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import PasscodeGate from "@/components/PasscodeGate";
+import AppIdentityGate from "@/components/AppIdentityGate";
+import AccessDenied from "@/components/AccessDenied";
 import { Employee } from "@/types/employee";
 import { loadStaff, setLeaveBalance } from "@/lib/staffStore";
 import { LeaveRequest } from "@/types/leave";
@@ -500,8 +501,8 @@ function PayrollPageBody() {
 
 export default function PayrollPage() {
   return (
-    <PasscodeGate group="payroll" subtitle="Enter your passcode to access the Payroll Dashboard">
-      <PayrollPageBody />
-    </PasscodeGate>
+    <AppIdentityGate>
+      {(identity, logout) => identity.canManagePayroll ? <PayrollPageBody /> : <AccessDenied logout={logout} />}
+    </AppIdentityGate>
   );
 }
