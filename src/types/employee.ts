@@ -23,6 +23,12 @@ export interface Employee {
   // the self-service Leave Request page. Optional — staff without a PIN set
   // can't yet log in there.
   pin?: string;
+  // Per-section access grants, matching the sidebar's locked groups. A staff
+  // member's PIN only unlocks a gated area if the matching flag is true —
+  // otherwise the super passcode is the only way in for that area.
+  canAdmin?: boolean;
+  canManageLeave?: boolean;
+  canManageEvents?: boolean;
   defaultSchedule: {
     monday: boolean;
     tuesday: boolean;
