@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import PasscodeGate from "@/components/PasscodeGate";
+import AppIdentityGate from "@/components/AppIdentityGate";
+import AccessDenied from "@/components/AccessDenied";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
 import {
@@ -258,8 +259,8 @@ function EventsPageBody() {
 
 export default function EventsPage() {
   return (
-    <PasscodeGate group="events" subtitle="Enter your passcode to manage events">
-      <EventsPageBody />
-    </PasscodeGate>
+    <AppIdentityGate>
+      {(identity, logout) => identity.canManageEvents ? <EventsPageBody /> : <AccessDenied logout={logout} />}
+    </AppIdentityGate>
   );
 }
