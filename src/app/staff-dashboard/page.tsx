@@ -18,6 +18,7 @@ import {
   isEligibleForQuarter, computeDaysWorkedInQuarter, splitBonusPool, getQuarterDateRange,
   loadGrowthBonusDaysOverrides, GrowthBonusQuarter,
 } from "@/lib/growthBonus";
+import { PvBonusQuarter, loadPvBonusYear } from "@/lib/pvBonus";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
 const REASON_LABELS: Record<string, string> = {
@@ -76,6 +77,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [yearDaysOverrides, setYearDaysOverrides] = useState<Record<number, Record<number, number>>>({});
   const [yearPayrollEntries, setYearPayrollEntries] = useState<PayrollEntry[]>([]);
   const [bonusReceivedThisYear, setBonusReceivedThisYear] = useState(0);
+  const [pvQuarters, setPvQuarters] = useState<PvBonusQuarter[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [showCertForm, setShowCertForm] = useState(false);
@@ -107,9 +109,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       loadGrowthBonusDaysOverrides(bonusYear, 3), loadGrowthBonusDaysOverrides(bonusYear, 4),
       loadPayrollEntriesInRange(yearStart, yearEnd),
       loadGrowthBonusPayments(selectedId),
+      loadPvBonusYear(selectedId, bonusYear),
     ]).then(([
       shiftData, leaveData, certData, eventData, titles,
-      q1, q2, q3, q4, d1, d2, d3, d4, entries, payments,
+      q1, q2, q3, q4, d1, d2, d3, d4, entries, payments, pvYear,
     ]) => {
       if (cancelled) return;
       setShifts(shiftData);
@@ -120,6 +123,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       setYearQuartersData({ 1: q1, 2: q2, 3: q3, 4: q4 });
       setYearDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
       setYearPayrollEntries(entries);
+      setPvQuarters(pvYear);
       setBonusReceivedThisYear(payments.filter((p) => p.date.startsWith(String(bonusYear))).reduce((sum, p) => sum + p.amount, 0));
       setLoading(false);
     });
@@ -298,6 +302,33 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                         ) : (
                           <span className="text-slate-400">Not met</span>
                         )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {selectedEmployee?.pvBonusEligible && (
+              <div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow">
+                <h2 className="font-bold text-slate-700 mb-3">💰 {bonusYear} Bonus (30% of Income)</h2>
+                <div className="space-y-1.5">
+                  {pvQuarters.map((q) => {
+                    const owed = q.totalIncome * 0.3;
+                    const balance = owed - q.amountPaid;
+                    return (
+                      <div key={q.quarter} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
+                        <span className="font-medium text-slate-700">{QUARTER_LABELS[q.quarter]}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-slate-400 text-xs">30%: ${owed.toLocaleString()}</span>
+                          {q.paid ? (
+                            <span className="text-emerald-700 font-semibold">✓ Paid (${q.amountPaid.toLocaleString()})</span>
+                          ) : balance > 0 ? (
+                            <span className="text-amber-600 font-semibold">Owed: ${balance.toLocaleString()}</span>
+                          ) : (
+                            <span className="text-slate-400">Not started</span>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
