@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import PasscodeGate from "@/components/PasscodeGate";
+import AppIdentityGate from "@/components/AppIdentityGate";
+import AccessDenied from "@/components/AccessDenied";
 import { Holiday, loadHolidays, addHoliday, removeHoliday } from "@/lib/holidays";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { OpenTuesday, getOpenTuesdays, addOpenTuesday, removeOpenTuesday } from "@/lib/openTuesdays";
@@ -239,8 +240,8 @@ function HolidaysPageBody() {
 
 export default function HolidaysPage() {
   return (
-    <PasscodeGate group="admin" subtitle="Enter your passcode to manage holidays & closures">
-      <HolidaysPageBody />
-    </PasscodeGate>
+    <AppIdentityGate>
+      {(identity, logout) => identity.canAdmin ? <HolidaysPageBody /> : <AccessDenied logout={logout} />}
+    </AppIdentityGate>
   );
 }
