@@ -2,7 +2,9 @@
 
 import { useState, useEffect, ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import { PasscodeGroup, PASSCODES, SESSION_KEYS } from "@/lib/passcodes";
+import { PasscodeGroup, SUPER_PASSCODE, SESSION_KEYS, PERMISSION_FIELDS } from "@/lib/passcodes";
+import { loadStaff } from "@/lib/staffStore";
+import { Employee } from "@/types/employee";
 
 interface Props {
   group: PasscodeGroup;
@@ -21,8 +23,11 @@ export default function PasscodeGate({
   const [authenticated, setAuthenticated] = useState(false);
   const [passcode, setPasscode] = useState("");
   const [passcodeError, setPasscodeError] = useState(false);
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [staffLoaded, setStaffLoaded] = useState(false);
 
   useEffect(() => {
+    loadStaff().then((s) => { setStaff(s); setStaffLoaded(true); });
     try {
       if (sessionStorage.getItem(SESSION_KEYS[group]) === "1") {
         setAuthenticated(true);
@@ -34,20 +39,27 @@ export default function PasscodeGate({
   }, [group]);
 
   function handlePasscode() {
-    if (passcode === PASSCODES[group]) {
+    if (passcode === SUPER_PASSCODE) {
       setAuthenticated(true);
       setPasscodeError(false);
-      try {
-        sessionStorage.setItem(SESSION_KEYS[group], "1");
-      } catch {}
+      try { sessionStorage.setItem(SESSION_KEYS[group], "1"); } catch {}
+      return;
+    }
+
+    const field = PERMISSION_FIELDS[group];
+    const match = staff.find((e) => e.pin && e.pin === passcode && e[field]);
+    if (match) {
+      setAuthenticated(true);
+      setPasscodeError(false);
+      try { sessionStorage.setItem(SESSION_KEYS[group], "1"); } catch {}
     } else {
       setPasscodeError(true);
       setPasscode("");
     }
   }
 
-  // Avoid a flash of the lock screen while we check sessionStorage on mount
-  if (!checked) return null;
+  // Avoid a flash of the lock screen while we check sessionStorage/staff on mount
+  if (!checked || !staffLoaded) return null;
 
   if (!authenticated) {
     return (
