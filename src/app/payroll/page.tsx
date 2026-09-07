@@ -9,9 +9,11 @@ import { LeaveRequest } from "@/types/leave";
 import { loadLeaveRequests } from "@/lib/leaveStore";
 import { Holiday, loadHolidays } from "@/lib/holidays";
 import { TempStaff } from "@/app/temps/page";
+import { getTempAssignmentsForMonth } from "@/lib/tempAssignments";
 import { supabase } from "@/lib/supabase";
 import { PayrollEntry, loadPayrollEntries, savePayrollEntry } from "@/lib/payrollStore";
 import { PayPeriod, getPayPeriodForDate, stepPayPeriod } from "@/lib/payPeriods";
+import { getScheduledEmployeeIdsInRange } from "@/lib/staffSchedule";
 
 const HYGIENE_BONUS_PER_PATIENT = 15;
 
@@ -32,11 +34,12 @@ interface RowFields {
   bonusAmount: number;
   hygienePatientCount: number;
   notes: string;
+  skipped: boolean;
 }
 
 const EMPTY_ROW: RowFields = {
   hoursWorked: 0, overtimeHours: 0, ptoHours: 0, sickHours: 0,
-  paidHolidayHours: 0, paidMeetingHours: 0, bonusAmount: 0, hygienePatientCount: 0, notes: "",
+  paidHolidayHours: 0, paidMeetingHours: 0, bonusAmount: 0, hygienePatientCount: 0, notes: "", skipped: false,
 };
 
 function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
@@ -60,41 +63,69 @@ function PayrollPageBody() {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [savedEntries, setSavedEntries] = useState<Record<string, PayrollEntry>>({});
+  const [scheduledStaffIds, setScheduledStaffIds] = useState<Set<number>>(new Set());
+  const [scheduledTempIds, setScheduledTempIds] = useState<Set<string>>(new Set());
+  const [manuallyAdded, setManuallyAdded] = useState<Set<string>>(new Set());
   const [rows, setRows] = useState<Record<string, RowFields>>({});
+  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<Record<string, string>>({});
+  const [globalMsg, setGlobalMsg] = useState("");
+  const [showAddPicker, setShowAddPicker] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { refresh(); }, [period.start]);
 
   async function refresh() {
     setLoading(true);
-    const [s, t, lr, h, entries] = await Promise.all([
+    const y = Number(period.start.slice(0, 4));
+    const m = Number(period.start.slice(5, 7));
+    const [s, t, lr, h, entries, schedIds, tempAssignments] = await Promise.all([
       loadStaff(), loadTemps(), loadLeaveRequests(), loadHolidays(), loadPayrollEntries(period.start),
+      getScheduledEmployeeIdsInRange(period.start, period.end),
+      getTempAssignmentsForMonth(y, m),
     ]);
     setStaff(s);
     setTemps(t);
     setLeaveRequests(lr);
     setHolidays(h);
+    setScheduledStaffIds(schedIds);
+    setScheduledTempIds(new Set(tempAssignments.filter((a) => a.date >= period.start && a.date <= period.end).map((a) => a.tempId)));
+    setManuallyAdded(new Set());
     const entryMap: Record<string, PayrollEntry> = {};
     for (const e of entries) entryMap[e.personKey] = e;
     setSavedEntries(entryMap);
     setLoading(false);
   }
 
-  const people: PersonRow[] = useMemo(() => {
-    const activeStaff = staff.filter((e) => !e.archived && !e.excludeFromPayroll);
-    const staffRows: PersonRow[] = activeStaff.map((e) => ({
-      personKey: `staff:${e.id}`, personName: e.name, isTemp: false, employee: e,
-    }));
-    const tempRows: PersonRow[] = temps.map((t) => ({
-      personKey: `temp:${t.id}`, personName: t.name, isTemp: true,
-    }));
-    return [...staffRows, ...tempRows].sort((a, b) => a.personName.localeCompare(b.personName));
-  }, [staff, temps]);
+  const employeeRows: PersonRow[] = useMemo(() => {
+    return staff
+      .filter((e) => !e.excludeFromPayroll)
+      .filter((e) => scheduledStaffIds.has(e.id) || manuallyAdded.has(`staff:${e.id}`) || savedEntries[`staff:${e.id}`])
+      .map((e) => ({ personKey: `staff:${e.id}`, personName: e.name, isTemp: false, employee: e }))
+      .sort((a, b) => a.personName.localeCompare(b.personName));
+  }, [staff, scheduledStaffIds, manuallyAdded, savedEntries]);
 
-  // Sum of approved leave hours for one employee/reason overlapping the period.
+  const tempRows: PersonRow[] = useMemo(() => {
+    return temps
+      .filter((t) => scheduledTempIds.has(t.id) || manuallyAdded.has(`temp:${t.id}`) || savedEntries[`temp:${t.id}`])
+      .map((t) => ({ personKey: `temp:${t.id}`, personName: t.name, isTemp: true }))
+      .sort((a, b) => a.personName.localeCompare(b.personName));
+  }, [temps, scheduledTempIds, manuallyAdded, savedEntries]);
+
+  const addablePeople: PersonRow[] = useMemo(() => {
+    const shown = new Set([...employeeRows, ...tempRows].map((p) => p.personKey));
+    const staffOptions = staff
+      .filter((e) => !e.excludeFromPayroll && !shown.has(`staff:${e.id}`))
+      .map((e) => ({ personKey: `staff:${e.id}`, personName: e.name + (e.archived ? " (archived)" : ""), isTemp: false, employee: e }));
+    const tempOptions = temps
+      .filter((t) => !shown.has(`temp:${t.id}`))
+      .map((t) => ({ personKey: `temp:${t.id}`, personName: t.name, isTemp: true }));
+    return [...staffOptions, ...tempOptions].sort((a, b) => a.personName.localeCompare(b.personName));
+  }, [staff, temps, employeeRows, tempRows]);
+
   function sumApprovedHours(employeeId: number, reason: "pto" | "sick"): number {
     return leaveRequests
       .filter((r) => r.employeeId === employeeId && r.status === "approved" && r.reason === reason)
@@ -107,20 +138,18 @@ function PayrollPageBody() {
     return count * 8;
   }, [holidays, period]);
 
-  // Whenever the underlying data for this period is loaded, (re)compute each
-  // person's row — starting from a saved entry if one exists, otherwise a
-  // fresh auto-calculated default.
   useEffect(() => {
     if (loading) return;
     const next: Record<string, RowFields> = {};
-    for (const p of people) {
+    for (const p of [...employeeRows, ...tempRows]) {
       const saved = savedEntries[p.personKey];
       if (saved) {
         next[p.personKey] = {
           hoursWorked: saved.hoursWorked, overtimeHours: saved.overtimeHours,
           ptoHours: saved.ptoHours, sickHours: saved.sickHours,
           paidHolidayHours: saved.paidHolidayHours, paidMeetingHours: saved.paidMeetingHours,
-          bonusAmount: saved.bonusAmount, hygienePatientCount: saved.hygienePatientCount, notes: saved.notes,
+          bonusAmount: saved.bonusAmount, hygienePatientCount: saved.hygienePatientCount,
+          notes: saved.notes, skipped: saved.skipped ?? false,
         };
       } else {
         next[p.personKey] = {
@@ -133,10 +162,14 @@ function PayrollPageBody() {
     }
     setRows(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, savedEntries, people.length]);
+  }, [loading, savedEntries, employeeRows.length, tempRows.length]);
 
-  function updateRow(personKey: string, field: keyof RowFields, value: number | string) {
+  function updateRow(personKey: string, field: keyof RowFields, value: number | string | boolean) {
     setRows((r) => ({ ...r, [personKey]: { ...r[personKey], [field]: value } }));
+  }
+
+  function toggleSkip(personKey: string) {
+    setRows((r) => ({ ...r, [personKey]: { ...r[personKey], skipped: !r[personKey]?.skipped } }));
   }
 
   function recomputeAuto(p: PersonRow) {
@@ -152,17 +185,32 @@ function PayrollPageBody() {
     }));
   }
 
-  async function handleSave(p: PersonRow) {
-    setSavingKey(p.personKey);
+  async function saveOne(p: PersonRow): Promise<boolean> {
     const fields = rows[p.personKey] ?? EMPTY_ROW;
     const saved = await savePayrollEntry({
       payPeriodStart: period.start, payPeriodEnd: period.end,
       personKey: p.personKey, personName: p.personName,
       ...fields,
     });
-    setSavingKey(null);
-    setSavedMsg((m) => ({ ...m, [p.personKey]: saved ? "Saved." : "Something went wrong — not saved." }));
     if (saved) setSavedEntries((e) => ({ ...e, [p.personKey]: saved }));
+    return !!saved;
+  }
+
+  async function handleSave(p: PersonRow) {
+    setSavingKey(p.personKey);
+    const ok = await saveOne(p);
+    setSavingKey(null);
+    setSavedMsg((m) => ({ ...m, [p.personKey]: ok ? "Saved." : "Not saved — try again." }));
+  }
+
+  async function handleSaveAll() {
+    setSavingAll(true);
+    setGlobalMsg("");
+    const all = [...employeeRows, ...tempRows];
+    const results = await Promise.all(all.map((p) => saveOne(p)));
+    setSavingAll(false);
+    const failed = results.filter((ok) => !ok).length;
+    setGlobalMsg(failed === 0 ? `Saved ${all.length} people.` : `Saved ${all.length - failed} of ${all.length} — ${failed} failed, try again.`);
   }
 
   async function handleBalanceChange(employee: Employee, field: "pto" | "sick", hours: number) {
@@ -170,149 +218,279 @@ function PayrollPageBody() {
     await refresh();
   }
 
+  function handleAddPerson(p: PersonRow) {
+    setManuallyAdded((s) => new Set(s).add(p.personKey));
+    setShowAddPicker(false);
+  }
+
   const isHygienist = (e?: Employee) => e && (e.role === "Hygienist" || e.skills.includes("Hygienist"));
+
+  function TableSection({ title, people }: { title: string; people: PersonRow[] }) {
+    if (people.length === 0) {
+      return (
+        <div>
+          <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">{title}</h2>
+          <p className="text-sm text-slate-400">Nobody in this group for this period.</p>
+        </div>
+      );
+    }
+    return (
+      <div>
+        <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">{title}</h2>
+        <div className="overflow-x-auto rounded-xl bg-white shadow-sm">
+          <table className="w-full text-sm border-collapse min-w-[900px]">
+            <thead>
+              <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-2 py-2 font-medium w-20">Hours</th>
+                <th className="px-2 py-2 font-medium w-16">OT</th>
+                <th className="px-2 py-2 font-medium w-16">PTO</th>
+                <th className="px-2 py-2 font-medium w-16">Sick</th>
+                <th className="px-2 py-2 font-medium w-16">Hol.</th>
+                <th className="px-2 py-2 font-medium w-16">Mtg</th>
+                <th className="px-2 py-2 font-medium w-20">Bonus $</th>
+                <th className="px-2 py-2 font-medium w-16">Hyg Pts</th>
+                <th className="px-3 py-2 font-medium">Notes</th>
+                <th className="px-2 py-2 font-medium w-20"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {people.map((p) => {
+                const fields = rows[p.personKey] ?? EMPTY_ROW;
+                const skipped = fields.skipped;
+                const cellClass = "w-full rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none disabled:bg-slate-50 disabled:text-slate-300";
+                return (
+                  <tr key={p.personKey} className={`border-b border-slate-50 last:border-0 ${skipped ? "opacity-50" : ""}`}>
+                    <td className="px-3 py-1.5 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                          style={{ backgroundColor: p.employee?.color ?? "#6b7280" }}>
+                          {p.personName.charAt(0)}
+                        </div>
+                        <span className="font-medium text-slate-700">{p.personName}</span>
+                      </div>
+                    </td>
+                    <td className="px-1 py-1.5"><input type="number" disabled={skipped} value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><input type="number" disabled={skipped} value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5">
+                      {p.employee ? <input type="number" disabled={skipped} value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-1 py-1.5">
+                      {p.employee ? <input type="number" disabled={skipped} value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-1 py-1.5">
+                      {p.employee ? <input type="number" disabled={skipped} value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-1 py-1.5"><input type="number" disabled={skipped} value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><input type="number" disabled={skipped} value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5">
+                      {isHygienist(p.employee) ? <input type="number" disabled={skipped} value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))} className={cellClass} title={`$${(fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT).toFixed(2)} bonus`} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-2 py-1.5"><input type="text" disabled={skipped} value={fields.notes} onChange={(e) => updateRow(p.personKey, "notes", e.target.value)} className={cellClass + " min-w-[100px]"} /></td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      <button onClick={() => toggleSkip(p.personKey)} className={`text-xs font-medium px-2 py-1 rounded ${skipped ? "bg-slate-100 text-slate-500" : "text-slate-400 hover:bg-slate-100"}`}>
+                        {skipped ? "Unskip" : "Skip"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderCard(p: PersonRow) {
+    const fields = rows[p.personKey] ?? EMPTY_ROW;
+    const expanded = expandedKey === p.personKey;
+    const hygieneBonus = fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT;
+    return (
+      <div key={p.personKey} className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <button onClick={() => setExpandedKey(expanded ? null : p.personKey)}
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
+          <div className="flex items-center gap-2.5">
+            <div className="h-7 w-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+              style={{ backgroundColor: p.employee?.color ?? "#6b7280" }}>
+              {p.personName.charAt(0)}
+            </div>
+            <span className="text-sm font-semibold text-slate-700">{p.personName}</span>
+            <span className="text-xs text-slate-400">{p.employee?.role ?? "Temp"}</span>
+          </div>
+          <span className="text-slate-300 text-xs">{expanded ? "▲" : "▼"}</span>
+        </button>
+
+        {expanded && (
+          <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
+            {p.employee && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">PTO Balance (hrs)</label>
+                  <input type="number" defaultValue={p.employee.ptoBalanceHours ?? 0}
+                    onBlur={(e) => handleBalanceChange(p.employee!, "pto", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">Sick Balance (hrs)</label>
+                  <input type="number" defaultValue={p.employee.sickBalanceHours ?? 0}
+                    onBlur={(e) => handleBalanceChange(p.employee!, "sick", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">Hours Worked</label>
+                <input type="number" value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">OT Hours</label>
+                <input type="number" value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">Bonus ($)</label>
+                <input type="number" value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+              </div>
+            </div>
+
+            {p.employee && (
+              <div>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs text-slate-400">PTO / Sick / Holiday (this period)</span>
+                  <button onClick={() => recomputeAuto(p)} className="text-xs text-orange-500 hover:underline">↺ recompute</button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <input type="number" value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  <input type="number" value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  <input type="number" value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-0.5">Paid Meeting/Day-off Hours</label>
+              <input type="number" value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))}
+                className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+            </div>
+
+            {isHygienist(p.employee) && (
+              <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-2.5 flex items-center gap-3">
+                <div>
+                  <label className="block text-xs text-emerald-700 mb-0.5">Hygiene Patients</label>
+                  <input type="number" value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))}
+                    className="w-20 rounded-lg border border-emerald-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+                <span className="text-sm text-emerald-700">× ${HYGIENE_BONUS_PER_PATIENT} = <strong>${hygieneBonus.toFixed(2)}</strong></span>
+              </div>
+            )}
+
+            <input type="text" value={fields.notes} onChange={(e) => updateRow(p.personKey, "notes", e.target.value)}
+              placeholder="Notes (optional)" className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+
+            <div className="flex items-center gap-3">
+              <button onClick={() => handleSave(p)} disabled={savingKey === p.personKey}
+                className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50"
+                style={{ backgroundColor: "#e8622a" }}>
+                {savingKey === p.personKey ? "Saving…" : "Save"}
+              </button>
+              <button onClick={() => toggleSkip(p.personKey)} className="text-xs text-slate-400 hover:text-slate-600 underline">
+                {fields.skipped ? "Unskip (will be paid)" : "Skip (not paid this period)"}
+              </button>
+              {savedMsg[p.personKey] && <span className="text-xs text-slate-400">{savedMsg[p.personKey]}</span>}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
       <Sidebar />
       <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
-        <header className="mb-6">
-          <h1 className="text-3xl font-bold">Payroll Dashboard</h1>
-          <p className="mt-1 text-slate-500">Reference sheet for entering payroll in Gusto — hours, PTO/sick, holiday pay, and bonuses per pay period.</p>
+        <header className="mb-4">
+          <h1 className="text-2xl font-bold">Payroll Dashboard</h1>
         </header>
 
-        <div className="mb-6 flex items-center gap-3">
-          <button onClick={() => setPeriod((p) => stepPayPeriod(p, -1))} className="rounded-xl border px-3 py-1.5 text-slate-500 hover:bg-slate-50 transition bg-white">←</button>
-          <span className="text-lg font-bold min-w-[220px] text-center">{period.label}</span>
-          <button onClick={() => setPeriod((p) => stepPayPeriod(p, 1))} className="rounded-xl border px-3 py-1.5 text-slate-500 hover:bg-slate-50 transition bg-white">→</button>
+        <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setPeriod((p) => stepPayPeriod(p, -1))} className="rounded-lg border px-3 py-1.5 text-slate-500 hover:bg-slate-50 transition bg-white">←</button>
+            <span className="font-bold min-w-[200px] text-center">{period.label}</span>
+            <button onClick={() => setPeriod((p) => stepPayPeriod(p, 1))} className="rounded-lg border px-3 py-1.5 text-slate-500 hover:bg-slate-50 transition bg-white">→</button>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden">
+              <button onClick={() => setViewMode("table")} className="px-3 py-1.5 text-sm font-semibold transition"
+                style={viewMode === "table" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                Table
+              </button>
+              <button onClick={() => setViewMode("cards")} className="px-3 py-1.5 text-sm font-semibold transition"
+                style={viewMode === "cards" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                Cards
+              </button>
+            </div>
+            <div className="relative">
+              <button onClick={() => setShowAddPicker((s) => !s)}
+                className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                + Add Person
+              </button>
+              {showAddPicker && (
+                <div className="absolute right-0 mt-1 w-64 max-h-72 overflow-y-auto rounded-lg bg-white shadow-lg border border-slate-200 z-10">
+                  {addablePeople.length === 0 ? (
+                    <p className="text-xs text-slate-400 p-3">Everyone's already listed.</p>
+                  ) : addablePeople.map((p) => (
+                    <button key={p.personKey} onClick={() => handleAddPerson(p)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition border-b border-slate-50 last:border-0">
+                      {p.personName}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {loading ? (
-          <p className="text-slate-400">Loading…</p>
+          <p className="text-slate-400 text-sm">Loading…</p>
         ) : (
-          <div className="space-y-3 max-w-4xl">
-            {people.length === 0 ? (
-              <div className="rounded-2xl bg-white p-8 text-center shadow"><p className="text-slate-400">No staff or temps to show.</p></div>
-            ) : people.map((p) => {
-              const fields = rows[p.personKey] ?? EMPTY_ROW;
-              const expanded = expandedKey === p.personKey;
-              const hygieneBonus = fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT;
-              return (
-                <div key={p.personKey} className="rounded-2xl bg-white shadow overflow-hidden">
-                  <button onClick={() => setExpandedKey(expanded ? null : p.personKey)}
-                    className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-50 transition">
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
-                        style={{ backgroundColor: p.employee?.color ?? "#6b7280" }}>
-                        {p.personName.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="font-semibold text-slate-700">{p.personName}{p.isTemp && <span className="ml-2 rounded-full bg-teal-100 text-teal-700 text-xs font-semibold px-2 py-0.5">Temp</span>}</div>
-                        <div className="text-xs text-slate-400">{p.employee?.role ?? "Temp staff"}</div>
-                      </div>
-                    </div>
-                    <span className="text-slate-300 text-sm">{expanded ? "▲" : "▼"}</span>
+          <div className={viewMode === "table" ? "space-y-6" : "space-y-6 max-w-3xl"}>
+            {viewMode === "table" ? (
+              <>
+                <TableSection title="Employees" people={employeeRows} />
+                <TableSection title="Temps" people={tempRows} />
+                <div className="flex items-center gap-3">
+                  <button onClick={handleSaveAll} disabled={savingAll}
+                    className="rounded-lg px-5 py-2 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50"
+                    style={{ backgroundColor: "#e8622a" }}>
+                    {savingAll ? "Saving…" : `Save All (${employeeRows.length + tempRows.length})`}
                   </button>
-
-                  {expanded && (
-                    <div className="px-5 pb-5 space-y-4 border-t border-slate-100 pt-4">
-                      {p.employee && (
-                        <div className="grid gap-3 sm:grid-cols-2 rounded-xl bg-slate-50 p-3">
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-500 mb-1">PTO Balance (hrs)</label>
-                            <input type="number" defaultValue={p.employee.ptoBalanceHours ?? 0}
-                              onBlur={(e) => handleBalanceChange(p.employee!, "pto", Number(e.target.value))}
-                              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-500 mb-1">Sick Balance (hrs)</label>
-                            <input type="number" defaultValue={p.employee.sickBalanceHours ?? 0}
-                              onBlur={(e) => handleBalanceChange(p.employee!, "sick", Number(e.target.value))}
-                              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-500 mb-1">Hours Worked</label>
-                          <input type="number" value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))}
-                            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-500 mb-1">Overtime Hours</label>
-                          <input type="number" value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))}
-                            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-500 mb-1">Bonus ($)</label>
-                          <input type="number" value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))}
-                            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                        </div>
-                      </div>
-
-                      {p.employee && (
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-semibold text-slate-500">Auto-calculated from approved requests / holidays</span>
-                            <button onClick={() => recomputeAuto(p)} className="text-xs text-orange-500 hover:underline">↺ Recompute</button>
-                          </div>
-                          <div className="grid gap-3 sm:grid-cols-3">
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-500 mb-1">PTO Hours (this period)</label>
-                              <input type="number" value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))}
-                                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-500 mb-1">Sick Hours (this period)</label>
-                              <input type="number" value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))}
-                                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-500 mb-1">Paid Holiday Hours</label>
-                              <input type="number" value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))}
-                                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">Paid Day Off for Meetings (hrs)</label>
-                        <input type="number" value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))}
-                          className="w-full sm:w-48 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                      </div>
-
-                      {isHygienist(p.employee) && (
-                        <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-3">
-                          <label className="block text-xs font-semibold text-emerald-700 mb-1">Hygiene Patients Seen This Period</label>
-                          <div className="flex items-center gap-3">
-                            <input type="number" value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))}
-                              className="w-32 rounded-lg border border-emerald-200 px-2 py-1.5 text-sm focus:outline-none" />
-                            <span className="text-sm text-emerald-700">× ${HYGIENE_BONUS_PER_PATIENT} = <strong>${hygieneBonus.toFixed(2)} bonus</strong></span>
-                          </div>
-                        </div>
-                      )}
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">Notes</label>
-                        <textarea value={fields.notes} onChange={(e) => updateRow(p.personKey, "notes", e.target.value)} rows={2}
-                          className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none resize-none" />
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        <button onClick={() => handleSave(p)} disabled={savingKey === p.personKey}
-                          className="rounded-xl px-5 py-2 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50"
-                          style={{ backgroundColor: "#e8622a" }}>
-                          {savingKey === p.personKey ? "Saving…" : "Save"}
-                        </button>
-                        {savedMsg[p.personKey] && <span className="text-xs text-slate-400">{savedMsg[p.personKey]}</span>}
-                      </div>
-                    </div>
-                  )}
+                  {globalMsg && <span className="text-xs text-slate-400">{globalMsg}</span>}
                 </div>
-              );
-            })}
+              </>
+            ) : (
+              <>
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Employees</h2>
+                  <div className="space-y-2">
+                    {employeeRows.length === 0 ? <p className="text-sm text-slate-400">No employees scheduled this period.</p> : employeeRows.map(renderCard)}
+                  </div>
+                </div>
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Temps</h2>
+                  <div className="space-y-2">
+                    {tempRows.length === 0 ? <p className="text-sm text-slate-400">No temps assigned this period.</p> : tempRows.map(renderCard)}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
