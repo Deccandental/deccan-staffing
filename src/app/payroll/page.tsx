@@ -23,8 +23,9 @@ import {
   loadGrowthBonusDaysOverrides, saveGrowthBonusDaysOverride,
 } from "@/lib/growthBonus";
 import { PvBonusQuarter, loadPvBonusYear, savePvBonusQuarter } from "@/lib/pvBonus";
-import { HoBonusMonth, loadHoBonusMonths, saveHoBonusMonth } from "@/lib/hoBonus";
+import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
+import { formatMoney } from "@/lib/format";
 
 const HYGIENE_BONUS_PER_PATIENT = 15;
 
@@ -708,19 +709,19 @@ function GrowthBonusPanel() {
             <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: progressColor }} />
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            {progressPct}% of the way to this quarter's bonus target (${requiredProduction.toLocaleString()}){calc?.eligible ? " — target met! 🎉" : ""}
+            {progressPct}% of the way to this quarter's bonus target (${formatMoney(requiredProduction)}){calc?.eligible ? " — target met! 🎉" : ""}
           </p>
         </div>
 
         {calc && (
           <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
-            <div>Delta: <strong>${calc.delta.toLocaleString()}</strong> · Growth: <strong>{(calc.growthPct * 100).toFixed(1)}%</strong></div>
+            <div>Delta: <strong>${formatMoney(calc.delta)}</strong> · Growth: <strong>{(calc.growthPct * 100).toFixed(1)}%</strong></div>
             <div className="flex gap-4 text-xs">
               <span className={calc.meetsBam ? "text-green-600" : "text-red-500"}>{calc.meetsBam ? "✓" : "✗"} Exceeds BAM</span>
               <span className={calc.meetsGrowth ? "text-green-600" : "text-red-500"}>{calc.meetsGrowth ? "✓" : "✗"} 20%+ growth</span>
             </div>
             {calc.eligible ? (
-              <div className="text-emerald-700 font-semibold">🎉 Bonus pool: ${calc.bonusPool.toLocaleString()} (at {(calc.tierPct * 100).toFixed(0)}% rate)</div>
+              <div className="text-emerald-700 font-semibold">🎉 Bonus pool: ${formatMoney(calc.bonusPool)} (at {(calc.tierPct * 100).toFixed(0)}% rate)</div>
             ) : (
               <div className="text-slate-400">No bonus pool this quarter — thresholds not met.</div>
             )}
@@ -761,10 +762,10 @@ function GrowthBonusPanel() {
                   </td>
                   <td className="px-2 py-2">{row.multiplier}</td>
                   <td className="px-2 py-2">{row.points}</td>
-                  <td className="px-2 py-2 font-semibold">${row.bonus.toLocaleString()}</td>
-                  <td className="px-2 py-2">${earned.toLocaleString()}</td>
-                  <td className="px-2 py-2">${paid.toLocaleString()}</td>
-                  <td className={`px-2 py-2 font-semibold ${balance > 0 ? "text-amber-600" : "text-slate-400"}`}>${balance.toLocaleString()}</td>
+                  <td className="px-2 py-2 font-semibold">${formatMoney(row.bonus)}</td>
+                  <td className="px-2 py-2">${formatMoney(earned)}</td>
+                  <td className="px-2 py-2">${formatMoney(paid)}</td>
+                  <td className={`px-2 py-2 font-semibold ${balance > 0 ? "text-amber-600" : "text-slate-400"}`}>${formatMoney(balance)}</td>
                   <td className="px-2 py-2">
                     {payingFor === row.employee.id ? (
                       <div className="flex items-center gap-1">
@@ -811,7 +812,7 @@ function GrowthBonusPanel() {
                 <div key={p.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 gap-2">
                   <span className="truncate">{emp?.name ?? "Unknown"} — {new Date(p.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{p.notes ? ` · ${p.notes}` : ""}</span>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="font-semibold">${p.amount.toLocaleString()}</span>
+                    <span className="font-semibold">${formatMoney(p.amount)}</span>
                     <button onClick={() => startEditPayment(p)} className="text-xs text-orange-500 hover:underline">Edit</button>
                     <button onClick={() => handleDeletePayment(p.id)} className="text-xs text-red-400 hover:underline">Delete</button>
                   </div>
@@ -936,9 +937,9 @@ function PvBonusPanel() {
                           <tr key={q.quarter} className="border-b border-slate-50 last:border-0">
                             <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{QUARTER_LABELS[q.quarter as 1 | 2 | 3 | 4]}</td>
                             <td className="px-2 py-2"><input type="number" value={q.totalIncome} onChange={(e) => updateCell(year, q.quarter, "totalIncome", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
-                            <td className="px-2 py-2 text-slate-500">${owed.toLocaleString()}</td>
+                            <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
                             <td className="px-2 py-2"><input type="number" value={q.amountPaid} onChange={(e) => updateCell(year, q.quarter, "amountPaid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
-                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${balance.toLocaleString()}</td>
+                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
                             <td className="px-2 py-2 text-center">
                               <input type="checkbox" checked={q.paid} onChange={(e) => updateCell(year, q.quarter, "paid", e.target.checked)} />
                             </td>
@@ -981,7 +982,7 @@ function HoBonusPanel() {
 
   async function loadYears(ys: number[]) {
     setLoading(true);
-    const results = await Promise.all(ys.map((y) => loadHoBonusMonths(y)));
+    const results = await Promise.all(ys.map((y) => loadHoBonusPayoutYear(y)));
     setRows((r) => { const next = { ...r }; ys.forEach((y, i) => { next[y] = results[i]; }); return next; });
     setLoading(false);
   }
@@ -1017,7 +1018,7 @@ function HoBonusPanel() {
 
   return (
     <div className="max-w-4xl space-y-4">
-      <p className="text-sm text-slate-500">Production-based — 40% of that month's production, paid out over the following month's pay periods.</p>
+      <p className="text-sm text-slate-500">Production-based — 40% of that month's production, paid out over the following month's pay periods. Each year's table starts with December of the prior year (paid out the following January) through November.</p>
       <div className="flex items-center gap-2">
         <input type="number" value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
           className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
@@ -1037,7 +1038,7 @@ function HoBonusPanel() {
             <button onClick={() => toggleExpanded(year)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
               <span className="font-bold text-slate-700">{year}</span>
               <div className="flex items-center gap-3">
-                <span className="text-xs text-slate-400 hidden sm:inline">Income ${yearTotals.income.toLocaleString()} · 40% ${yearTotals.owed.toLocaleString()} · Paid ${yearTotals.paid.toLocaleString()}</span>
+                <span className="text-xs text-slate-400 hidden sm:inline">Income ${formatMoney(yearTotals.income)} · 40% ${formatMoney(yearTotals.owed)} · Paid ${formatMoney(yearTotals.paid)}</span>
                 <span className="text-slate-300 text-xs">{isExpanded ? "▲" : "▼"}</span>
               </div>
             </button>
@@ -1061,11 +1062,11 @@ function HoBonusPanel() {
                         const balance = owed - m.paid;
                         return (
                           <tr key={m.month} className="border-b border-slate-50 last:border-0">
-                            <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]}</td>
+                            <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
                             <td className="px-2 py-2"><input type="number" value={m.production} onChange={(e) => updateCell(year, m.month, "production", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
-                            <td className="px-2 py-2 text-slate-500">${owed.toLocaleString()}</td>
+                            <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
                             <td className="px-2 py-2"><input type="number" value={m.paid} onChange={(e) => updateCell(year, m.month, "paid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
-                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${balance.toLocaleString()}</td>
+                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
                             <td className="px-2 py-2"><input type="text" value={m.notes} onChange={(e) => updateCell(year, m.month, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
                           </tr>
                         );
@@ -1205,9 +1206,9 @@ function HygieneBonusPanel() {
                     <tr key={p.start} className="border-b border-slate-50 last:border-0">
                       <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{p.label}</td>
                       <td className="px-2 py-2"><input type="number" value={row.patientCount} onChange={(e) => updateRow(p.start, "patientCount", Number(e.target.value))} className={`${cellClass} w-16`} /></td>
-                      <td className="px-2 py-2 text-slate-500">${earned.toLocaleString()}</td>
+                      <td className="px-2 py-2 text-slate-500">${formatMoney(earned)}</td>
                       <td className="px-2 py-2"><input type="number" value={row.amountPaid} onChange={(e) => updateRow(p.start, "amountPaid", Number(e.target.value))} className={`${cellClass} w-20`} /></td>
-                      <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${balance.toLocaleString()}</td>
+                      <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
                     </tr>
                   );
                 })}
@@ -1221,7 +1222,7 @@ function HygieneBonusPanel() {
             </button>
             {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
             <span className="text-sm text-slate-500 ml-auto">
-              {year} balance: <strong className={runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${(runningEarned - runningPaid).toLocaleString()}</strong>
+              {year} balance: <strong className={runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${formatMoney(runningEarned - runningPaid)}</strong>
             </span>
           </div>
         </div>
