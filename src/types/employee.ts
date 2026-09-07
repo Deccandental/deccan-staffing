@@ -62,6 +62,10 @@ export interface Employee {
   // worked (e.g. Office Manager 1.2, Patient Scheduler 1.1, reduced 0.5).
   // Only meaningful when growthBonusEligible is true. Defaults to 1.
   growthBonusMultiplier?: number;
+  // Separate opt-in for a PV-style bonus (a flat % of that person's own
+  // income/production, tracked independently of the shared Growth Bonus
+  // pool — e.g. Dr. PV, who is explicitly exempt from the Growth Bonus).
+  pvBonusEligible?: boolean;
   // When true, this person is inactive — hidden from every "pick who's
   // working / assign this to" list (Schedule Builder, swap menus, Events
   // invite list, PIN logins, etc.) but their existing records (leave
