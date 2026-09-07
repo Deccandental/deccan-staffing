@@ -338,7 +338,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                     {form.growthBonusEligible && (
                       <div className="flex items-center gap-2">
                         <label className="text-xs text-gray-500">Point multiplier</label>
-                        <input type="number" step="0.1" value={form.growthBonusMultiplier ?? 1}
+                        <input type="number" onFocus={(e) => e.target.select()} step="0.1" value={form.growthBonusMultiplier ?? 1}
                           onChange={(e) => setForm((f) => ({ ...f, growthBonusMultiplier: Number(e.target.value) }))}
                           className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none" />
                       </div>
@@ -351,7 +351,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                     {form.pvBonusEligible && (
                       <div className="flex items-center gap-2 mt-1">
                         <label className="text-xs text-gray-500">Percentage of net production</label>
-                        <input type="number" step="1" value={form.netProductionBonusPercent ?? 30}
+                        <input type="number" onFocus={(e) => e.target.select()} step="1" value={form.netProductionBonusPercent ?? 30}
                           onChange={(e) => setForm((f) => ({ ...f, netProductionBonusPercent: Number(e.target.value) }))}
                           className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none" />
                         <span className="text-xs text-gray-500">%</span>
