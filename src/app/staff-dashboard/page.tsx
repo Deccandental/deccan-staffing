@@ -311,16 +311,17 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
             {selectedEmployee?.pvBonusEligible && (
               <div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow">
-                <h2 className="font-bold text-slate-700 mb-3">💰 {bonusYear} Bonus (30% of Income)</h2>
+                <h2 className="font-bold text-slate-700 mb-3">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
                 <div className="space-y-1.5">
                   {pvQuarters.map((q) => {
-                    const owed = q.totalIncome * 0.3;
+                    const percent = selectedEmployee.netProductionBonusPercent ?? 30;
+                    const owed = q.totalIncome * (percent / 100);
                     const balance = owed - q.amountPaid;
                     return (
                       <div key={q.quarter} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
                         <span className="font-medium text-slate-700">{QUARTER_LABELS[q.quarter]}</span>
                         <div className="flex items-center gap-3">
-                          <span className="text-slate-400 text-xs">30%: ${owed.toLocaleString()}</span>
+                          <span className="text-slate-400 text-xs">{percent}%: ${owed.toLocaleString()}</span>
                           {q.paid ? (
                             <span className="text-emerald-700 font-semibold">✓ Paid (${q.amountPaid.toLocaleString()})</span>
                           ) : balance > 0 ? (
