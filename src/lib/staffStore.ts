@@ -37,6 +37,7 @@ function rowToEmployee(row: any): Employee {
     growthBonusEligible: row.growth_bonus_eligible ?? false,
     growthBonusMultiplier: row.growth_bonus_multiplier ?? 1,
     pvBonusEligible: row.pv_bonus_eligible ?? false,
+    netProductionBonusPercent: row.net_production_bonus_percent ?? 30,
     archived: row.archived ?? false,
     defaultSchedule,
   };
@@ -56,7 +57,7 @@ export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee |
     can_manage_certs: emp.canManageCerts ?? false, can_manage_payroll: emp.canManagePayroll ?? false, archived: emp.archived ?? false,
     pto_balance_hours: emp.ptoBalanceHours ?? 0, sick_balance_hours: emp.sickBalanceHours ?? 0, exclude_from_payroll: emp.excludeFromPayroll ?? false,
     default_schedule: emp.defaultSchedule, remote_days: emp.remoteDays ?? null,
-    hire_date: emp.hireDate || null, growth_bonus_eligible: emp.growthBonusEligible ?? false, growth_bonus_multiplier: emp.growthBonusMultiplier ?? 1, pv_bonus_eligible: emp.pvBonusEligible ?? false,
+    hire_date: emp.hireDate || null, growth_bonus_eligible: emp.growthBonusEligible ?? false, growth_bonus_multiplier: emp.growthBonusMultiplier ?? 1, pv_bonus_eligible: emp.pvBonusEligible ?? false, net_production_bonus_percent: emp.netProductionBonusPercent ?? 30,
   }).select().single();
   if (error) { console.error("addEmployee error:", error); return null; }
   return rowToEmployee(data);
@@ -70,7 +71,7 @@ export async function updateEmployee(emp: Employee): Promise<void> {
     can_manage_certs: emp.canManageCerts ?? false, can_manage_payroll: emp.canManagePayroll ?? false, archived: emp.archived ?? false,
     pto_balance_hours: emp.ptoBalanceHours ?? 0, sick_balance_hours: emp.sickBalanceHours ?? 0, exclude_from_payroll: emp.excludeFromPayroll ?? false,
     default_schedule: emp.defaultSchedule, remote_days: emp.remoteDays ?? null,
-    hire_date: emp.hireDate || null, growth_bonus_eligible: emp.growthBonusEligible ?? false, growth_bonus_multiplier: emp.growthBonusMultiplier ?? 1, pv_bonus_eligible: emp.pvBonusEligible ?? false,
+    hire_date: emp.hireDate || null, growth_bonus_eligible: emp.growthBonusEligible ?? false, growth_bonus_multiplier: emp.growthBonusMultiplier ?? 1, pv_bonus_eligible: emp.pvBonusEligible ?? false, net_production_bonus_percent: emp.netProductionBonusPercent ?? 30,
   }).eq("id", emp.id);
   if (error) console.error("updateEmployee error:", error);
 }
