@@ -72,7 +72,7 @@ function StaffPageBody() {
     setAdding(false);
     setForm({
       name: emp.name, role: emp.role, specialty: emp.specialty,
-      color: emp.color, skills: emp.skills, email: emp.email ?? "",
+      color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin ?? "",
       defaultSchedule: { ...emp.defaultSchedule }
     });
   }
@@ -174,6 +174,22 @@ function StaffPageBody() {
                     <label className="block text-sm font-medium text-gray-500 mb-1">Email Address</label>
                     <input type="email" value={form.email ?? ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
                       className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="staff@mydeccandental.com" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-500 mb-1">Leave Request PIN</label>
+                    <div className="flex gap-2">
+                      <input value={form.pin ?? ""} onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                        inputMode="numeric" maxLength={4}
+                        className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm tracking-widest font-bold focus:outline-none" placeholder="4-digit PIN" />
+                      <button type="button" onClick={() => setForm((f) => ({ ...f, pin: String(Math.floor(1000 + Math.random() * 9000)) }))}
+                        className="flex-shrink-0 rounded-xl border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-500 hover:bg-gray-50">
+                        Random
+                      </button>
+                    </div>
+                    {form.pin && staff.some((e) => e.pin === form.pin && e.id !== editing?.id) && (
+                      <p className="text-xs text-red-500 mt-1">⚠ Another staff member already has this PIN.</p>
+                    )}
+                    <p className="text-xs text-gray-400 mt-1">Used to log in on the Leave Request page. Leave blank to disable self-service login for this person.</p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Primary Role</label>
