@@ -91,6 +91,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       canManageCerts: emp.canManageCerts ?? false, archived: emp.archived ?? false,
       canManagePayroll: emp.canManagePayroll ?? false, ptoBalanceHours: emp.ptoBalanceHours ?? 0,
       sickBalanceHours: emp.sickBalanceHours ?? 0, excludeFromPayroll: emp.excludeFromPayroll ?? false,
+      remoteDays: emp.remoteDays ? { ...emp.remoteDays } : undefined,
       defaultSchedule: { ...emp.defaultSchedule }
     });
   }
@@ -137,6 +138,13 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 
   function toggleDay(day: typeof DAYS[number]) {
     setForm((f) => ({ ...f, defaultSchedule: { ...f.defaultSchedule, [day]: !f.defaultSchedule[day] } }));
+  }
+
+  function toggleRemoteDay(day: typeof DAYS[number]) {
+    setForm((f) => {
+      const current = f.remoteDays ?? { monday: false, tuesday: false, wednesday: false, thursday: false, friday: false };
+      return { ...f, remoteDays: { ...current, [day]: !current[day] } };
+    });
   }
 
   async function movePref(dentistId: number, assistantId: number, dir: -1 | 1) {
@@ -341,6 +349,20 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-2">Remote Days</label>
+                  <div className="flex gap-2">
+                    {DAYS.map((day, i) => (
+                      <button key={day} onClick={() => toggleRemoteDay(day)}
+                        className="flex-1 rounded-lg py-2 text-xs font-semibold transition"
+                        style={form.remoteDays?.[day] ? { backgroundColor: "#0d9488", color: "white" } : { background: "#f1f5f9", color: "#9ca3af" }}>
+                        {DAY_LABELS[i]}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Works remotely on these days — even if the office itself is closed (e.g. a normally-closed Tuesday). Shows automatically on Availability without needing to be marked each week.</p>
                 </div>
 
                 <div>
