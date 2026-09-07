@@ -12,8 +12,11 @@ import {
 } from "@/lib/certsStore";
 import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
 import { UpcomingShift, loadUpcomingShiftsForEmployee } from "@/lib/staffSchedule";
+import { PayrollEntry, loadPayrollEntriesInRange } from "@/lib/payrollStore";
 import {
   getCurrentQuarter, computeQuarterCalc, loadGrowthBonusQuarter, loadGrowthBonusPayments,
+  isEligibleForQuarter, computeDaysWorkedInQuarter, splitBonusPool, getQuarterDateRange,
+  loadGrowthBonusDaysOverrides, GrowthBonusQuarter,
 } from "@/lib/growthBonus";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
@@ -31,6 +34,8 @@ const LEAVE_STATUS_STYLES: Record<string, string> = {
 const ROLE_ICONS: Record<UpcomingShift["role"], string> = {
   Dentist: "🦷", Assistant: "🤝", "Front Desk": "🖥️", Hygienist: "✨", Floater: "🔄",
 };
+
+const QUARTER_LABELS: Record<1 | 2 | 3 | 4, string> = { 1: "Q1 (Jan–Mar)", 2: "Q2 (Apr–Jun)", 3: "Q3 (Jul–Sep)", 4: "Q4 (Oct–Dec)" };
 
 function daysUntil(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -66,8 +71,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [certs, setCerts] = useState<Certification[]>([]);
   const [titleOptions, setTitleOptions] = useState<string[]>([]);
   const [events, setEvents] = useState<StaffEvent[]>([]);
-  const [bonusProgressPct, setBonusProgressPct] = useState(0);
-  const [bonusUnlocked, setBonusUnlocked] = useState(false);
+  const [bonusYear] = useState(new Date().getFullYear());
+  const [yearQuartersData, setYearQuartersData] = useState<Record<number, GrowthBonusQuarter>>({});
+  const [yearDaysOverrides, setYearDaysOverrides] = useState<Record<number, Record<number, number>>>({});
+  const [yearPayrollEntries, setYearPayrollEntries] = useState<PayrollEntry[]>([]);
   const [bonusReceivedThisYear, setBonusReceivedThisYear] = useState(0);
   const [loading, setLoading] = useState(false);
 
@@ -86,33 +93,67 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     let cancelled = false;
     setLoading(true);
     const todayStr = new Date().toISOString().split("T")[0];
+    const yearStart = `${bonusYear}-01-01`;
+    const yearEnd = `${bonusYear}-12-31`;
     Promise.all([
       loadUpcomingShiftsForEmployee(selectedId),
       loadLeaveRequests(),
       loadCertificationsForEmployee(selectedId),
       loadUpcomingEvents(todayStr),
       loadDistinctTitles(),
-      loadGrowthBonusQuarter(getCurrentQuarter().year, getCurrentQuarter().quarter),
+      loadGrowthBonusQuarter(bonusYear, 1), loadGrowthBonusQuarter(bonusYear, 2),
+      loadGrowthBonusQuarter(bonusYear, 3), loadGrowthBonusQuarter(bonusYear, 4),
+      loadGrowthBonusDaysOverrides(bonusYear, 1), loadGrowthBonusDaysOverrides(bonusYear, 2),
+      loadGrowthBonusDaysOverrides(bonusYear, 3), loadGrowthBonusDaysOverrides(bonusYear, 4),
+      loadPayrollEntriesInRange(yearStart, yearEnd),
       loadGrowthBonusPayments(selectedId),
-    ]).then(([shiftData, leaveData, certData, eventData, titles, quarterData, payments]) => {
+    ]).then(([
+      shiftData, leaveData, certData, eventData, titles,
+      q1, q2, q3, q4, d1, d2, d3, d4, entries, payments,
+    ]) => {
       if (cancelled) return;
       setShifts(shiftData);
       setLeaveRequests(leaveData.filter((r) => r.employeeId === selectedId));
       setCerts(certData);
       setEvents(eventData.filter((ev) => ev.inviteAll || ev.invitedStaffIds.includes(selectedId)));
       setTitleOptions(titles);
-      const calc = computeQuarterCalc(quarterData);
-      const required = Math.max(quarterData.bamThreshold, quarterData.netProductionPriorYear * 1.2);
-      setBonusProgressPct(required > 0 ? Math.min(100, Math.round((quarterData.netProductionCurrent / required) * 100)) : 0);
-      setBonusUnlocked(calc.eligible);
-      const thisYear = new Date().getFullYear();
-      setBonusReceivedThisYear(payments.filter((p) => p.date.startsWith(String(thisYear))).reduce((sum, p) => sum + p.amount, 0));
+      setYearQuartersData({ 1: q1, 2: q2, 3: q3, 4: q4 });
+      setYearDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
+      setYearPayrollEntries(entries);
+      setBonusReceivedThisYear(payments.filter((p) => p.date.startsWith(String(bonusYear))).reduce((sum, p) => sum + p.amount, 0));
       setLoading(false);
     });
     return () => { cancelled = true; };
   }, [selectedId]);
 
   const selectedEmployee = staff.find((e) => e.id === selectedId);
+
+  // Computes what this specific employee earned for a given quarter, by
+  // splitting that quarter's pool across every eligible employee — mirrors
+  // the same logic used in the Payroll Dashboard's Growth Bonus tab.
+  function bonusForQuarter(q: 1 | 2 | 3 | 4): { calc: ReturnType<typeof computeQuarterCalc>; myBonus: number } | null {
+    const qData = yearQuartersData[q];
+    if (!qData || !selectedEmployee) return null;
+    const calc = computeQuarterCalc(qData);
+    const { start, end } = getQuarterDateRange(bonusYear, q);
+    const eligible = staff.filter((e) => isEligibleForQuarter(e, end));
+    const overridesForQ = yearDaysOverrides[q] ?? {};
+    const rows = eligible.map((e) => ({
+      employee: e,
+      days: overridesForQ[e.id] ?? computeDaysWorkedInQuarter(e.id, start, end, yearPayrollEntries),
+    }));
+    const split = calc.eligible ? splitBonusPool(calc.bonusPool, rows) : [];
+    const mine = split.find((r) => r.employee.id === selectedEmployee.id);
+    return { calc, myBonus: mine?.bonus ?? 0 };
+  }
+
+  const currentQuarter = getCurrentQuarter().quarter;
+  const currentQuarterData = yearQuartersData[currentQuarter];
+  const currentCalc = currentQuarterData ? computeQuarterCalc(currentQuarterData) : null;
+  const requiredProduction = currentQuarterData ? Math.max(currentQuarterData.bamThreshold, currentQuarterData.netProductionPriorYear * 1.2) : 0;
+  const bonusProgressPct = currentQuarterData && requiredProduction > 0
+    ? Math.min(100, Math.round((currentQuarterData.netProductionCurrent / requiredProduction) * 100)) : 0;
+  const bonusUnlocked = !!currentCalc?.eligible;
 
   function openNewCert() {
     setCertForm(EMPTY_CERT_FORM);
@@ -234,13 +275,33 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             {selectedEmployee?.growthBonusEligible && (
               <div className="lg:col-span-2 rounded-2xl p-5 shadow" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)" }}>
                 <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                  <h2 className="font-bold text-slate-700">{bonusUnlocked ? "🎉 Bonus unlocked this quarter!" : "🚀 Growth Bonus Progress"}</h2>
+                  <h2 className="font-bold text-slate-700">
+                    {bonusUnlocked ? "🎉 " : "🚀 "}{QUARTER_LABELS[currentQuarter]} {bonusYear} Bonus Progress{bonusUnlocked ? " — unlocked!" : ""}
+                  </h2>
                   <span className="text-sm text-slate-600">Received this year: <strong>${bonusReceivedThisYear.toLocaleString()}</strong></span>
                 </div>
                 <div className="w-full h-3 rounded-full bg-white overflow-hidden">
                   <div className="h-full rounded-full transition-all" style={{ width: `${bonusProgressPct}%`, backgroundColor: bonusUnlocked ? "#10b981" : "#f59e0b" }} />
                 </div>
                 <p className="text-xs text-slate-500 mt-1">{bonusProgressPct}% of the way to this quarter's production target{bonusUnlocked ? " — already there!" : ""}</p>
+
+                <div className="mt-3 pt-3 border-t border-white/60 space-y-1.5">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{bonusYear} so far</p>
+                  {([1, 2, 3, 4] as const).filter((q) => q <= currentQuarter).map((q) => {
+                    const result = bonusForQuarter(q);
+                    if (!result) return null;
+                    return (
+                      <div key={q} className="flex items-center justify-between text-sm bg-white/60 rounded-lg px-3 py-1.5">
+                        <span className="font-medium text-slate-700">{QUARTER_LABELS[q]}</span>
+                        {result.calc.eligible ? (
+                          <span className="text-emerald-700 font-semibold">✓ Unlocked — you earned ${result.myBonus.toLocaleString()}</span>
+                        ) : (
+                          <span className="text-slate-400">Not met</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
