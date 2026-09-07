@@ -8,6 +8,7 @@ import { LeaveReason, LeaveRequest } from "@/types/leave";
 import { addLeaveRequest, loadLeaveRequests, cancelLeaveRequest, deleteLeaveRequest, countBusinessDays, validateNoticePeriod } from "@/lib/leaveStore";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
+import StaffLoginGate, { StaffIdentity } from "@/components/StaffLoginGate";
 
 const REASON_LABELS: Record<LeaveReason, string> = {
   sick: "Sick Leave", pto: "PTO / Vacation", leave: "Personal Leave", other: "Other",
@@ -20,8 +21,6 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: "bg-slate-100 text-slate-400",
   manual: "bg-purple-100 text-purple-700",
 };
-
-const PASSCODE = "2503";
 
 interface AbsenceEntry {
   type: "request" | "manual";
@@ -38,7 +37,7 @@ interface AbsenceEntry {
   submittedAt?: string;
 }
 
-export default function LeavePage() {
+function LeavePageBody({ identity, logout }: { identity: StaffIdentity; logout: () => void }) {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
@@ -47,9 +46,6 @@ export default function LeavePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [noticeWarning, setNoticeWarning] = useState("");
-  const [allPasscode, setAllPasscode] = useState("");
-  const [allAuthenticated, setAllAuthenticated] = useState(false);
-  const [allPasscodeError, setAllPasscodeError] = useState(false);
   const [filterEmployee, setFilterEmployee] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -58,7 +54,9 @@ export default function LeavePage() {
   const [calMonth, setCalMonth] = useState(today0.getMonth() + 1);
 
   const [form, setForm] = useState({
-    employeeId: "", employeeEmail: "", startDate: "", endDate: "",
+    employeeId: identity.mode === "staff" ? String(identity.employeeId) : "",
+    employeeEmail: identity.mode === "staff" ? identity.employeeEmail : "",
+    startDate: "", endDate: "",
     isPartialDay: false, partialHours: "", reason: "pto" as LeaveReason, notes: "",
   });
 
@@ -262,9 +260,19 @@ export default function LeavePage() {
       <div className="hidden lg:block"><Sidebar /></div>
 
       <div className="lg:ml-64 p-4 lg:p-8">
-        <div className="mb-6">
-          <h1 className="text-2xl lg:text-3xl font-bold" style={{ color: "#5a5a5a" }}>Leave & Absences</h1>
-          <p className="mt-1 text-gray-400 text-sm">Submit and track your leave requests</p>
+        <div className="mb-6 flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-2xl lg:text-3xl font-bold" style={{ color: "#5a5a5a" }}>Leave & Absences</h1>
+            <p className="mt-1 text-gray-400 text-sm">Submit and track your leave requests</p>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm text-sm">
+            <span className="text-gray-400">
+              {identity.mode === "manager" ? "👔 Manager view" : `👤 ${identity.employeeName}`}
+            </span>
+            <button onClick={logout} className="text-xs font-semibold text-gray-400 hover:text-red-500 underline">
+              Not you?
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
@@ -272,7 +280,7 @@ export default function LeavePage() {
             { key: "request", label: "📝 New Request" },
             { key: "my", label: "📋 My Requests" },
             { key: "calendar", label: "🗓️ Calendar" },
-            { key: "all", label: "📊 All Absences" },
+            ...(identity.mode === "manager" ? [{ key: "all", label: "📊 All Absences" }] : []),
           ].map((tab) => (
             <button key={tab.key} onClick={() => setView(tab.key as any)}
               className="rounded-xl px-4 py-2 text-sm font-semibold transition whitespace-nowrap flex-shrink-0"
@@ -300,11 +308,17 @@ export default function LeavePage() {
                 <h2 className="text-lg font-bold" style={{ color: "#5a5a5a" }}>Submit a Leave Request</h2>
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Your Name</label>
-                  <select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))}
-                    className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }}>
-                    <option value="">Select your name...</option>
-                    {staff.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}
-                  </select>
+                  {identity.mode === "staff" ? (
+                    <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold" style={{ color: "#5a5a5a" }}>
+                      {identity.employeeName}
+                    </div>
+                  ) : (
+                    <select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))}
+                      className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }}>
+                      <option value="">Select staff member...</option>
+                      {staff.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}
+                    </select>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Your Email</label>
@@ -375,14 +389,16 @@ export default function LeavePage() {
 
         {view === "my" && (
           <div className="max-w-lg mx-auto lg:mx-0">
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-500 mb-1">Select your name</label>
-              <select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }}>
-                <option value="">Select name...</option>
-                {staff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </select>
-            </div>
+            {identity.mode === "manager" && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-500 mb-1">Select staff member</label>
+                <select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))}
+                  className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }}>
+                  <option value="">Select name...</option>
+                  {staff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+              </div>
+            )}
             {form.employeeId && (
               <div className="space-y-3">
                 {myRequests.length === 0 ? (
@@ -479,19 +495,11 @@ export default function LeavePage() {
 
         {view === "all" && (
           <div>
-            {!allAuthenticated ? (
+            {identity.mode !== "manager" ? (
               <div className="max-w-sm mx-auto mt-4">
                 <div className="rounded-2xl bg-white p-8 shadow text-center">
-                  <div className="text-4xl mb-3">🔐</div>
-                  <h2 className="text-xl font-bold mb-1" style={{ color: "#5a5a5a" }}>Manager Access</h2>
-                  <p className="text-gray-400 text-sm mb-6">Enter your passcode to view all staff absences</p>
-                  <input type="password" value={allPasscode} onChange={(e) => setAllPasscode(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") { if (allPasscode === PASSCODE) setAllAuthenticated(true); else { setAllPasscodeError(true); setAllPasscode(""); } } }}
-                    placeholder="Enter passcode" maxLength={6}
-                    className={`w-full rounded-xl border px-4 py-3 text-center text-xl tracking-widest font-bold focus:outline-none mb-3 ${allPasscodeError ? "border-red-300 bg-red-50" : "border-gray-200"}`} style={{ fontSize: 24 }} />
-                  {allPasscodeError && <p className="text-red-500 text-sm mb-3">Incorrect passcode.</p>}
-                  <button onClick={() => { if (allPasscode === PASSCODE) setAllAuthenticated(true); else { setAllPasscodeError(true); setAllPasscode(""); } }}
-                    className="w-full rounded-xl py-3 font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Unlock</button>
+                  <div className="text-4xl mb-3">🔒</div>
+                  <p className="text-gray-400 text-sm">This view is only available to managers.</p>
                 </div>
               </div>
             ) : (
@@ -569,5 +577,13 @@ export default function LeavePage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function LeavePage() {
+  return (
+    <StaffLoginGate>
+      {(identity, logout) => <LeavePageBody identity={identity} logout={logout} />}
+    </StaffLoginGate>
   );
 }
