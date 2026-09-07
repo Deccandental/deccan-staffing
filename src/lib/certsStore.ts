@@ -105,9 +105,9 @@ export async function uploadCertFile(file: File): Promise<{ url: string; name: s
 
   const ext = toUpload.name.includes(".") ? toUpload.name.split(".").pop() : "";
   const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext ? `.${ext}` : ""}`;
-  const { error } = await supabase.storage.from("certificates").upload(path, toUpload);
+  const { error } = await supabase.storage.from("Certificates").upload(path, toUpload);
   if (error) { console.error("uploadCertFile error:", error); return { error: "Upload failed. Please try again." }; }
-  const { data } = supabase.storage.from("certificates").getPublicUrl(path);
+  const { data } = supabase.storage.from("Certificates").getPublicUrl(path);
   return { url: data.publicUrl, name: originalName };
 }
 
