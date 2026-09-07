@@ -12,6 +12,9 @@ import {
 } from "@/lib/certsStore";
 import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
 import { UpcomingShift, loadUpcomingShiftsForEmployee } from "@/lib/staffSchedule";
+import {
+  getCurrentQuarter, computeQuarterCalc, loadGrowthBonusQuarter, loadGrowthBonusPayments,
+} from "@/lib/growthBonus";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
 const REASON_LABELS: Record<string, string> = {
@@ -63,6 +66,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [certs, setCerts] = useState<Certification[]>([]);
   const [titleOptions, setTitleOptions] = useState<string[]>([]);
   const [events, setEvents] = useState<StaffEvent[]>([]);
+  const [bonusProgressPct, setBonusProgressPct] = useState(0);
+  const [bonusUnlocked, setBonusUnlocked] = useState(false);
+  const [bonusReceivedThisYear, setBonusReceivedThisYear] = useState(0);
   const [loading, setLoading] = useState(false);
 
   const [showCertForm, setShowCertForm] = useState(false);
@@ -86,13 +92,21 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       loadCertificationsForEmployee(selectedId),
       loadUpcomingEvents(todayStr),
       loadDistinctTitles(),
-    ]).then(([shiftData, leaveData, certData, eventData, titles]) => {
+      loadGrowthBonusQuarter(getCurrentQuarter().year, getCurrentQuarter().quarter),
+      loadGrowthBonusPayments(selectedId),
+    ]).then(([shiftData, leaveData, certData, eventData, titles, quarterData, payments]) => {
       if (cancelled) return;
       setShifts(shiftData);
       setLeaveRequests(leaveData.filter((r) => r.employeeId === selectedId));
       setCerts(certData);
       setEvents(eventData.filter((ev) => ev.inviteAll || ev.invitedStaffIds.includes(selectedId)));
       setTitleOptions(titles);
+      const calc = computeQuarterCalc(quarterData);
+      const required = Math.max(quarterData.bamThreshold, quarterData.netProductionPriorYear * 1.2);
+      setBonusProgressPct(required > 0 ? Math.min(100, Math.round((quarterData.netProductionCurrent / required) * 100)) : 0);
+      setBonusUnlocked(calc.eligible);
+      const thisYear = new Date().getFullYear();
+      setBonusReceivedThisYear(payments.filter((p) => p.date.startsWith(String(thisYear))).reduce((sum, p) => sum + p.amount, 0));
       setLoading(false);
     });
     return () => { cancelled = true; };
@@ -214,6 +228,19 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   <div className="font-bold text-lg text-slate-700">{selectedEmployee.name}</div>
                   <div className="text-sm text-slate-400">{selectedEmployee.specialty ?? selectedEmployee.role}{selectedEmployee.email ? ` · ${selectedEmployee.email}` : ""}</div>
                 </div>
+              </div>
+            )}
+
+            {selectedEmployee?.growthBonusEligible && (
+              <div className="lg:col-span-2 rounded-2xl p-5 shadow" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)" }}>
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                  <h2 className="font-bold text-slate-700">{bonusUnlocked ? "🎉 Bonus unlocked this quarter!" : "🚀 Growth Bonus Progress"}</h2>
+                  <span className="text-sm text-slate-600">Received this year: <strong>${bonusReceivedThisYear.toLocaleString()}</strong></span>
+                </div>
+                <div className="w-full h-3 rounded-full bg-white overflow-hidden">
+                  <div className="h-full rounded-full transition-all" style={{ width: `${bonusProgressPct}%`, backgroundColor: bonusUnlocked ? "#10b981" : "#f59e0b" }} />
+                </div>
+                <p className="text-xs text-slate-500 mt-1">{bonusProgressPct}% of the way to this quarter's production target{bonusUnlocked ? " — already there!" : ""}</p>
               </div>
             )}
 
