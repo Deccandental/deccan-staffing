@@ -9,8 +9,7 @@ function fromRow(row: any): Certification {
     ownerType: row.owner_type,
     employeeId: row.employee_id ?? null,
     title: row.title,
-    issuingAuthority: row.issuing_authority ?? "",
-    expirationDate: row.expiration_date,
+    expirationDate: row.expiration_date ?? null,
     fileUrl: row.file_url,
     fileName: row.file_name ?? "",
     remindersSent: row.reminders_sent ?? {},
@@ -56,6 +55,7 @@ export async function GET(req: NextRequest) {
   const results: { certId: string; type: string; sent: boolean }[] = [];
 
   for (const cert of certs) {
+    if (!cert.expirationDate) continue; // shouldn't happen given the query filter, but keeps this type-safe
     const remaining = daysUntil(cert.expirationDate);
     for (const t of THRESHOLDS) {
       if (remaining !== t.days) continue;
