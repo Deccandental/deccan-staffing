@@ -25,6 +25,14 @@ export async function loadPvBonusQuarter(year: number, quarter: number): Promise
   return fromRow(data);
 }
 
+export async function loadPvBonusYear(year: number): Promise<PvBonusQuarter[]> {
+  const { data, error } = await supabase.from("pv_bonus_quarters").select("*").eq("year", year).order("quarter");
+  if (error) { console.error("loadPvBonusYear error:", error); return []; }
+  const byQuarter: Record<number, PvBonusQuarter> = {};
+  for (const row of data ?? []) byQuarter[row.quarter] = fromRow(row);
+  return ([1, 2, 3, 4] as const).map((q) => byQuarter[q] ?? { year, quarter: q, totalIncome: 0, amountPaid: 0, notes: "" });
+}
+
 export async function savePvBonusQuarter(q: PvBonusQuarter): Promise<void> {
   const { error } = await supabase.from("pv_bonus_quarters").upsert({
     year: q.year, quarter: q.quarter, total_income: q.totalIncome, amount_paid: q.amountPaid, notes: q.notes,
