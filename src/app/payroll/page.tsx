@@ -970,6 +970,8 @@ const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "Ju
 
 function HoBonusPanel() {
   const currentYear = new Date().getFullYear();
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [employeeId, setEmployeeId] = useState<number | null>(null);
   const [years, setYears] = useState<number[]>([currentYear]);
   const [expanded, setExpanded] = useState<Set<number>>(new Set([currentYear]));
   const [rows, setRows] = useState<Record<number, HoBonusMonth[]>>({});
@@ -978,11 +980,21 @@ function HoBonusPanel() {
   const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
   const [newYearInput, setNewYearInput] = useState("");
 
-  useEffect(() => { loadYears(years); }, []);
+  useEffect(() => {
+    loadStaff().then((s) => {
+      setStaff(s);
+      const eligible = s.filter((e) => e.hoBonusEligible);
+      if (eligible.length > 0) setEmployeeId(eligible[0].id);
+      else setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => { if (employeeId != null) loadYears(years); }, [employeeId]);
 
   async function loadYears(ys: number[]) {
+    if (employeeId == null) return;
     setLoading(true);
-    const results = await Promise.all(ys.map((y) => loadHoBonusPayoutYear(y)));
+    const results = await Promise.all(ys.map((y) => loadHoBonusPayoutYear(employeeId, y)));
     setRows((r) => { const next = { ...r }; ys.forEach((y, i) => { next[y] = results[i]; }); return next; });
     setLoading(false);
   }
@@ -1011,15 +1023,22 @@ function HoBonusPanel() {
     setSavedMsg((m) => ({ ...m, [year]: "Saved." }));
   }
 
+  const eligibleStaff = staff.filter((e) => e.hoBonusEligible);
   const sortedYears = [...years].sort((a, b) => b - a);
   const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
 
-  if (loading && Object.keys(rows).length === 0) return <p className="text-slate-400 text-sm">Loading…</p>;
+  if (eligibleStaff.length === 0 && !loading) {
+    return <p className="text-sm text-slate-400">No one is marked "Eligible for Dr. Ho-style Bonus" yet — set that on the Staff page first.</p>;
+  }
 
   return (
     <div className="max-w-4xl space-y-4">
       <p className="text-sm text-slate-500">Production-based — 40% of that month's production, paid out over the following month's pay periods. Each year's table starts with December of the prior year (paid out the following January) through November.</p>
       <div className="flex items-center gap-2">
+        <select value={employeeId ?? ""} onChange={(e) => setEmployeeId(Number(e.target.value))}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {eligibleStaff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
         <input type="number" onFocus={(e) => e.target.select()} value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
           className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
         <button onClick={addYear} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
@@ -1027,7 +1046,7 @@ function HoBonusPanel() {
         </button>
       </div>
 
-      {sortedYears.map((year) => {
+      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : sortedYears.map((year) => {
         const yearRows = rows[year] ?? [];
         const isExpanded = expanded.has(year);
         const yearTotals = yearRows.reduce((acc, m) => ({
