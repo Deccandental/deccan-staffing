@@ -4,7 +4,7 @@ import { useState, useEffect, ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
-import { PASSCODES } from "@/lib/passcodes";
+import { SUPER_PASSCODE } from "@/lib/passcodes";
 
 export type StaffIdentity =
   | { mode: "staff"; employeeId: number; employeeName: string; employeeEmail: string }
@@ -41,7 +41,12 @@ export default function StaffLoginGate({ children }: Props) {
   }
 
   function handleLogin() {
-    if (code === PASSCODES.leaveManage) {
+    if (code === SUPER_PASSCODE) {
+      persist({ mode: "manager" });
+      return;
+    }
+    const managerMatch = staff.find((e) => e.pin && e.pin === code && e.canManageLeave);
+    if (managerMatch) {
       persist({ mode: "manager" });
       return;
     }
