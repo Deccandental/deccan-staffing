@@ -1,6 +1,7 @@
 import { Sidebar } from "@/components/Sidebar";
 import ScheduleBuilder from "@/components/ScheduleBuilder";
-import PasscodeGate from "@/components/PasscodeGate";
+import AppIdentityGate from "@/components/AppIdentityGate";
+import AccessDenied from "@/components/AccessDenied";
 
 function ScheduleBuilderPageInner() {
   return (
@@ -19,8 +20,8 @@ function ScheduleBuilderPageInner() {
 
 export default function ScheduleBuilderPage() {
   return (
-    <PasscodeGate group="admin" subtitle="Enter your passcode to access the schedule builder">
-      <ScheduleBuilderPageInner />
-    </PasscodeGate>
+    <AppIdentityGate>
+      {(identity, logout) => identity.canAdmin ? <ScheduleBuilderPageInner /> : <AccessDenied logout={logout} />}
+    </AppIdentityGate>
   );
 }
