@@ -21,6 +21,7 @@ import {
   getQuarterDateRange, getCurrentQuarter, loadGrowthBonusPayments, addGrowthBonusPayment,
 } from "@/lib/growthBonus";
 import { PvBonusQuarter, loadPvBonusQuarter, savePvBonusQuarter } from "@/lib/pvBonus";
+import { HoBonusMonth, loadHoBonusMonth, loadHoBonusMonths, saveHoBonusMonth } from "@/lib/hoBonus";
 
 const HYGIENE_BONUS_PER_PATIENT = 15;
 
@@ -81,7 +82,7 @@ function PayrollPageBody() {
   const [savedMsg, setSavedMsg] = useState<Record<string, string>>({});
   const [globalMsg, setGlobalMsg] = useState("");
   const [showAddPicker, setShowAddPicker] = useState(false);
-  const [mainTab, setMainTab] = useState<"payroll" | "growth" | "pv">("payroll");
+  const [mainTab, setMainTab] = useState<"payroll" | "growth" | "pv" | "ho">("payroll");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { refresh(); }, [period.start]);
@@ -441,10 +442,15 @@ function PayrollPageBody() {
             style={mainTab === "pv" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
             PV Bonus
           </button>
+          <button onClick={() => setMainTab("ho")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "ho" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Dr. Ho
+          </button>
         </div>
 
         {mainTab === "growth" && <GrowthBonusPanel />}
         {mainTab === "pv" && <PvBonusPanel />}
+        {mainTab === "ho" && <HoBonusPanel />}
 
         {mainTab === "payroll" && (
         <>
@@ -818,6 +824,107 @@ function PvBonusPanel() {
             {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function HoBonusPanel() {
+  const today = new Date();
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth() + 1);
+  const [form, setForm] = useState<HoBonusMonth>({ year: today.getFullYear(), month: today.getMonth() + 1, production: 0, paid: 0, notes: "" });
+  const [yearMonths, setYearMonths] = useState<HoBonusMonth[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  useEffect(() => { refresh(); }, [year, month]);
+
+  async function refresh() {
+    setLoading(true);
+    const [m, months] = await Promise.all([loadHoBonusMonth(year, month), loadHoBonusMonths(year)]);
+    setForm(m);
+    setYearMonths(months);
+    setLoading(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    await saveHoBonusMonth(form);
+    setSaving(false);
+    setSavedMsg("Saved.");
+    await refresh();
+  }
+
+  const owed40 = form.production * 0.4;
+  const balance = owed40 - form.paid;
+
+  const yearTotals = yearMonths.reduce((acc, m) => ({
+    income: acc.income + m.production, owed: acc.owed + m.production * 0.4, paid: acc.paid + m.paid,
+  }), { income: 0, owed: 0, paid: 0 });
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <p className="text-sm text-slate-500">Production-based — 40% of that month's production, paid out over the following month's pay periods.</p>
+      <div className="flex items-center gap-3">
+        <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
+          className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+        <select value={month} onChange={(e) => setMonth(Number(e.target.value))}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
+        </select>
+      </div>
+
+      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
+        <>
+          <div className="rounded-xl bg-white shadow-sm p-4 space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">Production for {MONTH_NAMES[month - 1]} {year}</label>
+                <input type="number" value={form.production} onChange={(e) => setForm((f) => ({ ...f, production: Number(e.target.value) }))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">Paid</label>
+                <input type="number" value={form.paid} onChange={(e) => setForm((f) => ({ ...f, paid: Number(e.target.value) }))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
+              <div>40%: <strong>${owed40.toLocaleString()}</strong></div>
+              <div className={balance > 0 ? "text-amber-600 font-semibold" : balance < 0 ? "text-red-500 font-semibold" : "text-slate-500"}>
+                {balance > 0 ? `Owed: $${balance.toLocaleString()}` : balance < 0 ? `Overpaid by: $${Math.abs(balance).toLocaleString()}` : "Fully paid"}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-0.5">Notes</label>
+              <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={3}
+                placeholder="Any adjustments..." className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none resize-none" />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button onClick={handleSave} disabled={saving}
+                className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+              {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-white shadow-sm p-4">
+            <h2 className="font-bold text-slate-700 mb-2 text-sm">{year} Totals</h2>
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div><span className="text-slate-400 text-xs block">Income</span><strong>${yearTotals.income.toLocaleString()}</strong></div>
+              <div><span className="text-slate-400 text-xs block">40%</span><strong>${yearTotals.owed.toLocaleString()}</strong></div>
+              <div><span className="text-slate-400 text-xs block">Paid</span><strong>${yearTotals.paid.toLocaleString()}</strong></div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
