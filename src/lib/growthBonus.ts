@@ -102,14 +102,17 @@ export function isEligibleForQuarter(emp: Employee, quarterEnd: string): boolean
   return monthsEmployed >= 5;
 }
 
-// Days worked = hours actually worked (excludes PTO/sick/holiday/meeting
-// hours, which are tracked separately) summed across every pay period whose
-// start falls within the quarter, divided by 8.
-export function computeDaysWorkedInQuarter(employeeId: number, quarterStart: string, quarterEnd: string, entries: PayrollEntry[]): number {
-  const totalHours = entries
+// Hours actually worked (excludes PTO/sick/holiday/meeting hours, which are
+// tracked separately) summed across every pay period whose start falls
+// within the quarter.
+export function computeHoursWorkedInQuarter(employeeId: number, quarterStart: string, quarterEnd: string, entries: PayrollEntry[]): number {
+  return entries
     .filter((e) => e.personKey === `staff:${employeeId}` && e.payPeriodStart >= quarterStart && e.payPeriodStart <= quarterEnd)
     .reduce((sum, e) => sum + e.hoursWorked, 0);
-  return Math.round((totalHours / 8) * 10) / 10;
+}
+
+export function hoursToDays(hours: number): number {
+  return Math.round((hours / 8) * 10) / 10;
 }
 
 export interface EmployeeBonusRow {
@@ -136,28 +139,30 @@ function fromPaymentRow(row: any): GrowthBonusPayment {
   return { id: row.id, employeeId: row.employee_id, date: row.date, amount: row.amount ?? 0, notes: row.notes ?? "", createdAt: row.created_at };
 }
 
-// Manual per-person days override for a quarter — used when the Payroll
+// Manual per-person hours override for a quarter — used when the Payroll
 // table wasn't in use yet for that period (e.g. before the feature existed),
-// so there's nothing to auto-calculate from. Falls back to the auto-computed
-// value from payroll hours whenever no override has been saved.
-export async function loadGrowthBonusDaysOverrides(year: number, quarter: number): Promise<Record<number, number>> {
+// so there's nothing to auto-calculate from. Falls back to the auto-summed
+// hours from Payroll whenever no override has been saved. Days are always
+// derived from hours (÷8) rather than entered directly, matching how hours
+// are already the real unit entered in Payroll.
+export async function loadGrowthBonusHoursOverrides(year: number, quarter: number): Promise<Record<number, number>> {
   const { data, error } = await supabase.from("growth_bonus_entries").select("*").eq("year", year).eq("quarter", quarter);
-  if (error) { console.error("loadGrowthBonusDaysOverrides error:", error); return {}; }
+  if (error) { console.error("loadGrowthBonusHoursOverrides error:", error); return {}; }
   const map: Record<number, number> = {};
-  for (const row of data ?? []) map[row.employee_id] = row.days;
+  for (const row of data ?? []) map[row.employee_id] = row.hours;
   return map;
 }
 
-export async function saveGrowthBonusDaysOverride(year: number, quarter: number, employeeId: number, days: number): Promise<void> {
+export async function saveGrowthBonusHoursOverride(year: number, quarter: number, employeeId: number, hours: number): Promise<void> {
   const { error } = await supabase.from("growth_bonus_entries").upsert({
-    year, quarter, employee_id: employeeId, days, updated_at: new Date().toISOString(),
+    year, quarter, employee_id: employeeId, hours, updated_at: new Date().toISOString(),
   }, { onConflict: "year,quarter,employee_id" });
-  if (error) console.error("saveGrowthBonusDaysOverride error:", error);
+  if (error) console.error("saveGrowthBonusHoursOverride error:", error);
 }
 
-export async function clearGrowthBonusDaysOverride(year: number, quarter: number, employeeId: number): Promise<void> {
+export async function clearGrowthBonusHoursOverride(year: number, quarter: number, employeeId: number): Promise<void> {
   const { error } = await supabase.from("growth_bonus_entries").delete().eq("year", year).eq("quarter", quarter).eq("employee_id", employeeId);
-  if (error) console.error("clearGrowthBonusDaysOverride error:", error);
+  if (error) console.error("clearGrowthBonusHoursOverride error:", error);
 }
 
 export async function loadGrowthBonusPayments(employeeId?: number): Promise<GrowthBonusPayment[]> {
