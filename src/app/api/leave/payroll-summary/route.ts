@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { getPayPeriods, getLookaheadWindow } from "@/lib/payPeriods";
 
 const REASON_LABELS: Record<string, string> = {
-  sick: "Sick Leave", pto: "PTO / Vacation", leave: "Personal Leave", other: "Other",
+  sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other",
 };
 const RECIPIENTS = ["dr.nanjapa@mydeccandental.com", "ketki@mydeccandental.com", "dr.coulter@mydeccandental.com"];
 
