@@ -11,7 +11,7 @@ import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
 const REASON_LABELS: Record<LeaveReason, string> = {
-  sick: "Sick Leave", pto: "PTO / Vacation", leave: "Personal Leave", other: "Other",
+  sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other",
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -134,7 +134,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
     if (isSubmitting) return;
     setError("");
     if (!form.employeeId) { setError("Please select your name."); return; }
-    if (!form.employeeEmail) { setError("Please enter your email."); return; }
+    if (!form.employeeEmail) { setError("This person doesn't have an email on file — add one on the Staff page before submitting."); return; }
     if (!form.startDate || !form.endDate) { setError("Please select start and end dates."); return; }
     if (form.endDate < form.startDate) { setError("End date must be after start date."); return; }
 
@@ -347,17 +347,15 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                       {identity.employeeName}
                     </div>
                   ) : (
-                    <select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))}
+                    <select value={form.employeeId} onChange={(e) => {
+                      const emp = staff.find((s) => String(s.id) === e.target.value);
+                      setForm((f) => ({ ...f, employeeId: e.target.value, employeeEmail: emp?.email ?? "" }));
+                    }}
                       className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }}>
                       <option value="">Select staff member...</option>
                       {staff.filter((e) => !e.archived).map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}
                     </select>
                   )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-1">Your Email</label>
-                  <input type="email" value={form.employeeEmail} onChange={(e) => setForm((f) => ({ ...f, employeeEmail: e.target.value }))}
-                    placeholder="your.email@mydeccandental.com" className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
