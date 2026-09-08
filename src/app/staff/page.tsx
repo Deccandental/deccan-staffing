@@ -42,6 +42,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   pvBonusEligible: false,
   netProductionBonusPercent: 30,
   hoBonusEligible: false,
+  employmentType: "full_time",
   defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
 };
 
@@ -102,6 +103,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       pvBonusEligible: emp.pvBonusEligible ?? false,
       netProductionBonusPercent: emp.netProductionBonusPercent ?? 30,
       hoBonusEligible: emp.hoBonusEligible ?? false,
+      employmentType: emp.employmentType ?? "full_time",
       defaultSchedule: { ...emp.defaultSchedule }
     });
   }
@@ -331,6 +333,22 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                     <input type="date" value={form.hireDate ?? ""} onChange={(e) => setForm((f) => ({ ...f, hireDate: e.target.value }))}
                       className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" />
                     <p className="text-xs text-gray-400 mt-1">Used for the Growth Bonus's 5-month new-hire grace period.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-500 mb-1">Employment Type</label>
+                    <div className="flex rounded-xl border border-gray-200 overflow-hidden w-fit">
+                      <button type="button" onClick={() => setForm((f) => ({ ...f, employmentType: "full_time" }))}
+                        className="px-3 py-1.5 text-sm font-medium transition"
+                        style={(form.employmentType ?? "full_time") === "full_time" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                        Full-Time
+                      </button>
+                      <button type="button" onClick={() => setForm((f) => ({ ...f, employmentType: "part_time" }))}
+                        className="px-3 py-1.5 text-sm font-medium transition"
+                        style={form.employmentType === "part_time" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                        Part-Time
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">Part-time staff are excluded from full-time-only timelines like PTO eligibility.</p>
                   </div>
                   <div>
                     <label className="flex items-center gap-2 cursor-pointer mb-1">
