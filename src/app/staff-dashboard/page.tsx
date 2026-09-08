@@ -355,7 +355,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             {selectedEmployee?.hoBonusEligible && (
               <div className="lg:col-span-2 rounded-2xl bg-white shadow overflow-hidden">
                 <div className="p-5 pb-3">
-                  <h2 className="font-bold text-slate-700">💰 {bonusYear} Bonus — 40% of Production, paid the following month</h2>
+                  <h2 className="font-bold text-slate-700">💰 {bonusYear} Compensation — 40% of Production, paid the following month</h2>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm border-collapse min-w-[600px]">
