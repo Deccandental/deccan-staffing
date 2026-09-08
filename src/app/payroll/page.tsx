@@ -1028,7 +1028,7 @@ function HoBonusPanel() {
   const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
 
   if (eligibleStaff.length === 0 && !loading) {
-    return <p className="text-sm text-slate-400">No one is marked "Eligible for Dr. Ho-style Bonus" yet — set that on the Staff page first.</p>;
+    return <p className="text-sm text-slate-400">No one is marked "Eligible for Dr. Ho-style Compensation" yet — set that on the Staff page first.</p>;
   }
 
   return (
