@@ -73,6 +73,9 @@ export interface Employee {
   // Separate opt-in for a Dr. Ho-style bonus (a flat % of production, paid
   // the following month, tracked monthly rather than quarterly).
   hoBonusEligible?: boolean;
+  // Defaults to full-time when unset. Used for things like PTO eligibility
+  // timelines that only apply to full-time staff.
+  employmentType?: "full_time" | "part_time";
   // When true, this person is inactive — hidden from every "pick who's
   // working / assign this to" list (Schedule Builder, swap menus, Events
   // invite list, PIN logins, etc.) but their existing records (leave
