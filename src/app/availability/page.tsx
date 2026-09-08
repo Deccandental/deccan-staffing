@@ -189,10 +189,10 @@ function AvailabilityPageBody() {
                               const schedKey = DAY_MAP[d.weekday];
                               const worksDefault = schedKey ? emp.defaultSchedule[schedKey] : false;
                               const isTuesdayOpen = d.isTuesday && d.isOpenTuesday;
-                              // Any Tuesday (open or closed) is freely markable for everyone —
-                              // matches the existing precedent that open Tuesdays already ignore
-                              // each person's regular default schedule.
-                              const shouldShow = worksDefault || d.isTuesday;
+                              // Only a genuine Open Tuesday bypasses the normal schedule check for
+                              // everyone (matches the Schedule Builder's own engine) — a regular
+                              // closed Tuesday should still respect each person's real availability.
+                              const shouldShow = worksDefault || isTuesdayOpen;
                               const override = getOverride(emp.id, d.date);
                               const reasonStyle = REASONS.find((r) => r.key === override?.reason) ?? REASONS[1];
                               const remoteByDefault = !override && !!(schedKey && emp.remoteDays?.[schedKey]);
