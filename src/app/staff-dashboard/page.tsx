@@ -15,8 +15,8 @@ import { UpcomingShift, loadUpcomingShiftsForEmployee } from "@/lib/staffSchedul
 import { PayrollEntry, loadPayrollEntriesInRange } from "@/lib/payrollStore";
 import {
   getCurrentQuarter, computeQuarterCalc, loadGrowthBonusQuarter, loadGrowthBonusPayments,
-  isEligibleForQuarter, computeDaysWorkedInQuarter, splitBonusPool, getQuarterDateRange,
-  loadGrowthBonusDaysOverrides, GrowthBonusQuarter,
+  isEligibleForQuarter, computeHoursWorkedInQuarter, hoursToDays, splitBonusPool, getQuarterDateRange,
+  loadGrowthBonusHoursOverrides, GrowthBonusQuarter,
 } from "@/lib/growthBonus";
 import { PvBonusQuarter, loadPvBonusYear } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusPayoutYear } from "@/lib/hoBonus";
@@ -111,8 +111,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       loadDistinctTitles(),
       loadGrowthBonusQuarter(bonusYear, 1), loadGrowthBonusQuarter(bonusYear, 2),
       loadGrowthBonusQuarter(bonusYear, 3), loadGrowthBonusQuarter(bonusYear, 4),
-      loadGrowthBonusDaysOverrides(bonusYear, 1), loadGrowthBonusDaysOverrides(bonusYear, 2),
-      loadGrowthBonusDaysOverrides(bonusYear, 3), loadGrowthBonusDaysOverrides(bonusYear, 4),
+      loadGrowthBonusHoursOverrides(bonusYear, 1), loadGrowthBonusHoursOverrides(bonusYear, 2),
+      loadGrowthBonusHoursOverrides(bonusYear, 3), loadGrowthBonusHoursOverrides(bonusYear, 4),
       loadPayrollEntriesInRange(yearStart, yearEnd),
       loadGrowthBonusPayments(selectedId),
       loadPvBonusYear(selectedId, bonusYear),
@@ -157,10 +157,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     const { start, end } = getQuarterDateRange(bonusYear, q);
     const eligible = staff.filter((e) => isEligibleForQuarter(e, end));
     const overridesForQ = yearDaysOverrides[q] ?? {};
-    const rows = eligible.map((e) => ({
-      employee: e,
-      days: overridesForQ[e.id] ?? computeDaysWorkedInQuarter(e.id, start, end, yearPayrollEntries),
-    }));
+    const rows = eligible.map((e) => {
+      const hours = overridesForQ[e.id] ?? computeHoursWorkedInQuarter(e.id, start, end, yearPayrollEntries);
+      return { employee: e, days: hoursToDays(hours) };
+    });
     const split = calc.eligible ? splitBonusPool(calc.bonusPool, rows) : [];
     const mine = split.find((r) => r.employee.id === selectedEmployee.id);
     return { calc, myBonus: mine?.bonus ?? 0 };
