@@ -100,6 +100,20 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
     return "";
   }, [selectedEmployee, form.reason, form.paidHours]);
 
+  const ptoEligibilityWarning = useMemo(() => {
+    if (!selectedEmployee || form.reason !== "pto" || !selectedEmployee.hireDate) return "";
+    const isFullTime = (selectedEmployee.employmentType ?? "full_time") === "full_time";
+    if (!isFullTime) return "";
+    const [y, m, d] = selectedEmployee.hireDate.split("-").map(Number);
+    const eligDate = new Date(y, m - 1 + 4, d);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const daysLeft = Math.round((eligDate.getTime() - today.getTime()) / 86400000);
+    if (daysLeft <= 0) return "";
+    const dateLabel = eligDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+    return `${selectedEmployee.name} isn't yet eligible for PTO — eligibility begins in ${daysLeft} day${daysLeft === 1 ? "" : "s"} (${dateLabel}). This request may not be approved.`;
+  }, [selectedEmployee, form.reason]);
+
   const conflictWarning = useMemo(() => {
     if (!selectedEmployee || !form.startDate || !form.endDate) return "";
     const overlapping = requests.filter((r) => {
@@ -418,6 +432,9 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                     )}
                     {balanceWarning && <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700 mt-2">⚠️ {balanceWarning}</div>}
                   </div>
+                )}
+                {ptoEligibilityWarning && (
+                  <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">🕐 {ptoEligibilityWarning}</div>
                 )}
                 {conflictWarning && (
                   <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">⚠️ {conflictWarning}</div>
