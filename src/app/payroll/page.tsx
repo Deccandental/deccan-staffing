@@ -17,10 +17,10 @@ import { PayPeriod, getPayPeriodForDate, stepPayPeriod } from "@/lib/payPeriods"
 import { getScheduledEmployeeIdsInRange } from "@/lib/staffSchedule";
 import {
   GrowthBonusQuarter, GrowthBonusPayment, loadGrowthBonusQuarter, saveGrowthBonusQuarter,
-  computeQuarterCalc, isEligibleForQuarter, computeDaysWorkedInQuarter, splitBonusPool,
+  computeQuarterCalc, isEligibleForQuarter, computeHoursWorkedInQuarter, hoursToDays, splitBonusPool,
   getQuarterDateRange, getCurrentQuarter, loadGrowthBonusPayments, addGrowthBonusPayment,
   updateGrowthBonusPayment, deleteGrowthBonusPayment,
-  loadGrowthBonusDaysOverrides, saveGrowthBonusDaysOverride,
+  loadGrowthBonusHoursOverrides, saveGrowthBonusHoursOverride,
 } from "@/lib/growthBonus";
 import { PvBonusQuarter, loadPvBonusYear, savePvBonusQuarter } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth } from "@/lib/hoBonus";
@@ -552,7 +552,7 @@ function GrowthBonusPanel() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [yearQuarters, setYearQuarters] = useState<Record<number, GrowthBonusQuarter>>({});
   const [yearEntries, setYearEntries] = useState<PayrollEntry[]>([]);
-  const [daysOverrides, setDaysOverrides] = useState<Record<number, Record<number, number>>>({});
+  const [hoursOverrides, setHoursOverrides] = useState<Record<number, Record<number, number>>>({});
   const [payments, setPayments] = useState<GrowthBonusPayment[]>([]);
   const [form, setForm] = useState({ bamThreshold: 378000, netProductionCurrent: 0, netProductionPriorYear: 0 });
   const [loading, setLoading] = useState(true);
@@ -580,13 +580,13 @@ function GrowthBonusPanel() {
       loadGrowthBonusQuarter(year, 1), loadGrowthBonusQuarter(year, 2), loadGrowthBonusQuarter(year, 3), loadGrowthBonusQuarter(year, 4),
       loadPayrollEntriesInRange(yearStart, yearEnd),
       loadGrowthBonusPayments(),
-      loadGrowthBonusDaysOverrides(year, 1), loadGrowthBonusDaysOverrides(year, 2),
-      loadGrowthBonusDaysOverrides(year, 3), loadGrowthBonusDaysOverrides(year, 4),
+      loadGrowthBonusHoursOverrides(year, 1), loadGrowthBonusHoursOverrides(year, 2),
+      loadGrowthBonusHoursOverrides(year, 3), loadGrowthBonusHoursOverrides(year, 4),
     ]);
     setStaff(s);
     setYearQuarters({ 1: q1, 2: q2, 3: q3, 4: q4 });
     setYearEntries(entries);
-    setDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
+    setHoursOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
     setPayments(pays.filter((p) => p.date >= yearStart && p.date <= yearEnd));
     setLoading(false);
   }
@@ -600,16 +600,17 @@ function GrowthBonusPanel() {
   }
 
   function splitForQuarter(q: 1 | 2 | 3 | 4, qData: GrowthBonusQuarter | undefined) {
-    if (!qData) return { calc: null as ReturnType<typeof computeQuarterCalc> | null, split: [] as ReturnType<typeof splitBonusPool> };
+    if (!qData) return { calc: null as ReturnType<typeof computeQuarterCalc> | null, split: [] as (ReturnType<typeof splitBonusPool>[number] & { hours: number })[] };
     const calc = computeQuarterCalc(qData);
     const { start, end } = getQuarterDateRange(year, q);
     const eligible = staff.filter((e) => isEligibleForQuarter(e, end));
-    const overridesForQ = daysOverrides[q] ?? {};
-    const rows = eligible.map((e) => ({
-      employee: e,
-      days: overridesForQ[e.id] ?? computeDaysWorkedInQuarter(e.id, start, end, yearEntries),
-    }));
-    const split = calc.eligible ? splitBonusPool(calc.bonusPool, rows) : rows.map((r) => ({ employee: r.employee, days: r.days, multiplier: r.employee.growthBonusMultiplier ?? 1, points: 0, bonus: 0 }));
+    const overridesForQ = hoursOverrides[q] ?? {};
+    const rows = eligible.map((e) => {
+      const hours = overridesForQ[e.id] ?? computeHoursWorkedInQuarter(e.id, start, end, yearEntries);
+      return { employee: e, hours, days: hoursToDays(hours) };
+    });
+    const splitRaw = calc.eligible ? splitBonusPool(calc.bonusPool, rows) : rows.map((r) => ({ employee: r.employee, days: r.days, multiplier: r.employee.growthBonusMultiplier ?? 1, points: 0, bonus: 0 }));
+    const split = splitRaw.map((r, i) => ({ ...r, hours: rows[i].hours }));
     return { calc, split };
   }
 
@@ -618,8 +619,8 @@ function GrowthBonusPanel() {
   const progressPct = requiredProduction > 0 ? Math.min(100, Math.round((form.netProductionCurrent / requiredProduction) * 100)) : 0;
   const progressColor = calc?.eligible ? "#10b981" : progressPct >= 70 ? "#f59e0b" : progressPct >= 40 ? "#fb923c" : "#f87171";
 
-  async function handleDaysEdit(employeeId: number, days: number) {
-    await saveGrowthBonusDaysOverride(year, quarter, employeeId, days);
+  async function handleHoursEdit(employeeId: number, hours: number) {
+    await saveGrowthBonusHoursOverride(year, quarter, employeeId, hours);
     await refresh();
   }
 
@@ -731,11 +732,12 @@ function GrowthBonusPanel() {
 
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
         <h2 className="px-4 pt-3 font-bold text-slate-700 text-sm">{QUARTER_LABELS[quarter]} {year} — Bonus Split</h2>
-        <p className="px-4 pt-1 text-xs text-slate-400">"Days" auto-fills from Payroll hours once that's in use for a period — you can also type a number directly (e.g. for quarters before Payroll was tracked).</p>
+        <p className="px-4 pt-1 text-xs text-slate-400">"Hours" auto-fills from Payroll once that's in use for a period — you can also type a number directly (e.g. for quarters before Payroll was tracked). Days are calculated from hours ÷ 8.</p>
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
               <th className="px-3 py-2 font-medium">Name</th>
+              <th className="px-2 py-2 font-medium">Hours</th>
               <th className="px-2 py-2 font-medium">Days</th>
               <th className="px-2 py-2 font-medium">Mult.</th>
               <th className="px-2 py-2 font-medium">Points</th>
@@ -748,7 +750,7 @@ function GrowthBonusPanel() {
           </thead>
           <tbody>
             {split.length === 0 ? (
-              <tr><td colSpan={9} className="px-3 py-4 text-slate-400 text-sm">No one is eligible yet for this quarter.</td></tr>
+              <tr><td colSpan={10} className="px-3 py-4 text-slate-400 text-sm">No one is eligible yet for this quarter.</td></tr>
             ) : split.map((row) => {
               const earned = ytdEarned[row.employee.id] ?? 0;
               const paid = ytdPaid[row.employee.id] ?? 0;
@@ -757,9 +759,10 @@ function GrowthBonusPanel() {
                 <tr key={row.employee.id} className="border-b border-slate-50 last:border-0">
                   <td className="px-3 py-2 font-medium text-slate-700">{row.employee.name}</td>
                   <td className="px-2 py-2">
-                    <input type="number" onFocus={(e) => e.target.select()} defaultValue={row.days} onBlur={(e) => handleDaysEdit(row.employee.id, Number(e.target.value))}
-                      className="w-16 rounded border border-slate-200 px-1.5 py-0.5 text-xs focus:outline-none" />
+                    <input type="number" onFocus={(e) => e.target.select()} defaultValue={row.hours} onBlur={(e) => handleHoursEdit(row.employee.id, Number(e.target.value))}
+                      className="w-20 rounded border border-slate-200 px-1.5 py-0.5 text-xs focus:outline-none" />
                   </td>
+                  <td className="px-2 py-2 text-slate-500">{row.days}</td>
                   <td className="px-2 py-2">{row.multiplier}</td>
                   <td className="px-2 py-2">{row.points}</td>
                   <td className="px-2 py-2 font-semibold">${formatMoney(row.bonus)}</td>
