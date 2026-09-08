@@ -11,7 +11,7 @@ import { adjustLeaveBalance } from "@/lib/staffStore";
 import { supabase } from "@/lib/supabase";
 
 const REASON_LABELS: Record<LeaveReason, string> = {
-  sick: "Sick Leave", pto: "PTO / Vacation", leave: "Personal Leave", other: "Other",
+  sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other",
 };
 
 const STATUS_STYLES: Record<string, string> = {
