@@ -361,7 +361,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                     )}
                     <label className="flex items-center gap-2 cursor-pointer mt-3">
                       <input type="checkbox" checked={form.hoBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, hoBonusEligible: e.target.checked }))} />
-                      <span className="text-sm font-medium text-gray-700">Eligible for Dr. Ho-style Bonus (monthly, paid the following month)</span>
+                      <span className="text-sm font-medium text-gray-700">Eligible for Dr. Ho-style Compensation (monthly, paid the following month)</span>
                     </label>
                   </div>
                 </div>
