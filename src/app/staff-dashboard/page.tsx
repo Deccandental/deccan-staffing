@@ -156,6 +156,11 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   // the same logic used in the Payroll Dashboard's Growth Bonus tab.
   const isHygienist = selectedEmployee && (selectedEmployee.role === "Hygienist" || selectedEmployee.skills.includes("Hygienist"));
 
+  const isFullTime = (selectedEmployee?.employmentType ?? "full_time") === "full_time";
+  const ptoEligibilityDate = selectedEmployee?.hireDate ? addMonths(selectedEmployee.hireDate, 4) : null;
+  const ptoDaysLeft = ptoEligibilityDate ? daysUntil(ptoEligibilityDate) : null;
+  const showPtoCountdown = isFullTime && ptoDaysLeft != null && ptoDaysLeft > 0;
+
   const bonusEligibilityDate = selectedEmployee?.hireDate ? addMonths(selectedEmployee.hireDate, 5) : null;
   const bonusDaysLeft = bonusEligibilityDate ? daysUntil(bonusEligibilityDate) : null;
   const showBonusCountdown = !!selectedEmployee?.growthBonusEligible && bonusDaysLeft != null && bonusDaysLeft > 0;
@@ -304,6 +309,15 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
+            {showPtoCountdown && (
+              <div className="lg:col-span-2 rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
+                <h2 className="font-bold text-slate-700">🕐 PTO Eligibility Countdown</h2>
+                <p className="text-sm text-slate-600 mt-1">
+                  You'll become eligible for PTO in <strong>{ptoDaysLeft} day{ptoDaysLeft === 1 ? "" : "s"}</strong> (on {new Date(ptoEligibilityDate! + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}).
+                </p>
+              </div>
+            )}
+
             {selectedEmployee?.growthBonusEligible && showBonusCountdown && (
               <div className="lg:col-span-2 rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #e0e7ff, #c7d2fe)" }}>
                 <h2 className="font-bold text-slate-700">⏳ Bonus Eligibility Countdown</h2>
@@ -422,7 +436,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 <p className="text-sm text-slate-400">No leave requests on file.</p>
               ) : (
                 <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {leaveRequests.map((req) => (
+                  {[...leaveRequests].sort((a, b) => a.startDate.localeCompare(b.startDate)).map((req) => (
                     <div key={req.id} className="rounded-xl bg-slate-50 px-3 py-2">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium text-slate-700">
