@@ -25,7 +25,7 @@ import { formatMoney } from "@/lib/format";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
 const REASON_LABELS: Record<string, string> = {
-  sick: "Sick Leave", pto: "PTO / Vacation", leave: "Personal Leave", other: "Other",
+  sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other",
 };
 
 const LEAVE_STATUS_STYLES: Record<string, string> = {
