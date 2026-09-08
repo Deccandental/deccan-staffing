@@ -50,6 +50,15 @@ function daysUntil(dateStr: string): number {
   return Math.round((target - today.getTime()) / 86400000);
 }
 
+function addMonths(dateStr: string, months: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(y, m - 1 + months, d);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function certBadge(cert: Certification): { label: string; className: string } {
   if (!cert.expirationDate) return { label: "No expiration", className: "bg-slate-100 text-slate-500" };
   const days = daysUntil(cert.expirationDate);
@@ -146,6 +155,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   // splitting that quarter's pool across every eligible employee — mirrors
   // the same logic used in the Payroll Dashboard's Growth Bonus tab.
   const isHygienist = selectedEmployee && (selectedEmployee.role === "Hygienist" || selectedEmployee.skills.includes("Hygienist"));
+
+  const bonusEligibilityDate = selectedEmployee?.hireDate ? addMonths(selectedEmployee.hireDate, 5) : null;
+  const bonusDaysLeft = bonusEligibilityDate ? daysUntil(bonusEligibilityDate) : null;
+  const showBonusCountdown = !!selectedEmployee?.growthBonusEligible && bonusDaysLeft != null && bonusDaysLeft > 0;
   const hygieneEarned = hygieneEntries.reduce((sum, e) => sum + e.patientCount * HYGIENE_BONUS_PER_PATIENT, 0);
   const hygienePaid = hygieneEntries.reduce((sum, e) => sum + e.amountPaid, 0);
   const hygieneBalance = hygieneEarned - hygienePaid;
@@ -291,7 +304,16 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
-            {selectedEmployee?.growthBonusEligible && (
+            {selectedEmployee?.growthBonusEligible && showBonusCountdown && (
+              <div className="lg:col-span-2 rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #e0e7ff, #c7d2fe)" }}>
+                <h2 className="font-bold text-slate-700">⏳ Bonus Eligibility Countdown</h2>
+                <p className="text-sm text-slate-600 mt-1">
+                  You'll become eligible for the Growth Bonus in <strong>{bonusDaysLeft} day{bonusDaysLeft === 1 ? "" : "s"}</strong> (on {new Date(bonusEligibilityDate! + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}).
+                </p>
+              </div>
+            )}
+
+            {selectedEmployee?.growthBonusEligible && !showBonusCountdown && (
               <div className="lg:col-span-2 rounded-2xl p-5 shadow" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)" }}>
                 <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                   <h2 className="font-bold text-slate-700">
