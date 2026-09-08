@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
       ? new Date(request.startDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })
       : `${new Date(request.startDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })} – ${new Date(request.endDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`;
 
-    const reasonLabels: Record<string, string> = { sick: "Sick Leave", pto: "PTO / Vacation", leave: "Personal Leave", other: "Other" };
+    const reasonLabels: Record<string, string> = { sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other" };
 
     if (type === "submitted") {
       // Notify managers
