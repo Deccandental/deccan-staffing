@@ -3,6 +3,7 @@ import { DailyAssignments, DentistAssignment } from "@/types/assignment";
 import { getWeekday } from "./dateUtils";
 import { StaffOverride } from "./overrides";
 import { DentistPrefs } from "./staffStore";
+import { LeaveRequest } from "@/types/leave";
 
 export interface AssignmentWarning {
   severity: "warning" | "error";
@@ -23,14 +24,22 @@ export function buildDailyAssignments(
   frontDeskRequired: number = 2,
   hygienistsRequired: number = 1,
   assistantCounts: Record<number, number> = {},
-  floaterAssistantId: number | null = null
+  floaterAssistantId: number | null = null,
+  leaveRequests: LeaveRequest[] = []
 ): DailyAssignmentsResult {
   const weekday = date ? getWeekday(date) : null;
   const warnings: AssignmentWarning[] = [];
 
   function isUnavailable(emp: Employee): boolean {
     if (!date) return false;
-    return overrides.some((o) => o.employeeId === emp.id && o.date === date && !o.halfDay && o.reason !== "remote");
+    if (overrides.some((o) => o.employeeId === emp.id && o.date === date && !o.halfDay && o.reason !== "remote")) return true;
+    // Full-day approved leave blocks scheduling too — a manual override isn't
+    // the only way someone ends up out for the day. Half-day leave doesn't
+    // block (mirrors how a half-day override doesn't block above).
+    return leaveRequests.some((r) =>
+      r.employeeId === emp.id && r.status === "approved" && !r.isPartialDay &&
+      r.startDate <= date && r.endDate >= date
+    );
   }
 
   function isAvailable(emp: Employee): boolean {
