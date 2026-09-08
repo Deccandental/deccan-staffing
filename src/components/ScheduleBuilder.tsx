@@ -10,6 +10,8 @@ import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { loadSchedule, saveDaySchedule, MonthSchedule, AssistantOverrides } from "@/lib/scheduleStore";
 import { resolveDentistAssistants, getDentistSlotOverrides } from "@/lib/assistantSlots";
 import { loadHolidays, Holiday } from "@/lib/holidays";
+import { loadLeaveRequests } from "@/lib/leaveStore";
+import { LeaveRequest } from "@/types/leave";
 import { Employee } from "@/types/employee";
 import { TempAssignment, getTempAssignmentsForMonth } from "@/lib/tempAssignments";
 import { TempStaff } from "@/app/temps/page";
@@ -43,6 +45,7 @@ export default function ScheduleBuilder() {
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -57,8 +60,8 @@ export default function ScheduleBuilder() {
 
   useEffect(() => {
     async function load() {
-      const [s, o, p, ot, h, t] = await Promise.all([
-        loadStaff(), getOverrides(), loadPrefs(), getOpenTuesdays(), loadHolidays(), loadTemps()
+      const [s, o, p, ot, h, t, lr] = await Promise.all([
+        loadStaff(), getOverrides(), loadPrefs(), getOpenTuesdays(), loadHolidays(), loadTemps(), loadLeaveRequests()
       ]);
       setStaff(s);
       setOverrides(o);
@@ -66,17 +69,19 @@ export default function ScheduleBuilder() {
       setOpenTuesdays(ot);
       setHolidays(h);
       setTemps(t);
+      setLeaveRequests(lr);
       setStaffLoaded(true);
     }
     load();
 
     async function handleVisibility() {
       if (document.visibilityState === "visible") {
-        const [o, ot, h, t] = await Promise.all([getOverrides(), getOpenTuesdays(), loadHolidays(), loadTemps()]);
+        const [o, ot, h, t, lr] = await Promise.all([getOverrides(), getOpenTuesdays(), loadHolidays(), loadTemps(), loadLeaveRequests()]);
         setOverrides(o);
         setOpenTuesdays(ot);
         setHolidays(h);
         setTemps(t);
+        setLeaveRequests(lr);
       }
     }
     document.addEventListener("visibilitychange", handleVisibility);
@@ -284,7 +289,7 @@ export default function ScheduleBuilder() {
         daySched.frontDeskRequired ?? 2,
         daySched.hygienistsRequired ?? 1,
         daySched.assistantCounts ?? {},
-        daySched.floaterAssistantId ?? null
+        daySched.floaterAssistantId ?? null, leaveRequests
       );
 
       // A warning here is only "real" if nothing -- a manual override or a
@@ -324,7 +329,7 @@ export default function ScheduleBuilder() {
       statuses[day.date] = dentistsStillShort || hygienistsShort || frontDeskShort || hasOtherErrorWarning ? "warning" : "complete";
     }
     return statuses;
-  }, [schedule, staff, openDays, prefs, overrides, monthTempAssignments]);
+  }, [schedule, staff, openDays, prefs, overrides, monthTempAssignments, leaveRequests]);
 
   const completedDays = Object.values(dayStatuses).filter((s) => s === "complete").length;
   const warningDays = Object.values(dayStatuses).filter((s) => s === "warning").length;
@@ -342,7 +347,7 @@ export default function ScheduleBuilder() {
         daySched.frontDeskRequired ?? 2,
         daySched.hygienistsRequired ?? 1,
         daySched.assistantCounts ?? {},
-        daySched.floaterAssistantId ?? null
+        daySched.floaterAssistantId ?? null, leaveRequests
       );
 
       const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);
@@ -387,7 +392,7 @@ export default function ScheduleBuilder() {
       };
     }
     return result;
-  }, [openDays, schedule, staff, prefs, overrides, monthTempAssignments, temps]);
+  }, [openDays, schedule, staff, prefs, overrides, monthTempAssignments, temps, leaveRequests]);
 
   const allDentists = staff.filter((e) => e.role === "Dentist" && !e.archived).map((e) => e.name);
   const workingDentists = selectedDate && schedule[selectedDate] ? schedule[selectedDate].dentists : [];
@@ -406,8 +411,8 @@ export default function ScheduleBuilder() {
     const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
     const ac = schedule[selectedDate]?.assistantCounts ?? {};
     const fl = schedule[selectedDate]?.floaterAssistantId ?? null;
-    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday, fdr, hr, ac, fl);
-  }, [staff, workingDentists, selectedDate, schedule, prefs, overrides, openDays]);
+    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday, fdr, hr, ac, fl, leaveRequests);
+  }, [staff, workingDentists, selectedDate, schedule, prefs, overrides, openDays, leaveRequests]);
 
   function prevMonth() {
     if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1);
@@ -615,7 +620,7 @@ export default function ScheduleBuilder() {
                     daySched.frontDeskRequired ?? 2,
                     daySched.hygienistsRequired ?? 1,
                     daySched.assistantCounts ?? {},
-                    daySched.floaterAssistantId ?? null
+                    daySched.floaterAssistantId ?? null, leaveRequests
                   ) : null;
 
                   const ao = daySched?.assistantOverrides ?? {};
