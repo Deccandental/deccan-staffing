@@ -295,9 +295,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             <p className="text-slate-400">Loading…</p>
           </div>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-2 max-w-5xl">
+          <div className="grid gap-4 lg:grid-cols-2 max-w-5xl">
             {selectedEmployee && (
-              <div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow flex items-center gap-3">
+              <div className="lg:col-span-2 rounded-2xl bg-white p-4 shadow flex items-center gap-3">
                 <div className="h-12 w-12 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
                   style={{ backgroundColor: selectedEmployee.color }}>
                   {selectedEmployee.name.charAt(0)}
@@ -310,25 +310,27 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {showPtoCountdown && (
-              <div className="lg:col-span-2 rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
-                <h2 className="font-bold text-slate-700">🕐 PTO Eligibility Countdown</h2>
-                <p className="text-sm text-slate-600 mt-1">
-                  You'll become eligible for PTO in <strong>{ptoDaysLeft} day{ptoDaysLeft === 1 ? "" : "s"}</strong> (on {new Date(ptoEligibilityDate! + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}).
+              <div className="rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
+                <span className="text-lg">🕐</span>
+                <p className="text-xs text-slate-700 leading-snug">
+                  <strong>PTO eligible in {ptoDaysLeft}d</strong><br />
+                  {new Date(ptoEligibilityDate! + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </p>
               </div>
             )}
 
             {selectedEmployee?.growthBonusEligible && showBonusCountdown && (
-              <div className="lg:col-span-2 rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #e0e7ff, #c7d2fe)" }}>
-                <h2 className="font-bold text-slate-700">⏳ Bonus Eligibility Countdown</h2>
-                <p className="text-sm text-slate-600 mt-1">
-                  You'll become eligible for the Growth Bonus in <strong>{bonusDaysLeft} day{bonusDaysLeft === 1 ? "" : "s"}</strong> (on {new Date(bonusEligibilityDate! + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}).
+              <div className="rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #e0e7ff, #c7d2fe)" }}>
+                <span className="text-lg">⏳</span>
+                <p className="text-xs text-slate-700 leading-snug">
+                  <strong>Bonus eligible in {bonusDaysLeft}d</strong><br />
+                  {new Date(bonusEligibilityDate! + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </p>
               </div>
             )}
 
             {selectedEmployee?.growthBonusEligible && !showBonusCountdown && (
-              <div className="lg:col-span-2 rounded-2xl p-5 shadow" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)" }}>
+              <div className="lg:col-span-2 rounded-2xl p-4 shadow" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)" }}>
                 <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                   <h2 className="font-bold text-slate-700">
                     {bonusUnlocked ? "🎉 " : "🚀 "}{QUARTER_LABELS[currentQuarter]} {bonusYear} Bonus Progress{bonusUnlocked ? " — unlocked!" : ""}
@@ -340,7 +342,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 </div>
                 <p className="text-xs text-slate-500 mt-1">{bonusProgressPct}% of the way to this quarter's production target{bonusUnlocked ? " — already there!" : ""}</p>
 
-                <div className="mt-3 pt-3 border-t border-white/60 space-y-1.5">
+                <div className="mt-2 pt-2 border-t border-white/60 space-y-1">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{bonusYear} so far</p>
                   {([1, 2, 3, 4] as const).filter((q) => q <= currentQuarter).map((q) => {
                     const result = bonusForQuarter(q);
@@ -361,8 +363,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {selectedEmployee?.pvBonusEligible && (
-              <div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow">
-                <h2 className="font-bold text-slate-700 mb-3">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
+              <div className="lg:col-span-2 rounded-2xl bg-white p-4 shadow">
+                <h2 className="font-bold text-slate-700 mb-2">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
                 <div className="space-y-1.5">
                   {pvQuarters.map((q) => {
                     const percent = selectedEmployee.netProductionBonusPercent ?? 30;
@@ -389,8 +391,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {isHygienist && (
-              <div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow">
-                <h2 className="font-bold text-slate-700 mb-3">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
+              <div className="lg:col-span-2 rounded-2xl bg-white p-4 shadow">
+                <h2 className="font-bold text-slate-700 mb-2">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
                 <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
                   <span className="text-slate-500">Earned ${formatMoney(hygieneEarned)} · Paid ${formatMoney(hygienePaid)}</span>
                   {hygieneBalance > 0 ? (
@@ -404,12 +406,12 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
-            <div className="rounded-2xl bg-white p-5 shadow">
-              <h2 className="font-bold text-slate-700 mb-3">📅 Upcoming Shifts (next 3 weeks)</h2>
+            <div className="rounded-2xl bg-white p-4 shadow">
+              <h2 className="font-bold text-slate-700 mb-2">📅 Upcoming Shifts (next 3 weeks)</h2>
               {shifts.length === 0 ? (
                 <p className="text-sm text-slate-400">No upcoming shifts scheduled.</p>
               ) : (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
                   {shifts.map((s, i) => (
                     <div key={i} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm">
                       <div>
@@ -425,7 +427,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
-            <div className="rounded-2xl bg-white p-5 shadow">
+            <div className="rounded-2xl bg-white p-4 shadow">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-bold text-slate-700">📝 Leave Requests</h2>
                 <a href="/leave" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
@@ -435,7 +437,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               {leaveRequests.length === 0 ? (
                 <p className="text-sm text-slate-400">No leave requests on file.</p>
               ) : (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
                   {[...leaveRequests].sort((a, b) => a.startDate.localeCompare(b.startDate)).map((req) => (
                     <div key={req.id} className="rounded-xl bg-slate-50 px-3 py-2">
                       <div className="flex items-center justify-between">
@@ -454,12 +456,12 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
-            <div className="rounded-2xl bg-white p-5 shadow">
-              <h2 className="font-bold text-slate-700 mb-3">📌 Events</h2>
+            <div className="rounded-2xl bg-white p-4 shadow">
+              <h2 className="font-bold text-slate-700 mb-2">📌 Events</h2>
               {events.length === 0 ? (
                 <p className="text-sm text-slate-400">No upcoming events.</p>
               ) : (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
                   {events.map((ev) => (
                     <div key={ev.id} className="rounded-xl px-3 py-2" style={{ background: ev.mandatory ? "#fef2f2" : "#faf5ff" }}>
                       <div className="flex items-center justify-between gap-2">
@@ -476,7 +478,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
-            <div className="rounded-2xl bg-white p-5 shadow">
+            <div className="rounded-2xl bg-white p-4 shadow">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-bold text-slate-700">📄 Certifications</h2>
                 {!showCertForm && (
@@ -558,7 +560,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
             {selectedEmployee?.hoBonusEligible && (
               <div className="lg:col-span-2 rounded-2xl bg-white shadow overflow-hidden">
-                <div className="p-5 pb-3">
+                <div className="p-4 pb-2">
                   <h2 className="font-bold text-slate-700">💰 {bonusYear} Compensation — 40% of Production, paid the following month</h2>
                 </div>
                 <div className="overflow-x-auto">
