@@ -313,7 +313,10 @@ function CashFlowPageBody() {
                                 <button onClick={() => setMarkPayingFor(null)} className="text-xs text-slate-400">✕</button>
                               </div>
                             ) : occ.isPaid ? (
-                              <button onClick={() => handleUnmarkPaid(occ)} className="text-xs text-slate-400 hover:underline">Undo</button>
+                              <div className="flex items-center gap-2 justify-end">
+                                <button onClick={() => startMarkPaid(occ)} className="text-xs text-orange-500 hover:underline">Edit</button>
+                                <button onClick={() => handleUnmarkPaid(occ)} className="text-xs text-slate-400 hover:underline">Undo</button>
+                              </div>
                             ) : (
                               <button onClick={() => startMarkPaid(occ)} className="text-xs text-orange-500 hover:underline">Mark Paid</button>
                             )}
