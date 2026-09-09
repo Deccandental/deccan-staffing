@@ -236,28 +236,48 @@ function CashFlowPageBody() {
               </div>
 
               {showAddBill && (
-                <div className="rounded-xl bg-slate-50 p-3 mb-3 grid gap-2 sm:grid-cols-2">
-                  <input type="text" placeholder="Name (e.g. Rent, Payroll)" value={billForm.name} onChange={(e) => setBillForm((f) => ({ ...f, name: e.target.value }))}
-                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                  <input type="number" onFocus={(e) => e.target.select()} placeholder="Estimated amount" value={billForm.estimatedAmount} onChange={(e) => setBillForm((f) => ({ ...f, estimatedAmount: e.target.value }))}
-                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                  <select value={billForm.frequency} onChange={(e) => setBillForm((f) => ({ ...f, frequency: e.target.value as BillFrequency }))}
-                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
-                    <option value="monthly">Monthly</option>
-                    <option value="biweekly">Biweekly</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="once">One-time</option>
-                  </select>
-                  <input type="date" value={billForm.anchorDate} onChange={(e) => setBillForm((f) => ({ ...f, anchorDate: e.target.value }))}
-                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                  <select value={billForm.category} onChange={(e) => setBillForm((f) => ({ ...f, category: e.target.value as BillCategory }))}
-                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
-                    <option value="bill">Bill</option>
-                    <option value="payroll">Payroll</option>
-                  </select>
-                  <input type="text" placeholder="Category label (e.g. Rent, Lab, Software)" value={billForm.categoryLabel} onChange={(e) => setBillForm((f) => ({ ...f, categoryLabel: e.target.value }))}
-                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                  <button onClick={handleAddBill} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                <div className="rounded-xl bg-slate-50 p-3 mb-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-0.5">Vendor / Bill Name</label>
+                    <input type="text" placeholder="e.g. De Ritz LLC, Comcast" value={billForm.name} onChange={(e) => setBillForm((f) => ({ ...f, name: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-0.5">Estimated Amount</label>
+                    <input type="number" onFocus={(e) => e.target.select()} placeholder="$" value={billForm.estimatedAmount} onChange={(e) => setBillForm((f) => ({ ...f, estimatedAmount: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-0.5">Frequency</label>
+                    <div className="flex rounded-lg border border-slate-200 overflow-hidden w-fit">
+                      {(["monthly", "biweekly", "weekly", "once"] as BillFrequency[]).map((f) => (
+                        <button key={f} type="button" onClick={() => setBillForm((form) => ({ ...form, frequency: f }))}
+                          className="px-3 py-1.5 text-sm font-medium transition"
+                          style={billForm.frequency === f ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                          {FREQ_LABELS[f]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-0.5">{billForm.frequency === "once" ? "Due Date" : "First/Next Due Date"}</label>
+                    <input type="date" value={billForm.anchorDate} onChange={(e) => setBillForm((f) => ({ ...f, anchorDate: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-0.5">Type</label>
+                    <select value={billForm.category} onChange={(e) => setBillForm((f) => ({ ...f, category: e.target.value as BillCategory }))}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                      <option value="bill">Bill</option>
+                      <option value="payroll">Payroll</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-0.5">Category (optional)</label>
+                    <input type="text" placeholder="e.g. Rent, Lab, Software, Utilities" value={billForm.categoryLabel} onChange={(e) => setBillForm((f) => ({ ...f, categoryLabel: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  </div>
+                  <button onClick={handleAddBill} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition sm:col-span-2" style={{ backgroundColor: "#e8622a" }}>
                     Add
                   </button>
                 </div>
