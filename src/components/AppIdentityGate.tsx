@@ -43,6 +43,24 @@ export default function AppIdentityGate({ children }: Props) {
     setChecked(true);
   }, []);
 
+  // Re-sync a staff identity against the freshly-loaded staff record —
+  // sessionStorage only holds a snapshot from login time, so without this,
+  // a later change to someone's email or permissions wouldn't take effect
+  // until they manually logged out and back in.
+  useEffect(() => {
+    if (!staffLoaded || !identity || identity.mode !== "staff" || identity.employeeId == null) return;
+    const match = staff.find((e) => e.id === identity.employeeId && !e.archived);
+    if (!match) return;
+    const fresh: AppIdentity = {
+      mode: "staff",
+      employeeId: match.id, employeeName: match.name, employeeEmail: match.email ?? "",
+      canAdmin: !!match.canAdmin, canManageLeave: !!match.canManageLeave, canManageEvents: !!match.canManageEvents,
+      canManageCerts: !!match.canManageCerts, canManagePayroll: !!match.canManagePayroll,
+    };
+    if (JSON.stringify(fresh) !== JSON.stringify(identity)) persist(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staffLoaded, staff, identity?.employeeId]);
+
   function persist(id: AppIdentity) {
     setIdentity(id);
     try { sessionStorage.setItem(IDENTITY_SESSION_KEY, JSON.stringify(id)); } catch {}
