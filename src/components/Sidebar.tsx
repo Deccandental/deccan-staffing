@@ -5,6 +5,8 @@ import Image from "next/image";
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 
+import { loadLatestBalances, loadMinComfortableBalance, PRIMARY_CASH_ACCOUNT } from "@/lib/cashflow";
+
 // Kept as a raw string (not imported from AppIdentityGate) to avoid a
 // circular import, since AppIdentityGate itself renders <Sidebar />.
 const IDENTITY_SESSION_KEY = "dd_identity";
@@ -61,8 +63,24 @@ function hasAccess(permission: PermissionLevel, identity: StoredIdentity | null)
   return !!identity[permission];
 }
 
+function useLowBalanceWarning(identity: StoredIdentity | null): boolean {
+  const [warning, setWarning] = useState(false);
+  useEffect(() => {
+    if (!identity?.canManagePayroll) return;
+    let cancelled = false;
+    Promise.all([loadLatestBalances(), loadMinComfortableBalance()]).then(([balances, minComfortable]) => {
+      if (cancelled) return;
+      const current = balances[PRIMARY_CASH_ACCOUNT]?.balance ?? 0;
+      setWarning(current < minComfortable);
+    });
+    return () => { cancelled = true; };
+  }, [identity?.canManagePayroll]);
+  return warning;
+}
+
 function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   const identity = useIdentity();
+  const lowBalanceWarning = useLowBalanceWarning(identity);
 
   return (
     <>
@@ -113,6 +131,9 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
               >
                 <span className="text-base leading-none w-5 text-center flex-shrink-0" style={{ opacity: accessible ? 1 : 0.4 }}>{item.icon}</span>
                 <span className="flex-1">{item.label}</span>
+                {item.href === "/cashflow" && lowBalanceWarning && (
+                  <span className="text-xs flex-shrink-0" title="Cash balance is low">🚨</span>
+                )}
                 {!accessible && <span className="text-xs flex-shrink-0" style={{ opacity: 0.5 }}>🔒</span>}
                 {active && <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.85)" }} />}
               </Link>
