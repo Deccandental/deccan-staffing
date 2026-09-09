@@ -25,7 +25,7 @@ interface StoredIdentity {
   canManagePayroll?: boolean;
 }
 
-const navItems: { label: string; href: string; icon: string; permission: PermissionLevel }[] = [
+const navItems: { label: string; href: string; icon: string; permission: PermissionLevel; group?: string }[] = [
   { label: "Calendar", href: "/", icon: "📅", permission: "public" },
   { label: "Leave Request", href: "/leave", icon: "📝", permission: "any" },
   { label: "Staff Dashboard", href: "/staff-dashboard", icon: "🗂️", permission: "any" },
@@ -37,7 +37,8 @@ const navItems: { label: string; href: string; icon: string; permission: Permiss
   { label: "Holidays & Closures", href: "/holidays", icon: "🏖️", permission: "canAdmin" },
   { label: "Manage Leave", href: "/leave/manage", icon: "🔐", permission: "canManageLeave" },
   { label: "Events", href: "/events", icon: "📌", permission: "canManageEvents" },
-  { label: "Payroll Dashboard", href: "/payroll", icon: "💵", permission: "canManagePayroll" },
+  { label: "Payroll Dashboard", href: "/payroll", icon: "💵", permission: "canManagePayroll", group: "Finances" },
+  { label: "Cash Flow", href: "/cashflow", icon: "📊", permission: "canManagePayroll", group: "Finances" },
 ];
 
 function useIdentity(): StoredIdentity | null {
@@ -75,40 +76,47 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
       </div>
 
       <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-0.5">
-        {navItems.map((item) => {
+        {navItems.map((item, i) => {
           const active = pathname === item.href;
           const accessible = hasAccess(item.permission, identity);
+          const showGroupLabel = item.group && item.group !== navItems[i - 1]?.group;
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onNavigate}
-              className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150"
-              style={
-                active
-                  ? { background: "#e8622a", color: "white", boxShadow: "0 4px 14px rgba(232, 98, 42, 0.35)" }
-                  : accessible
-                  ? { color: "rgba(255,255,255,0.6)" }
-                  : { color: "rgba(255,255,255,0.25)" }
-              }
-              onMouseEnter={(e) => {
-                if (!active) {
-                  (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
-                  (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.4)";
+            <div key={item.href}>
+              {showGroupLabel && (
+                <div className="px-3 pt-4 pb-1 text-xs font-semibold tracking-widest uppercase" style={{ color: "rgba(255,255,255,0.25)" }}>
+                  {item.group}
+                </div>
+              )}
+              <Link
+                href={item.href}
+                onClick={onNavigate}
+                className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150"
+                style={
+                  active
+                    ? { background: "#e8622a", color: "white", boxShadow: "0 4px 14px rgba(232, 98, 42, 0.35)" }
+                    : accessible
+                    ? { color: "rgba(255,255,255,0.6)" }
+                    : { color: "rgba(255,255,255,0.25)" }
                 }
-              }}
-              onMouseLeave={(e) => {
-                if (!active) {
-                  (e.currentTarget as HTMLElement).style.background = "transparent";
-                  (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)";
-                }
-              }}
-            >
-              <span className="text-base leading-none w-5 text-center flex-shrink-0" style={{ opacity: accessible ? 1 : 0.4 }}>{item.icon}</span>
-              <span className="flex-1">{item.label}</span>
-              {!accessible && <span className="text-xs flex-shrink-0" style={{ opacity: 0.5 }}>🔒</span>}
-              {active && <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.85)" }} />}
-            </Link>
+                onMouseEnter={(e) => {
+                  if (!active) {
+                    (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
+                    (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.4)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) {
+                    (e.currentTarget as HTMLElement).style.background = "transparent";
+                    (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)";
+                  }
+                }}
+              >
+                <span className="text-base leading-none w-5 text-center flex-shrink-0" style={{ opacity: accessible ? 1 : 0.4 }}>{item.icon}</span>
+                <span className="flex-1">{item.label}</span>
+                {!accessible && <span className="text-xs flex-shrink-0" style={{ opacity: 0.5 }}>🔒</span>}
+                {active && <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.85)" }} />}
+              </Link>
+            </div>
           );
         })}
       </nav>
