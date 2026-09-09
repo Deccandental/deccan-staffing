@@ -23,9 +23,22 @@ export interface BillPayment {
 
 export interface BalanceCheck {
   id: string;
+  accountName: string;
   balance: number;
   checkedAt: string;
 }
+
+// The accounts tracked in the Cash Flow tool. Only the primary cash account
+// (checking) feeds the Safe to Spend / projection math — credit cards are
+// tracked here for reference/monitoring only, since a card balance is debt
+// owed, not liquid cash available to spend.
+export const TRACKED_ACCOUNTS = [
+  "Fifth Third Checking",
+  "Fifth Third Credit Card 0201",
+  "US Bank Credit Card 2244",
+  "US Bank Credit Card 9807",
+];
+export const PRIMARY_CASH_ACCOUNT = "Fifth Third Checking";
 
 export interface Occurrence {
   billId: string;
@@ -133,13 +146,20 @@ export async function deleteBillPayment(recurringBillId: string, dueDate: string
 // ---------------- CRUD: balance check-ins ----------------
 
 function fromBalanceRow(row: any): BalanceCheck {
-  return { id: row.id, balance: row.balance, checkedAt: row.checked_at };
+  return { id: row.id, accountName: row.account_name ?? PRIMARY_CASH_ACCOUNT, balance: row.balance, checkedAt: row.checked_at };
 }
 
-export async function loadLatestBalance(): Promise<BalanceCheck | null> {
-  const { data, error } = await supabase.from("balance_checks").select("*").order("checked_at", { ascending: false }).limit(1).maybeSingle();
-  if (error) { console.error("loadLatestBalance error:", error); return null; }
-  return data ? fromBalanceRow(data) : null;
+// Returns the latest entry for every account that has at least one, keyed
+// by account name.
+export async function loadLatestBalances(): Promise<Record<string, BalanceCheck>> {
+  const { data, error } = await supabase.from("balance_checks").select("*").order("checked_at", { ascending: false });
+  if (error) { console.error("loadLatestBalances error:", error); return {}; }
+  const latest: Record<string, BalanceCheck> = {};
+  for (const row of data ?? []) {
+    const bc = fromBalanceRow(row);
+    if (!latest[bc.accountName]) latest[bc.accountName] = bc;
+  }
+  return latest;
 }
 
 export async function loadBalanceHistory(limit: number = 20): Promise<BalanceCheck[]> {
@@ -148,8 +168,8 @@ export async function loadBalanceHistory(limit: number = 20): Promise<BalanceChe
   return (data ?? []).map(fromBalanceRow);
 }
 
-export async function addBalanceCheck(balance: number): Promise<void> {
-  const { error } = await supabase.from("balance_checks").insert({ balance, checked_at: new Date().toISOString() });
+export async function addBalanceCheck(accountName: string, balance: number): Promise<void> {
+  const { error } = await supabase.from("balance_checks").insert({ account_name: accountName, balance, checked_at: new Date().toISOString() });
   if (error) console.error("addBalanceCheck error:", error);
 }
 
