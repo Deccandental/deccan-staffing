@@ -33,6 +33,10 @@ function CashFlowPageBody() {
   const [billForm, setBillForm] = useState<{ name: string; estimatedAmount: string; frequency: BillFrequency; anchorDate: string; category: BillCategory; categoryLabel: string }>({
     name: "", estimatedAmount: "", frequency: "monthly", anchorDate: todayStr(), category: "bill", categoryLabel: "",
   });
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
+  const [editBillForm, setEditBillForm] = useState<{ name: string; estimatedAmount: string; frequency: BillFrequency; anchorDate: string; category: BillCategory; categoryLabel: string }>({
+    name: "", estimatedAmount: "", frequency: "monthly", anchorDate: todayStr(), category: "bill", categoryLabel: "",
+  });
 
   const [checkAmount, setCheckAmount] = useState("");
   const [checkDate, setCheckDate] = useState(todayStr());
@@ -102,6 +106,26 @@ function CashFlowPageBody() {
   async function handleDeactivateBill(id: string) {
     if (!confirm("Remove this recurring bill? It will stop appearing in the upcoming timeline.")) return;
     await updateRecurringBill(id, { active: false });
+    await refresh();
+  }
+
+  function startEditBill(b: RecurringBill) {
+    setEditingBillId(b.id);
+    setEditBillForm({
+      name: b.name, estimatedAmount: String(b.estimatedAmount), frequency: b.frequency,
+      anchorDate: b.anchorDate, category: b.category, categoryLabel: b.categoryLabel ?? "",
+    });
+  }
+
+  async function handleSaveEditBill() {
+    if (!editingBillId) return;
+    const amount = Number(editBillForm.estimatedAmount);
+    if (!editBillForm.name.trim() || !amount || !editBillForm.anchorDate) return;
+    await updateRecurringBill(editingBillId, {
+      name: editBillForm.name.trim(), estimatedAmount: amount, frequency: editBillForm.frequency,
+      anchorDate: editBillForm.anchorDate, category: editBillForm.category, categoryLabel: editBillForm.categoryLabel.trim() || undefined,
+    });
+    setEditingBillId(null);
     await refresh();
   }
 
@@ -288,13 +312,47 @@ function CashFlowPageBody() {
               ) : (
                 <div className="space-y-1.5">
                   {bills.filter((b) => b.active).map((b) => (
-                    <div key={b.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
-                      <span className="font-medium text-slate-700">{b.name} <span className="text-slate-400 font-normal">({FREQ_LABELS[b.frequency]}{b.categoryLabel ? ` · ${b.categoryLabel}` : b.category === "payroll" ? " · Payroll" : ""})</span></span>
-                      <div className="flex items-center gap-3">
-                        <span className="text-slate-500">~${formatMoney(b.estimatedAmount)}</span>
-                        <button onClick={() => handleDeactivateBill(b.id)} className="text-xs text-red-400 hover:underline">Remove</button>
+                    editingBillId === b.id ? (
+                      <div key={b.id} className="rounded-lg bg-amber-50 border border-amber-100 p-3 grid gap-2 sm:grid-cols-2">
+                        <input type="text" placeholder="Vendor / Bill Name" value={editBillForm.name} onChange={(e) => setEditBillForm((f) => ({ ...f, name: e.target.value }))}
+                          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                        <input type="number" onFocus={(e) => e.target.select()} placeholder="Estimated amount" value={editBillForm.estimatedAmount} onChange={(e) => setEditBillForm((f) => ({ ...f, estimatedAmount: e.target.value }))}
+                          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                        <div className="flex rounded-lg border border-slate-200 overflow-hidden w-fit">
+                          {(["monthly", "biweekly", "weekly", "once"] as BillFrequency[]).map((f) => (
+                            <button key={f} type="button" onClick={() => setEditBillForm((form) => ({ ...form, frequency: f }))}
+                              className="px-3 py-1.5 text-sm font-medium transition"
+                              style={editBillForm.frequency === f ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                              {FREQ_LABELS[f]}
+                            </button>
+                          ))}
+                        </div>
+                        <input type="date" value={editBillForm.anchorDate} onChange={(e) => setEditBillForm((f) => ({ ...f, anchorDate: e.target.value }))}
+                          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                        <select value={editBillForm.category} onChange={(e) => setEditBillForm((f) => ({ ...f, category: e.target.value as BillCategory }))}
+                          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                          <option value="bill">Bill</option>
+                          <option value="payroll">Payroll</option>
+                        </select>
+                        <input type="text" placeholder="Category (e.g. Rent, Lab, Software)" value={editBillForm.categoryLabel} onChange={(e) => setEditBillForm((f) => ({ ...f, categoryLabel: e.target.value }))}
+                          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                        <div className="flex items-center gap-2 sm:col-span-2">
+                          <button onClick={handleSaveEditBill} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                            Save
+                          </button>
+                          <button onClick={() => setEditingBillId(null)} className="text-sm text-slate-400 hover:underline">Cancel</button>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div key={b.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
+                        <span className="font-medium text-slate-700">{b.name} <span className="text-slate-400 font-normal">({FREQ_LABELS[b.frequency]}{b.categoryLabel ? ` · ${b.categoryLabel}` : b.category === "payroll" ? " · Payroll" : ""})</span></span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-slate-500">~${formatMoney(b.estimatedAmount)}</span>
+                          <button onClick={() => startEditBill(b)} className="text-xs text-orange-500 hover:underline">Edit</button>
+                          <button onClick={() => handleDeactivateBill(b.id)} className="text-xs text-red-400 hover:underline">Remove</button>
+                        </div>
+                      </div>
+                    )
                   ))}
                 </div>
               )}
