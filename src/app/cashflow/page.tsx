@@ -7,11 +7,12 @@ import AccessDenied from "@/components/AccessDenied";
 import { formatMoney } from "@/lib/format";
 import {
   RecurringBill, BillPayment, BalanceCheck, Occurrence, BillFrequency, BillCategory,
+  TRACKED_ACCOUNTS, PRIMARY_CASH_ACCOUNT,
   loadRecurringBills, addRecurringBill, updateRecurringBill,
   loadBillPayments, saveBillPayment, deleteBillPayment,
-  loadLatestBalance, loadBalanceHistory, addBalanceCheck,
+  loadLatestBalances, loadBalanceHistory, addBalanceCheck,
   loadMinComfortableBalance, saveMinComfortableBalance,
-  buildOccurrences, computeSafeToSpend, checkBillPayment, addDays,
+  buildOccurrences, computeSafeToSpend, checkBillPayment, addDays, projectBalance,
 } from "@/lib/cashflow";
 
 const FREQ_LABELS: Record<BillFrequency, string> = { weekly: "Weekly", biweekly: "Biweekly", monthly: "Monthly", once: "One-time" };
@@ -20,12 +21,12 @@ const todayStr = () => new Date().toISOString().split("T")[0];
 function CashFlowPageBody() {
   const [bills, setBills] = useState<RecurringBill[]>([]);
   const [payments, setPayments] = useState<BillPayment[]>([]);
-  const [latestBalance, setLatestBalance] = useState<BalanceCheck | null>(null);
+  const [latestBalances, setLatestBalances] = useState<Record<string, BalanceCheck>>({});
   const [balanceHistory, setBalanceHistory] = useState<BalanceCheck[]>([]);
   const [minComfortable, setMinComfortable] = useState(5000);
   const [loading, setLoading] = useState(true);
 
-  const [newBalanceInput, setNewBalanceInput] = useState("");
+  const [balanceInputs, setBalanceInputs] = useState<Record<string, string>>({});
   const [minComfortableInput, setMinComfortableInput] = useState("");
   const [savedMsg, setSavedMsg] = useState("");
 
@@ -46,6 +47,7 @@ function CashFlowPageBody() {
   const [markAmount, setMarkAmount] = useState("");
 
   const WINDOW_DAYS = 60;
+  const [timelineDays, setTimelineDays] = useState(14);
 
   useEffect(() => { refresh(); }, []);
 
@@ -56,13 +58,13 @@ function CashFlowPageBody() {
     const [b, p, lb, hist, minC] = await Promise.all([
       loadRecurringBills(),
       loadBillPayments(today, rangeEnd),
-      loadLatestBalance(),
-      loadBalanceHistory(10),
+      loadLatestBalances(),
+      loadBalanceHistory(20),
       loadMinComfortableBalance(),
     ]);
     setBills(b);
     setPayments(p);
-    setLatestBalance(lb);
+    setLatestBalances(lb);
     setBalanceHistory(hist);
     setMinComfortable(minC);
     setLoading(false);
@@ -70,15 +72,40 @@ function CashFlowPageBody() {
 
   const today = todayStr();
   const occurrences: Occurrence[] = buildOccurrences(bills, payments, today, addDays(today, WINDOW_DAYS));
-  const currentBalance = latestBalance?.balance ?? 0;
+  const currentBalance = latestBalances[PRIMARY_CASH_ACCOUNT]?.balance ?? 0;
   const safeToSpend14 = computeSafeToSpend(currentBalance, today, occurrences, 14);
   const safeToSpend30 = computeSafeToSpend(currentBalance, today, occurrences, 30);
+  const projection30 = projectBalance(currentBalance, today, occurrences, 30);
+  const lowestPoint = projection30.reduce((min, p) => p.balance < min.balance ? p : min, projection30[0] ?? { date: today, balance: currentBalance });
+  const isCurrentlyLow = currentBalance < minComfortable;
+  const willDipBelow = !isCurrentlyLow && lowestPoint.balance < minComfortable;
 
-  async function handleUpdateBalance() {
-    const amount = Number(newBalanceInput);
-    if (!newBalanceInput || isNaN(amount)) return;
-    await addBalanceCheck(amount);
-    setNewBalanceInput("");
+  function balanceOnOrBefore(date: string): number {
+    let bal = currentBalance;
+    for (const p of projection30) { if (p.date <= date) bal = p.balance; else break; }
+    return bal;
+  }
+
+  // Flags a bill if its next occurrence lands within 14 days AND the
+  // projected balance at that point (after it and everything before it is
+  // paid) would be under the comfort threshold.
+  function billWarning(bill: RecurringBill): { dueDate: string; balanceAfter: number } | null {
+    const next = occurrences.filter((o) => o.billId === bill.id && !o.isPaid).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+    if (!next || next.dueDate > addDays(today, 14)) return null;
+    const balanceAfter = balanceOnOrBefore(next.dueDate);
+    if (balanceAfter < minComfortable) return { dueDate: next.dueDate, balanceAfter };
+    return null;
+  }
+
+  const timelineLabel = timelineDays <= 14 ? "Next 2 Weeks" : timelineDays <= 28 ? "Next 4 Weeks" : `Next ${timelineDays} Days`;
+  const visibleOccurrences = occurrences.filter((occ) => occ.dueDate <= addDays(today, timelineDays));
+
+  async function handleUpdateBalance(accountName: string) {
+    const raw = balanceInputs[accountName];
+    const amount = Number(raw);
+    if (!raw || isNaN(amount)) return;
+    await addBalanceCheck(accountName, amount);
+    setBalanceInputs((f) => ({ ...f, [accountName]: "" }));
     await refresh();
   }
 
@@ -170,22 +197,25 @@ function CashFlowPageBody() {
         {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
           <div className="max-w-5xl space-y-6">
 
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="rounded-2xl bg-white p-5 shadow sm:col-span-1">
-                <p className="text-xs text-slate-400 uppercase tracking-wide font-semibold">Current Balance</p>
-                <p className="text-3xl font-bold text-slate-700 mt-1">${formatMoney(currentBalance)}</p>
-                <p className="text-xs text-slate-400 mt-1">
-                  {latestBalance ? `Checked ${new Date(latestBalance.checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "No balance entered yet"}
+            {isCurrentlyLow && (
+              <div className="rounded-xl p-4 flex items-center gap-3" style={{ background: "#fee2e2" }}>
+                <span className="text-2xl">🚨</span>
+                <p className="text-red-700 font-semibold text-sm">
+                  Your current balance (${formatMoney(currentBalance)}) is already below your ${formatMoney(minComfortable)} minimum.
                 </p>
-                <div className="flex items-center gap-2 mt-3">
-                  <input type="number" onFocus={(e) => e.target.select()} value={newBalanceInput} onChange={(e) => setNewBalanceInput(e.target.value)}
-                    placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                  <button onClick={handleUpdateBalance} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white whitespace-nowrap hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
-                    Update
-                  </button>
-                </div>
               </div>
+            )}
+            {willDipBelow && (
+              <div className="rounded-xl p-4 flex items-center gap-3" style={{ background: "#fef3c7" }}>
+                <span className="text-2xl">⚠️</span>
+                <p className="text-amber-800 font-semibold text-sm">
+                  Your balance is projected to dip to ${formatMoney(lowestPoint.balance)} around {new Date(lowestPoint.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })}
+                  {" "}— below your ${formatMoney(minComfortable)} minimum.
+                </p>
+              </div>
+            )}
 
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-2xl p-5 shadow" style={{ background: `linear-gradient(135deg, ${safeColor(safeToSpend14)}22, ${safeColor(safeToSpend14)}44)` }}>
                 <p className="text-xs text-slate-500 uppercase tracking-wide font-semibold">Safe to Spend (14 days)</p>
                 <p className="text-3xl font-bold mt-1" style={{ color: safeColor(safeToSpend14) }}>${formatMoney(safeToSpend14)}</p>
@@ -200,28 +230,56 @@ function CashFlowPageBody() {
             </div>
 
             <div className="rounded-2xl bg-white p-5 shadow">
-              <h2 className="font-bold text-slate-700 mb-2 text-sm">Minimum Comfortable Balance</h2>
-              <p className="text-xs text-slate-400 mb-2">The cushion you never want to dip below. Currently: <strong>${formatMoney(minComfortable)}</strong></p>
-              <div className="flex items-center gap-2 max-w-xs">
-                <input type="number" onFocus={(e) => e.target.select()} value={minComfortableInput} onChange={(e) => setMinComfortableInput(e.target.value)}
-                  placeholder="New minimum" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                <button onClick={handleSaveMinComfortable} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white whitespace-nowrap hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
-                  Save
-                </button>
+              <h2 className="font-bold text-slate-700 mb-3 text-sm">Account Balances</h2>
+              <div className="space-y-3">
+                {TRACKED_ACCOUNTS.map((account) => {
+                  const latest = latestBalances[account];
+                  const isPrimary = account === PRIMARY_CASH_ACCOUNT;
+                  return (
+                    <div key={account} className={`rounded-xl p-3 ${isPrimary ? "bg-orange-50" : "bg-slate-50"}`}>
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-700">{account}{isPrimary && <span className="ml-2 text-xs font-normal text-orange-500">(cash — used for projections)</span>}</p>
+                          <p className="text-xl font-bold text-slate-700">${formatMoney(latest?.balance ?? 0)}</p>
+                          <p className="text-xs text-slate-400">{latest ? `Checked ${new Date(latest.checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "No balance entered yet"}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[account] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [account]: e.target.value }))}
+                            placeholder="New balance" className="w-32 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                          <button onClick={() => handleUpdateBalance(account)} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white whitespace-nowrap hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                            Update
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              {savedMsg && <span className="text-xs text-slate-400 mt-1 block">{savedMsg}</span>}
+
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <h3 className="font-bold text-slate-700 mb-1 text-sm">Minimum Comfortable Balance</h3>
+                <p className="text-xs text-slate-400 mb-2">The cushion you never want your cash balance to dip below. Currently: <strong>${formatMoney(minComfortable)}</strong></p>
+                <div className="flex items-center gap-2 max-w-xs">
+                  <input type="number" onFocus={(e) => e.target.select()} value={minComfortableInput} onChange={(e) => setMinComfortableInput(e.target.value)}
+                    placeholder="New minimum" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  <button onClick={handleSaveMinComfortable} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white whitespace-nowrap hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                    Save
+                  </button>
+                </div>
+                {savedMsg && <span className="text-xs text-slate-400 mt-1 block">{savedMsg}</span>}
+              </div>
             </div>
 
-            <div className="rounded-2xl bg-white p-5 shadow">
+            <div className="rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #e0f2fe, #bae6fd)" }}>
               <h2 className="font-bold text-slate-700 mb-3">Check a Bill Before Paying</h2>
               <div className="flex flex-wrap items-end gap-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-0.5">Amount</label>
+                  <label className="block text-xs text-slate-500 mb-0.5">Amount</label>
                   <input type="number" onFocus={(e) => e.target.select()} value={checkAmount} onChange={(e) => setCheckAmount(e.target.value)}
                     className="w-32 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-0.5">Intended Pay Date</label>
+                  <label className="block text-xs text-slate-500 mb-0.5">Intended Pay Date</label>
                   <input type="date" value={checkDate} onChange={(e) => setCheckDate(e.target.value)}
                     className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                 </div>
@@ -345,7 +403,18 @@ function CashFlowPageBody() {
                       </div>
                     ) : (
                       <div key={b.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
-                        <span className="font-medium text-slate-700">{b.name} <span className="text-slate-400 font-normal">({FREQ_LABELS[b.frequency]}{b.categoryLabel ? ` · ${b.categoryLabel}` : b.category === "payroll" ? " · Payroll" : ""})</span></span>
+                        <span className="font-medium text-slate-700">
+                          {b.name} <span className="text-slate-400 font-normal">({FREQ_LABELS[b.frequency]}{b.categoryLabel ? ` · ${b.categoryLabel}` : b.category === "payroll" ? " · Payroll" : ""})</span>
+                          {(() => {
+                            const warn = billWarning(b);
+                            if (!warn) return null;
+                            return (
+                              <span className="ml-2 text-xs font-semibold text-amber-600">
+                                ⚠️ due {new Date(warn.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} — balance would drop to ${formatMoney(warn.balanceAfter)}
+                              </span>
+                            );
+                          })()}
+                        </span>
                         <div className="flex items-center gap-3">
                           <span className="text-slate-500">~${formatMoney(b.estimatedAmount)}</span>
                           <button onClick={() => startEditBill(b)} className="text-xs text-orange-500 hover:underline">Edit</button>
@@ -359,8 +428,21 @@ function CashFlowPageBody() {
             </div>
 
             <div className="rounded-2xl bg-white shadow overflow-hidden">
-              <h2 className="font-bold text-slate-700 p-5 pb-2">Next {WINDOW_DAYS} Days</h2>
-              {occurrences.length === 0 ? (
+              <div className="flex items-center justify-between p-5 pb-2 flex-wrap gap-2">
+                <h2 className="font-bold text-slate-700">{timelineLabel}</h2>
+                <div className="flex items-center gap-2 text-xs">
+                  {timelineDays !== 14 && (
+                    <button onClick={() => setTimelineDays(14)} className="text-orange-500 hover:underline">2 Weeks</button>
+                  )}
+                  {timelineDays !== 28 && (
+                    <button onClick={() => setTimelineDays(28)} className="text-orange-500 hover:underline">4 Weeks</button>
+                  )}
+                  {timelineDays !== 60 && (
+                    <button onClick={() => setTimelineDays(60)} className="text-orange-500 hover:underline">60 Days</button>
+                  )}
+                </div>
+              </div>
+              {visibleOccurrences.length === 0 ? (
                 <p className="text-sm text-slate-400 px-5 pb-5">Nothing scheduled — add recurring bills above to see them here.</p>
               ) : (
                 <div className="overflow-x-auto">
@@ -375,7 +457,7 @@ function CashFlowPageBody() {
                       </tr>
                     </thead>
                     <tbody>
-                      {occurrences.map((occ) => (
+                      {visibleOccurrences.map((occ) => (
                         <tr key={`${occ.billId}-${occ.dueDate}`} className="border-b border-slate-50 last:border-0">
                           <td className="px-5 py-2 text-slate-600 whitespace-nowrap">{new Date(occ.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td>
                           <td className="px-2 py-2 font-medium text-slate-700">{occ.billName}</td>
