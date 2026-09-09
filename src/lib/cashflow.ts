@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 
-export type BillFrequency = "weekly" | "biweekly" | "monthly";
+export type BillFrequency = "weekly" | "biweekly" | "monthly" | "once";
 export type BillCategory = "bill" | "payroll";
 
 export interface RecurringBill {
@@ -170,6 +170,10 @@ export async function saveMinComfortableBalance(amount: number): Promise<void> {
 
 export function computeDueDatesInRange(bill: RecurringBill, startDate: string, endDate: string): string[] {
   const dates: string[] = [];
+  if (bill.frequency === "once") {
+    if (bill.anchorDate >= startDate && bill.anchorDate <= endDate) dates.push(bill.anchorDate);
+    return dates;
+  }
   if (bill.frequency === "monthly") {
     let cursor = bill.anchorDate;
     let guard = 0;
