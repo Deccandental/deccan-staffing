@@ -32,6 +32,7 @@ const navItems: { label: string; href: string; icon: string; permission: Permiss
   { label: "Leave Request", href: "/leave", icon: "📝", permission: "any" },
   { label: "Staff Dashboard", href: "/staff-dashboard", icon: "🗂️", permission: "any" },
   { label: "Certifications", href: "/certifications", icon: "📄", permission: "any" },
+  { label: "Wishlist", href: "/wishlist", icon: "⭐", permission: "any" },
   { label: "Schedule Builder", href: "/schedule-builder", icon: "✏️", permission: "canAdmin" },
   { label: "Availability", href: "/availability", icon: "🏥", permission: "canAdmin" },
   { label: "Staff", href: "/staff", icon: "👥", permission: "canAdmin" },
