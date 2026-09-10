@@ -70,18 +70,14 @@ export async function deleteWishlistItem(id: string): Promise<void> {
   if (error) console.error("deleteWishlistItem error:", error);
 }
 
-export async function moveWishlistItem(items: WishlistItem[], itemId: string, direction: "up" | "down"): Promise<void> {
-  const ordered = [...items].sort((a, b) => a.sortOrder - b.sortOrder);
-  const idx = ordered.findIndex((i) => i.id === itemId);
-  if (idx === -1) return;
-  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
-  if (swapIdx < 0 || swapIdx >= ordered.length) return;
-  const a = ordered[idx];
-  const b = ordered[swapIdx];
-  const { error: e1 } = await supabase.from("wishlist_items").update({ sort_order: b.sortOrder }).eq("id", a.id);
-  const { error: e2 } = await supabase.from("wishlist_items").update({ sort_order: a.sortOrder }).eq("id", b.id);
-  if (e1) console.error("moveWishlistItem error:", e1);
-  if (e2) console.error("moveWishlistItem error:", e2);
+// Persists a full new ordering — sets sort_order to match the position of
+// each id in the given sequence. Used by drag-to-reorder.
+export async function setWishlistOrder(orderedIds: string[]): Promise<void> {
+  await Promise.all(orderedIds.map((id, index) =>
+    supabase.from("wishlist_items").update({ sort_order: index }).eq("id", id).then(({ error }) => {
+      if (error) console.error("setWishlistOrder error:", error);
+    })
+  ));
 }
 
 // Sets `itemId` to `rank` (1-5) for this person, replacing whatever they
