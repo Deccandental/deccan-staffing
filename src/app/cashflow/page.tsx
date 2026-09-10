@@ -309,16 +309,27 @@ function CashFlowPageBody() {
               )}
             </div>
 
-            <div className="rounded-2xl bg-white p-5 shadow">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-bold text-slate-700">Recurring Bills & Draws</h2>
-                <button onClick={() => setShowAddBill((s) => !s)} className="text-sm font-semibold text-orange-500 hover:underline">
-                  {showAddBill ? "Cancel" : "+ Add Bill"}
-                </button>
+            <div className="rounded-2xl bg-white shadow overflow-hidden">
+              <div className="flex items-center justify-between p-5 pb-2 flex-wrap gap-2">
+                <h2 className="font-bold text-slate-700">{timelineLabel}</h2>
+                <div className="flex items-center gap-3 text-xs">
+                  {timelineDays !== 14 && (
+                    <button onClick={() => setTimelineDays(14)} className="text-orange-500 hover:underline">2 Weeks</button>
+                  )}
+                  {timelineDays !== 28 && (
+                    <button onClick={() => setTimelineDays(28)} className="text-orange-500 hover:underline">4 Weeks</button>
+                  )}
+                  {timelineDays !== 60 && (
+                    <button onClick={() => setTimelineDays(60)} className="text-orange-500 hover:underline">60 Days</button>
+                  )}
+                  <button onClick={() => setShowAddBill((s) => !s)} className="text-sm font-semibold text-orange-500 hover:underline">
+                    {showAddBill ? "Cancel" : "+ Add Bill"}
+                  </button>
+                </div>
               </div>
 
               {showAddBill && (
-                <div className="rounded-xl bg-slate-50 p-3 mb-3 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-slate-50 p-3 mx-5 mb-3 grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="block text-xs text-slate-400 mb-0.5">Vendor / Bill Name</label>
                     <input type="text" placeholder="e.g. De Ritz LLC, Comcast" value={billForm.name} onChange={(e) => setBillForm((f) => ({ ...f, name: e.target.value }))}
@@ -365,85 +376,41 @@ function CashFlowPageBody() {
                 </div>
               )}
 
-              {bills.filter((b) => b.active).length === 0 ? (
-                <p className="text-sm text-slate-400">No recurring bills set up yet — add rent, loan payments, insurance, or payroll draws to get projections going.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {bills.filter((b) => b.active).map((b) => (
-                    editingBillId === b.id ? (
-                      <div key={b.id} className="rounded-lg bg-amber-50 border border-amber-100 p-3 grid gap-2 sm:grid-cols-2">
-                        <input type="text" placeholder="Vendor / Bill Name" value={editBillForm.name} onChange={(e) => setEditBillForm((f) => ({ ...f, name: e.target.value }))}
-                          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                        <input type="number" onFocus={(e) => e.target.select()} placeholder="Estimated amount" value={editBillForm.estimatedAmount} onChange={(e) => setEditBillForm((f) => ({ ...f, estimatedAmount: e.target.value }))}
-                          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                        <div className="flex rounded-lg border border-slate-200 overflow-hidden w-fit">
-                          {(["monthly", "biweekly", "weekly", "once"] as BillFrequency[]).map((f) => (
-                            <button key={f} type="button" onClick={() => setEditBillForm((form) => ({ ...form, frequency: f }))}
-                              className="px-3 py-1.5 text-sm font-medium transition"
-                              style={editBillForm.frequency === f ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
-                              {FREQ_LABELS[f]}
-                            </button>
-                          ))}
-                        </div>
-                        <input type="date" value={editBillForm.anchorDate} onChange={(e) => setEditBillForm((f) => ({ ...f, anchorDate: e.target.value }))}
-                          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                        <select value={editBillForm.category} onChange={(e) => setEditBillForm((f) => ({ ...f, category: e.target.value as BillCategory }))}
-                          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
-                          <option value="bill">Bill</option>
-                          <option value="payroll">Payroll</option>
-                        </select>
-                        <input type="text" placeholder="Category (e.g. Rent, Lab, Software)" value={editBillForm.categoryLabel} onChange={(e) => setEditBillForm((f) => ({ ...f, categoryLabel: e.target.value }))}
-                          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                        <div className="flex items-center gap-2 sm:col-span-2">
-                          <button onClick={handleSaveEditBill} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
-                            Save
-                          </button>
-                          <button onClick={() => setEditingBillId(null)} className="text-sm text-slate-400 hover:underline">Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div key={b.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
-                        <span className="font-medium text-slate-700">
-                          {b.name} <span className="text-slate-400 font-normal">({FREQ_LABELS[b.frequency]}{b.categoryLabel ? ` · ${b.categoryLabel}` : b.category === "payroll" ? " · Payroll" : ""})</span>
-                          {(() => {
-                            const warn = billWarning(b);
-                            if (!warn) return null;
-                            return (
-                              <span className="ml-2 text-xs font-semibold text-amber-600">
-                                ⚠️ due {new Date(warn.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} — balance would drop to ${formatMoney(warn.balanceAfter)}
-                              </span>
-                            );
-                          })()}
-                        </span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-slate-500">~${formatMoney(b.estimatedAmount)}</span>
-                          <button onClick={() => startEditBill(b)} className="text-xs text-orange-500 hover:underline">Edit</button>
-                          <button onClick={() => handleDeactivateBill(b.id)} className="text-xs text-red-400 hover:underline">Remove</button>
-                        </div>
-                      </div>
-                    )
-                  ))}
+              {editingBillId && (
+                <div className="rounded-xl bg-amber-50 border border-amber-100 p-3 mx-5 mb-3 grid gap-2 sm:grid-cols-2">
+                  <input type="text" placeholder="Vendor / Bill Name" value={editBillForm.name} onChange={(e) => setEditBillForm((f) => ({ ...f, name: e.target.value }))}
+                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  <input type="number" onFocus={(e) => e.target.select()} placeholder="Estimated amount" value={editBillForm.estimatedAmount} onChange={(e) => setEditBillForm((f) => ({ ...f, estimatedAmount: e.target.value }))}
+                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  <div className="flex rounded-lg border border-slate-200 overflow-hidden w-fit">
+                    {(["monthly", "biweekly", "weekly", "once"] as BillFrequency[]).map((f) => (
+                      <button key={f} type="button" onClick={() => setEditBillForm((form) => ({ ...form, frequency: f }))}
+                        className="px-3 py-1.5 text-sm font-medium transition"
+                        style={editBillForm.frequency === f ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                        {FREQ_LABELS[f]}
+                      </button>
+                    ))}
+                  </div>
+                  <input type="date" value={editBillForm.anchorDate} onChange={(e) => setEditBillForm((f) => ({ ...f, anchorDate: e.target.value }))}
+                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  <select value={editBillForm.category} onChange={(e) => setEditBillForm((f) => ({ ...f, category: e.target.value as BillCategory }))}
+                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                    <option value="bill">Bill</option>
+                    <option value="payroll">Payroll</option>
+                  </select>
+                  <input type="text" placeholder="Category (e.g. Rent, Lab, Software)" value={editBillForm.categoryLabel} onChange={(e) => setEditBillForm((f) => ({ ...f, categoryLabel: e.target.value }))}
+                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  <div className="flex items-center gap-2 sm:col-span-2">
+                    <button onClick={handleSaveEditBill} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                      Save
+                    </button>
+                    <button onClick={() => setEditingBillId(null)} className="text-sm text-slate-400 hover:underline">Cancel</button>
+                  </div>
                 </div>
               )}
-            </div>
 
-            <div className="rounded-2xl bg-white shadow overflow-hidden">
-              <div className="flex items-center justify-between p-5 pb-2 flex-wrap gap-2">
-                <h2 className="font-bold text-slate-700">{timelineLabel}</h2>
-                <div className="flex items-center gap-2 text-xs">
-                  {timelineDays !== 14 && (
-                    <button onClick={() => setTimelineDays(14)} className="text-orange-500 hover:underline">2 Weeks</button>
-                  )}
-                  {timelineDays !== 28 && (
-                    <button onClick={() => setTimelineDays(28)} className="text-orange-500 hover:underline">4 Weeks</button>
-                  )}
-                  {timelineDays !== 60 && (
-                    <button onClick={() => setTimelineDays(60)} className="text-orange-500 hover:underline">60 Days</button>
-                  )}
-                </div>
-              </div>
               {visibleOccurrences.length === 0 ? (
-                <p className="text-sm text-slate-400 px-5 pb-5">Nothing scheduled — add recurring bills above to see them here.</p>
+                <p className="text-sm text-slate-400 px-5 pb-5">Nothing scheduled — click "+ Add Bill" above to get started.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm border-collapse">
@@ -457,10 +424,26 @@ function CashFlowPageBody() {
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleOccurrences.map((occ) => (
+                      {visibleOccurrences.map((occ) => {
+                        const bill = bills.find((b) => b.id === occ.billId);
+                        return (
                         <tr key={`${occ.billId}-${occ.dueDate}`} className="border-b border-slate-50 last:border-0">
-                          <td className="px-5 py-2 text-slate-600 whitespace-nowrap">{new Date(occ.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td>
-                          <td className="px-2 py-2 font-medium text-slate-700">{occ.billName}</td>
+                          <td className="px-5 py-2 text-slate-600 whitespace-nowrap">
+                            {new Date(occ.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            {!occ.isPaid && occ.dueDate <= addDays(today, 14) && balanceOnOrBefore(occ.dueDate) < minComfortable && (
+                              <span className="ml-1" title={`Balance would be ~$${formatMoney(balanceOnOrBefore(occ.dueDate))} after this`}>⚠️</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-2 font-medium text-slate-700">
+                            {occ.billName} <span className="text-slate-400 font-normal">{occ.categoryLabel ? `· ${occ.categoryLabel}` : ""}</span>
+                            {bill && (
+                              <span className="ml-1">
+                                <button onClick={() => startEditBill(bill)} className="text-xs text-orange-500 hover:underline">Edit</button>
+                                {" · "}
+                                <button onClick={() => handleDeactivateBill(bill.id)} className="text-xs text-red-400 hover:underline">Remove</button>
+                              </span>
+                            )}
+                          </td>
                           <td className="px-2 py-2 text-slate-600">${formatMoney(occ.amount)}</td>
                           <td className="px-2 py-2">
                             {occ.isPaid ? <span className="text-emerald-600 text-xs font-semibold">✓ Actual</span> : <span className="text-slate-400 text-xs">Estimated</span>}
@@ -483,7 +466,8 @@ function CashFlowPageBody() {
                             )}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
