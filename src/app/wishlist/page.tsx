@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 import { formatMoney } from "@/lib/format";
 import {
-  WishlistItem, MAX_RANK, loadWishlistItems, addWishlistItem, deleteWishlistItem, moveWishlistItem, setMyRank,
+  WishlistItem, MAX_RANK, loadWishlistItems, addWishlistItem, deleteWishlistItem, setWishlistOrder, setMyRank,
 } from "@/lib/wishlist";
 
 function WishlistPageBody({ identity }: { identity: AppIdentity }) {
@@ -44,8 +44,43 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
     await refresh();
   }
 
-  async function handleMove(itemId: string, direction: "up" | "down") {
-    await moveWishlistItem(items, itemId, direction);
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  function computeTargetIndex(y: number, order: string[]): number {
+    for (let i = 0; i < order.length; i++) {
+      const el = itemRefs.current.get(order[i]);
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (y < rect.top + rect.height / 2) return i;
+    }
+    return order.length - 1;
+  }
+
+  function handleDragStart(e: React.PointerEvent, itemId: string, currentOrder: WishlistItem[]) {
+    if (!isAdmin) return;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setDraggingId(itemId);
+    setDragOrder(currentOrder.map((i) => i.id));
+  }
+
+  function handleDragMove(e: React.PointerEvent) {
+    if (!draggingId || !dragOrder) return;
+    const targetIdx = computeTargetIndex(e.clientY, dragOrder);
+    const currentIdx = dragOrder.indexOf(draggingId);
+    if (targetIdx !== currentIdx) {
+      const next = dragOrder.filter((id) => id !== draggingId);
+      next.splice(targetIdx, 0, draggingId);
+      setDragOrder(next);
+    }
+  }
+
+  async function handleDragEnd() {
+    if (!draggingId || !dragOrder) { setDraggingId(null); setDragOrder(null); return; }
+    setDraggingId(null);
+    await setWishlistOrder(dragOrder);
+    setDragOrder(null);
     await refresh();
   }
 
@@ -56,7 +91,9 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
     await refresh();
   }
 
-  const priorityOrder = [...items].sort((a, b) => a.sortOrder - b.sortOrder);
+  const priorityOrder = dragOrder
+    ? (dragOrder.map((id) => items.find((i) => i.id === id)).filter(Boolean) as WishlistItem[])
+    : [...items].sort((a, b) => a.sortOrder - b.sortOrder);
   const mostWanted = [...items].sort((a, b) => b.score - a.score || a.sortOrder - b.sortOrder);
   const usedRanks = new Set(items.filter((i) => i.myRank != null).map((i) => i.myRank as number));
   const ranksLeft = MAX_RANK - usedRanks.size;
@@ -129,19 +166,19 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="rounded-2xl bg-white shadow p-4">
                 <h2 className="font-bold text-slate-700 mb-1">Priority List</h2>
-                <p className="text-xs text-slate-400 mb-3">{isAdmin ? "Use the arrows to reorder." : "Ordered by leadership — only admins can reorder."}</p>
+                <p className="text-xs text-slate-400 mb-3">{isAdmin ? "Press and drag a card to reorder." : "Ordered by leadership — only admins can reorder."}</p>
                 {priorityOrder.length === 0 ? (
                   <p className="text-sm text-slate-400">Nothing on the wishlist yet.</p>
                 ) : (
                   <div className="space-y-2">
-                    {priorityOrder.map((item, i) => (
-                      <div key={item.id} className="rounded-xl bg-slate-50 p-3 flex items-start gap-3">
+                    {priorityOrder.map((item) => (
+                      <div key={item.id} ref={(el) => { if (el) itemRefs.current.set(item.id, el); }}
+                        className="rounded-xl p-3 flex items-start gap-3 transition"
+                        style={{ background: draggingId === item.id ? "#ffedd5" : "#f8fafc", opacity: draggingId === item.id ? 0.85 : 1 }}>
                         {isAdmin && (
-                          <div className="flex flex-col gap-0.5 flex-shrink-0">
-                            <button onClick={() => handleMove(item.id, "up")} disabled={i === 0}
-                              className="text-xs px-1.5 py-0.5 rounded hover:bg-slate-200 disabled:opacity-20 transition">▲</button>
-                            <button onClick={() => handleMove(item.id, "down")} disabled={i === priorityOrder.length - 1}
-                              className="text-xs px-1.5 py-0.5 rounded hover:bg-slate-200 disabled:opacity-20 transition">▼</button>
+                          <div onPointerDown={(e) => handleDragStart(e, item.id, priorityOrder)} onPointerMove={handleDragMove} onPointerUp={handleDragEnd} onPointerCancel={handleDragEnd}
+                            className="text-slate-400 flex-shrink-0 select-none" style={{ cursor: "grab", touchAction: "none", fontSize: 18, lineHeight: 1, padding: "2px 4px" }}>
+                            ⠿
                           </div>
                         )}
                         <div className="flex-1">
