@@ -358,6 +358,19 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       </div>
                     );
                   })}
+                  {(() => {
+                    const totalEarned = ([1, 2, 3, 4] as const)
+                      .filter((q) => q <= currentQuarter)
+                      .reduce((sum, q) => sum + (bonusForQuarter(q)?.myBonus ?? 0), 0);
+                    if (totalEarned > bonusReceivedThisYear) {
+                      return (
+                        <p className="text-xs text-slate-500 italic pt-1">
+                          Your bonus is being paid out gradually to match cash flow timing — nothing you've earned is reduced.
+                        </p>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
               </div>
             )}
@@ -470,7 +483,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       </div>
                       <div className="text-xs text-slate-500 mt-0.5">
                         {new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                        {ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : ""}
+                        {ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : " · All Day"}
                       </div>
                     </div>
                   ))}
