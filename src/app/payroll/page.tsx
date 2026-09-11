@@ -26,6 +26,11 @@ import { PvBonusQuarter, loadPvBonusYear, savePvBonusQuarter } from "@/lib/pvBon
 import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
 import { formatMoney } from "@/lib/format";
+import {
+  PRIMARY_CASH_ACCOUNT, loadLatestBalances, loadMinComfortableBalance,
+  loadRecurringBills as loadCashflowBills, loadBillPayments as loadCashflowBillPayments,
+  buildOccurrences as buildCashflowOccurrences, computeSafeToSpend, addDays as addCashflowDays,
+} from "@/lib/cashflow";
 
 const HYGIENE_BONUS_PER_PATIENT = 15;
 
@@ -562,6 +567,7 @@ function GrowthBonusPanel() {
   const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().split("T")[0], amount: "", notes: "" });
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editPaymentForm, setEditPaymentForm] = useState({ date: "", amount: "", notes: "" });
+  const [safeToPayTotal, setSafeToPayTotal] = useState<number | null>(null);
 
   useEffect(() => { refresh(); }, [year]);
 
@@ -588,6 +594,20 @@ function GrowthBonusPanel() {
     setYearEntries(entries);
     setHoursOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
     setPayments(pays.filter((p) => p.date >= yearStart && p.date <= yearEnd));
+
+    // How much bonus can safely be paid out right now, per the Cash Flow
+    // tool's own numbers — current cash balance minus everything else
+    // already scheduled to come out in the next 30 days.
+    const today = new Date().toISOString().split("T")[0];
+    const [balances, minComfortable, cashBills, cashPayments] = await Promise.all([
+      loadLatestBalances(), loadMinComfortableBalance(),
+      loadCashflowBills(), loadCashflowBillPayments(today, addCashflowDays(today, 30)),
+    ]);
+    const currentCashBalance = balances[PRIMARY_CASH_ACCOUNT]?.balance ?? 0;
+    const occurrences = buildCashflowOccurrences(cashBills, cashPayments, today, addCashflowDays(today, 30));
+    const safeToSpend30 = computeSafeToSpend(currentCashBalance, today, occurrences, 30);
+    setSafeToPayTotal(Math.max(0, safeToSpend30 - minComfortable));
+
     setLoading(false);
   }
 
@@ -632,6 +652,18 @@ function GrowthBonusPanel() {
   });
   const ytdPaid: Record<number, number> = {};
   payments.forEach((p) => { ytdPaid[p.employeeId] = (ytdPaid[p.employeeId] ?? 0) + p.amount; });
+
+  // If cash is tight, split whatever's safely available proportionally
+  // across everyone with an outstanding balance — nobody's earned amount
+  // changes, this only affects how fast each person gets paid out.
+  const totalOwed = Object.keys(ytdEarned).reduce((sum, id) => sum + Math.max(0, (ytdEarned[Number(id)] ?? 0) - (ytdPaid[Number(id)] ?? 0)), 0);
+  const payableNow = safeToPayTotal != null ? Math.min(safeToPayTotal, totalOwed) : null;
+  const isConstrained = payableNow != null && totalOwed > 0 && payableNow < totalOwed;
+  function suggestedPayNow(employeeId: number): number {
+    if (payableNow == null || totalOwed <= 0) return 0;
+    const owed = Math.max(0, (ytdEarned[employeeId] ?? 0) - (ytdPaid[employeeId] ?? 0));
+    return Math.round(payableNow * (owed / totalOwed));
+  }
 
   async function handleAddPayment(employeeId: number) {
     const amount = Number(paymentForm.amount);
@@ -716,13 +748,14 @@ function GrowthBonusPanel() {
 
         {calc && (
           <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
-            <div>Delta: <strong>${formatMoney(calc.delta)}</strong> · Growth: <strong>{(calc.growthPct * 100).toFixed(1)}%</strong></div>
+            <div>Growth vs last year: <strong>{(calc.growthPct * 100).toFixed(1)}%</strong> (delta ${formatMoney(calc.delta)})</div>
+            <div>Production above BAM: <strong>${formatMoney(calc.excessOverBam)}</strong> — this is what the rate applies to</div>
             <div className="flex gap-4 text-xs">
               <span className={calc.meetsBam ? "text-green-600" : "text-red-500"}>{calc.meetsBam ? "✓" : "✗"} Exceeds BAM</span>
               <span className={calc.meetsGrowth ? "text-green-600" : "text-red-500"}>{calc.meetsGrowth ? "✓" : "✗"} 20%+ growth</span>
             </div>
             {calc.eligible ? (
-              <div className="text-emerald-700 font-semibold">🎉 Bonus pool: ${formatMoney(calc.bonusPool)} (at {(calc.tierPct * 100).toFixed(0)}% rate)</div>
+              <div className="text-emerald-700 font-semibold">🎉 Bonus pool: ${formatMoney(calc.bonusPool)} (at {(calc.tierPct * 100).toFixed(0)}% of the excess over BAM)</div>
             ) : (
               <div className="text-slate-400">No bonus pool this quarter — thresholds not met.</div>
             )}
@@ -733,6 +766,23 @@ function GrowthBonusPanel() {
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
         <h2 className="px-4 pt-3 font-bold text-slate-700 text-sm">{QUARTER_LABELS[quarter]} {year} — Bonus Split</h2>
         <p className="px-4 pt-1 text-xs text-slate-400">"Hours" auto-fills from Payroll once that's in use for a period — you can also type a number directly (e.g. for quarters before Payroll was tracked). Days are calculated from hours ÷ 8.</p>
+
+        {totalOwed > 0 && (
+          <div className="mx-4 mt-3 rounded-lg p-3" style={{ background: isConstrained ? "#fef3c7" : "#d1fae5" }}>
+            {safeToPayTotal == null ? (
+              <p className="text-xs text-slate-500">Checking Cash Flow for what's safe to pay right now…</p>
+            ) : isConstrained ? (
+              <p className="text-sm text-amber-800">
+                <strong>💰 Safe to pay right now: ${formatMoney(payableNow ?? 0)}</strong> of ${formatMoney(totalOwed)} owed — cash is tight, so the "Suggested" column below splits what's available proportionally across everyone's balance. Nothing owed is reduced, this only paces out the timing.
+              </p>
+            ) : (
+              <p className="text-sm text-emerald-800">
+                <strong>💰 Safe to pay right now: ${formatMoney(payableNow ?? 0)}</strong> — enough to cover the full ${formatMoney(totalOwed)} currently owed.
+              </p>
+            )}
+          </div>
+        )}
+
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
@@ -745,12 +795,13 @@ function GrowthBonusPanel() {
               <th className="px-2 py-2 font-medium">Earned YTD</th>
               <th className="px-2 py-2 font-medium">Paid YTD</th>
               <th className="px-2 py-2 font-medium">Balance</th>
+              {isConstrained && <th className="px-2 py-2 font-medium">Suggested</th>}
               <th className="px-2 py-2 font-medium"></th>
             </tr>
           </thead>
           <tbody>
             {split.length === 0 ? (
-              <tr><td colSpan={10} className="px-3 py-4 text-slate-400 text-sm">No one is eligible yet for this quarter.</td></tr>
+              <tr><td colSpan={isConstrained ? 11 : 10} className="px-3 py-4 text-slate-400 text-sm">No one is eligible yet for this quarter.</td></tr>
             ) : split.map((row) => {
               const earned = ytdEarned[row.employee.id] ?? 0;
               const paid = ytdPaid[row.employee.id] ?? 0;
@@ -766,6 +817,9 @@ function GrowthBonusPanel() {
                   <td className="px-2 py-2">{row.multiplier}</td>
                   <td className="px-2 py-2">{row.points}</td>
                   <td className="px-2 py-2 font-semibold">${formatMoney(row.bonus)}</td>
+                  {isConstrained && (
+                    <td className="px-2 py-2 font-semibold text-amber-600">${formatMoney(suggestedPayNow(row.employee.id))}</td>
+                  )}
                   <td className="px-2 py-2">${formatMoney(earned)}</td>
                   <td className="px-2 py-2">${formatMoney(paid)}</td>
                   <td className={`px-2 py-2 font-semibold ${balance > 0 ? "text-amber-600" : "text-slate-400"}`}>${formatMoney(balance)}</td>
