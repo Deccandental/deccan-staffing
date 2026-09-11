@@ -74,6 +74,7 @@ export interface QuarterCalc {
   meetsGrowth: boolean;
   eligible: boolean;
   tierPct: number;
+  excessOverBam: number;
   bonusPool: number;
 }
 
@@ -93,8 +94,14 @@ export function computeQuarterCalc(q: GrowthBonusQuarter): QuarterCalc {
   const meetsGrowth = growthPct >= 0.20;
   const eligible = meetsBam && meetsGrowth;
   const tierPct = TIERED_RATE_PAUSED ? 0.03 : (growthPct >= 0.40 ? 0.05 : growthPct >= 0.30 ? 0.04 : 0.03);
-  const bonusPool = eligible ? Math.round(delta * tierPct) : 0;
-  return { delta, growthPct, meetsBam, meetsGrowth, eligible, tierPct, bonusPool };
+  // The rate tier is still chosen by YoY growth, but the bonus pool itself
+  // is a percentage of production above BAM (the floor that covers costs) —
+  // not above last year's number — so the pool always comes from money the
+  // practice has actually cleared past its baseline, regardless of how low
+  // or high last year happened to be.
+  const excessOverBam = Math.max(0, q.netProductionCurrent - q.bamThreshold);
+  const bonusPool = eligible ? Math.round(excessOverBam * tierPct) : 0;
+  return { delta, growthPct, meetsBam, meetsGrowth, eligible, tierPct, excessOverBam, bonusPool };
 }
 
 // A person is eligible for a given quarter if they're opted into the
