@@ -78,15 +78,21 @@ export interface QuarterCalc {
 }
 
 // Bonus only applies when production beats BAM AND grew at least 20% over
-// the same quarter last year. Rate on the delta scales with how much growth:
-// <30% -> 3%, 30-39% -> 4%, >=40% -> 5%.
+// the same quarter last year. Rate on the delta normally scales with how
+// much growth: <30% -> 3%, 30-39% -> 4%, >=40% -> 5%.
+//
+// TEMPORARILY PAUSED: the tiered rate is on hold — every eligible quarter
+// pays out at a flat 3% regardless of growth, until this flag is flipped
+// back to false.
+const TIERED_RATE_PAUSED = true;
+
 export function computeQuarterCalc(q: GrowthBonusQuarter): QuarterCalc {
   const delta = q.netProductionCurrent - q.netProductionPriorYear;
   const growthPct = q.netProductionPriorYear > 0 ? delta / q.netProductionPriorYear : 0;
   const meetsBam = q.netProductionCurrent > q.bamThreshold;
   const meetsGrowth = growthPct >= 0.20;
   const eligible = meetsBam && meetsGrowth;
-  const tierPct = growthPct >= 0.40 ? 0.05 : growthPct >= 0.30 ? 0.04 : 0.03;
+  const tierPct = TIERED_RATE_PAUSED ? 0.03 : (growthPct >= 0.40 ? 0.05 : growthPct >= 0.30 ? 0.04 : 0.03);
   const bonusPool = eligible ? Math.round(delta * tierPct) : 0;
   return { delta, growthPct, meetsBam, meetsGrowth, eligible, tierPct, bonusPool };
 }
