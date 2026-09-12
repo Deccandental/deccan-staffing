@@ -54,10 +54,11 @@ function CashFlowPageBody() {
   async function refresh() {
     setLoading(true);
     const today = todayStr();
+    const monthStart = today.slice(0, 8) + "01";
     const rangeEnd = addDays(today, WINDOW_DAYS);
     const [b, p, lb, hist, minC] = await Promise.all([
       loadRecurringBills(),
-      loadBillPayments(today, rangeEnd),
+      loadBillPayments(monthStart, rangeEnd),
       loadLatestBalances(),
       loadBalanceHistory(20),
       loadMinComfortableBalance(),
@@ -71,7 +72,8 @@ function CashFlowPageBody() {
   }
 
   const today = todayStr();
-  const occurrences: Occurrence[] = buildOccurrences(bills, payments, today, addDays(today, WINDOW_DAYS));
+  const monthStart = today.slice(0, 8) + "01";
+  const occurrences: Occurrence[] = buildOccurrences(bills, payments, monthStart, addDays(today, WINDOW_DAYS));
   const currentBalance = latestBalances[PRIMARY_CASH_ACCOUNT]?.balance ?? 0;
   const safeToSpend14 = computeSafeToSpend(currentBalance, today, occurrences, 14);
   const safeToSpend30 = computeSafeToSpend(currentBalance, today, occurrences, 30);
