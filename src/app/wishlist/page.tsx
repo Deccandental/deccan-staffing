@@ -204,7 +204,34 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
                   <p className="text-sm text-slate-400">Nothing on the wishlist yet.</p>
                 ) : (
                   <div className="space-y-2">
-                    {mostWanted.map((item) => (
+                    {mostWanted.slice(0, 5).map((item, i) => {
+                      const rank = i + 1;
+                      const styles: Record<number, { bg: string; text: string }> = {
+                        1: { bg: "linear-gradient(135deg, #fbbf24, #d97706)", text: "white" },
+                        2: { bg: "linear-gradient(135deg, #cbd5e1, #64748b)", text: "white" },
+                        3: { bg: "linear-gradient(135deg, #fb923c, #c2410c)", text: "white" },
+                        4: { bg: "linear-gradient(135deg, #2dd4bf, #0d9488)", text: "white" },
+                        5: { bg: "linear-gradient(135deg, #60a5fa, #2563eb)", text: "white" },
+                      };
+                      const s = styles[rank];
+                      return (
+                        <div key={item.id} className="rounded-xl p-3 flex items-center gap-3 shadow-sm" style={{ background: s.bg }}>
+                          <div className="flex-shrink-0 w-9 h-9 rounded-full bg-white/25 flex items-center justify-center">
+                            <span className="text-xl font-extrabold" style={{ color: s.text }}>{rank}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold truncate" style={{ color: s.text }}>{rank === 1 ? "🏆 " : ""}{item.description}</p>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              {item.estimatedCost != null && <span className="text-xs" style={{ color: "rgba(255,255,255,0.85)" }}>~${formatMoney(item.estimatedCost)}</span>}
+                              <span className="text-xs" style={{ color: "rgba(255,255,255,0.7)" }}>added by {item.addedByName}</span>
+                              <span className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.85)" }}>· score {item.score}</span>
+                            </div>
+                          </div>
+                          {myEmployeeId != null && <RankPicker item={item} />}
+                        </div>
+                      );
+                    })}
+                    {mostWanted.slice(5).map((item) => (
                       <div key={item.id} className="rounded-xl bg-slate-50 p-3 flex items-center gap-3">
                         <div className="flex-1">
                           <p className="text-sm font-medium text-slate-700">{item.description}</p>
