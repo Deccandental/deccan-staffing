@@ -817,12 +817,12 @@ function GrowthBonusPanel() {
                   <td className="px-2 py-2">{row.multiplier}</td>
                   <td className="px-2 py-2">{row.points}</td>
                   <td className="px-2 py-2 font-semibold">${formatMoney(row.bonus)}</td>
-                  {isConstrained && (
-                    <td className="px-2 py-2 font-semibold text-amber-600">${formatMoney(suggestedPayNow(row.employee.id))}</td>
-                  )}
                   <td className="px-2 py-2">${formatMoney(earned)}</td>
                   <td className="px-2 py-2">${formatMoney(paid)}</td>
                   <td className={`px-2 py-2 font-semibold ${balance > 0 ? "text-amber-600" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                  {isConstrained && (
+                    <td className="px-2 py-2 font-semibold text-amber-600">${formatMoney(suggestedPayNow(row.employee.id))}</td>
+                  )}
                   <td className="px-2 py-2">
                     {payingFor === row.employee.id ? (
                       <div className="flex items-center gap-1">
