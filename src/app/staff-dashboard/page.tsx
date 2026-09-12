@@ -191,6 +191,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const bonusProgressPct = currentQuarterData && requiredProduction > 0
     ? Math.min(100, Math.round((currentQuarterData.netProductionCurrent / requiredProduction) * 100)) : 0;
   const bonusUnlocked = !!currentCalc?.eligible;
+  const totalEarnedThisYear = ([1, 2, 3, 4] as const)
+    .filter((q) => q <= currentQuarter)
+    .reduce((sum, q) => sum + (bonusForQuarter(q)?.myBonus ?? 0), 0);
+  const bonusBeingPaced = totalEarnedThisYear > bonusReceivedThisYear;
 
   function openNewCert() {
     setCertForm(EMPTY_CERT_FORM);
@@ -342,6 +346,15 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 </div>
                 <p className="text-xs text-slate-500 mt-1">{bonusProgressPct}% of the way to this quarter's production target{bonusUnlocked ? " — already there!" : ""}</p>
 
+                {bonusBeingPaced && (
+                  <div className="mt-2 rounded-lg bg-white/80 px-3 py-2 flex items-center gap-2">
+                    <span className="text-base flex-shrink-0">💬</span>
+                    <p className="text-xs font-medium text-slate-700">
+                      Your bonus is being paid out gradually to match cash flow timing — nothing you've earned is reduced.
+                    </p>
+                  </div>
+                )}
+
                 <div className="mt-2 pt-2 border-t border-white/60 space-y-1">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{bonusYear} so far</p>
                   {([1, 2, 3, 4] as const).filter((q) => q <= currentQuarter).map((q) => {
@@ -358,19 +371,6 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       </div>
                     );
                   })}
-                  {(() => {
-                    const totalEarned = ([1, 2, 3, 4] as const)
-                      .filter((q) => q <= currentQuarter)
-                      .reduce((sum, q) => sum + (bonusForQuarter(q)?.myBonus ?? 0), 0);
-                    if (totalEarned > bonusReceivedThisYear) {
-                      return (
-                        <p className="text-xs text-slate-500 italic pt-1">
-                          Your bonus is being paid out gradually to match cash flow timing — nothing you've earned is reduced.
-                        </p>
-                      );
-                    }
-                    return null;
-                  })()}
                 </div>
               </div>
             )}
