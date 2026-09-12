@@ -562,6 +562,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                               : "No expiration"}
                           </div>
                           <button onClick={() => startEditCert(cert)} className="text-xs text-cyan-600 hover:underline mt-0.5">Edit</button>
+                          {cert.fileUrl && (
+                            <a href={cert.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-600 hover:underline mt-0.5 ml-2 inline-block">View file →</a>
+                          )}
                         </div>
                         <span className={`rounded-full px-2 py-0.5 text-xs font-semibold flex-shrink-0 ${badge.className}`}>{badge.label}</span>
                       </div>
