@@ -1,233 +1,1318 @@
 "use client";
 
-import Link from "next/link";
-import Image from "next/image";
-import { useState, useEffect } from "react";
-import { usePathname } from "next/navigation";
-
-import { loadLatestBalances, loadMinComfortableBalance, PRIMARY_CASH_ACCOUNT } from "@/lib/cashflow";
+import { useState, useEffect, useMemo } from "react";
+import { Sidebar } from "@/components/Sidebar";
+import AppIdentityGate from "@/components/AppIdentityGate";
+import AccessDenied from "@/components/AccessDenied";
+import { Employee } from "@/types/employee";
+import { loadStaff, setLeaveBalance } from "@/lib/staffStore";
+import { LeaveRequest } from "@/types/leave";
+import { loadLeaveRequests } from "@/lib/leaveStore";
+import { Holiday, loadHolidays } from "@/lib/holidays";
+import { TempStaff } from "@/app/temps/page";
+import { getTempAssignmentsForMonth } from "@/lib/tempAssignments";
 import { supabase } from "@/lib/supabase";
+import { PayrollEntry, loadPayrollEntries, loadPayrollEntriesInRange, savePayrollEntry } from "@/lib/payrollStore";
+import { PayPeriod, getPayPeriodForDate, stepPayPeriod } from "@/lib/payPeriods";
+import { getScheduledEmployeeIdsInRange } from "@/lib/staffSchedule";
+import {
+  GrowthBonusQuarter, GrowthBonusPayment, loadGrowthBonusQuarter, saveGrowthBonusQuarter,
+  computeQuarterCalc, isEligibleForQuarter, computeHoursWorkedInQuarter, hoursToDays, splitBonusPool,
+  getQuarterDateRange, getCurrentQuarter, loadGrowthBonusPayments, addGrowthBonusPayment,
+  updateGrowthBonusPayment, deleteGrowthBonusPayment,
+  loadGrowthBonusHoursOverrides, saveGrowthBonusHoursOverride,
+} from "@/lib/growthBonus";
+import { PvBonusQuarter, loadPvBonusYear, savePvBonusQuarter } from "@/lib/pvBonus";
+import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth } from "@/lib/hoBonus";
+import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
+import { formatMoney } from "@/lib/format";
+import {
+  loadCashAccounts, loadLatestBalances,
+  loadRecurringBills as loadCashflowBills, loadBillPayments as loadCashflowBillPayments,
+  buildOccurrences as buildCashflowOccurrences, computeSafeToSpend, addDays as addCashflowDays,
+} from "@/lib/cashflow";
 
-// Kept as a raw string (not imported from AppIdentityGate) to avoid a
-// circular import, since AppIdentityGate itself renders <Sidebar />.
-const IDENTITY_SESSION_KEY = "dd_identity";
+const HYGIENE_BONUS_PER_PATIENT = 15;
 
-type PermissionLevel =
-  | "public"          // no login needed at all
-  | "any"             // any logged-in identity (self-service pages)
-  | "canAdmin"
-  | "canManageLeave"
-  | "canManageEvents"
-  | "canManagePayroll";
-
-interface StoredIdentity {
-  employeeId?: number;
-  exemptFromPolicySigning?: boolean;
-  canAdmin?: boolean;
-  canManageLeave?: boolean;
-  canManageEvents?: boolean;
-  canManageCerts?: boolean;
-  canManagePayroll?: boolean;
+interface PersonRow {
+  personKey: string;
+  personName: string;
+  isTemp: boolean;
+  employee?: Employee;
 }
 
-const navItems: { label: string; href: string; icon: string; permission: PermissionLevel; group?: string }[] = [
-  { label: "Calendar", href: "/", icon: "📅", permission: "public" },
-  { label: "Leave Request", href: "/leave", icon: "📝", permission: "any" },
-  { label: "Staff Dashboard", href: "/staff-dashboard", icon: "🗂️", permission: "any" },
-  { label: "Certifications", href: "/certifications", icon: "📄", permission: "any" },
-  { label: "Wishlist", href: "/wishlist", icon: "⭐", permission: "any" },
-  { label: "Handbook", href: "/handbook", icon: "📘", permission: "any" },
-  { label: "Schedule Builder", href: "/schedule-builder", icon: "✏️", permission: "canAdmin", group: "Admin" },
-  { label: "Availability", href: "/availability", icon: "🏥", permission: "canAdmin", group: "Admin" },
-  { label: "Staff", href: "/staff", icon: "👥", permission: "canAdmin", group: "Admin" },
-  { label: "Temp Staff", href: "/temps", icon: "🔄", permission: "canAdmin", group: "Admin" },
-  { label: "Holidays & Closures", href: "/holidays", icon: "🏖️", permission: "canAdmin", group: "Admin" },
-  { label: "Manage Leave", href: "/leave/manage", icon: "🔐", permission: "canManageLeave", group: "Admin" },
-  { label: "Events", href: "/events", icon: "📌", permission: "canManageEvents", group: "Admin" },
-  { label: "Payroll Dashboard", href: "/payroll", icon: "💵", permission: "canManagePayroll", group: "Finances" },
-  { label: "Cash Flow", href: "/cashflow", icon: "📊", permission: "canManagePayroll", group: "Finances" },
-];
+interface RowFields {
+  hoursWorked: number;
+  overtimeHours: number;
+  ptoHours: number;
+  sickHours: number;
+  paidHolidayHours: number;
+  paidMeetingHours: number;
+  bonusAmount: number;
+  hygienePatientCount: number;
+  notes: string;
+  skipped: boolean;
+}
 
-function useIdentity(): StoredIdentity | null {
-  const [identity, setIdentity] = useState<StoredIdentity | null>(null);
+const EMPTY_ROW: RowFields = {
+  hoursWorked: 0, overtimeHours: 0, ptoHours: 0, sickHours: 0,
+  paidHolidayHours: 0, paidMeetingHours: 0, bonusAmount: 0, hygienePatientCount: 0, notes: "", skipped: false,
+};
+
+function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
+  return aStart <= bEnd && aEnd >= bStart;
+}
+
+async function loadTemps(): Promise<TempStaff[]> {
+  const { data, error } = await supabase.from("temps").select("*");
+  if (error) { console.error("loadTemps error:", error); return []; }
+  return (data ?? []).map((row) => ({
+    id: row.id, name: row.name, phone: row.phone ?? "", email: row.email ?? "",
+    role: row.role, skills: row.skills ?? [], rating: row.rating ?? 0,
+    notes: row.notes ?? "", addedAt: row.added_at,
+  }));
+}
+
+function PayrollPageBody() {
+  const [period, setPeriod] = useState<PayPeriod>(() => getPayPeriodForDate(new Date()));
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [temps, setTemps] = useState<TempStaff[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [savedEntries, setSavedEntries] = useState<Record<string, PayrollEntry>>({});
+  const [scheduledStaffIds, setScheduledStaffIds] = useState<Set<number>>(new Set());
+  const [scheduledTempIds, setScheduledTempIds] = useState<Set<string>>(new Set());
+  const [manuallyAdded, setManuallyAdded] = useState<Set<string>>(new Set());
+  const [rows, setRows] = useState<Record<string, RowFields>>({});
+  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [savedMsg, setSavedMsg] = useState<Record<string, string>>({});
+  const [globalMsg, setGlobalMsg] = useState("");
+  const [showAddPicker, setShowAddPicker] = useState(false);
+  const [mainTab, setMainTab] = useState<"payroll" | "growth" | "pv" | "ho" | "hygiene">("payroll");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { refresh(); }, [period.start]);
+
+  async function refresh() {
+    setLoading(true);
+    const y = Number(period.start.slice(0, 4));
+    const m = Number(period.start.slice(5, 7));
+    const [s, t, lr, h, entries, schedIds, tempAssignments] = await Promise.all([
+      loadStaff(), loadTemps(), loadLeaveRequests(), loadHolidays(), loadPayrollEntries(period.start),
+      getScheduledEmployeeIdsInRange(period.start, period.end),
+      getTempAssignmentsForMonth(y, m),
+    ]);
+    setStaff(s);
+    setTemps(t);
+    setLeaveRequests(lr);
+    setHolidays(h);
+    setScheduledStaffIds(schedIds);
+    setScheduledTempIds(new Set(tempAssignments.filter((a) => a.date >= period.start && a.date <= period.end).map((a) => a.tempId)));
+    setManuallyAdded(new Set());
+    const entryMap: Record<string, PayrollEntry> = {};
+    for (const e of entries) entryMap[e.personKey] = e;
+    setSavedEntries(entryMap);
+    setLoading(false);
+  }
+
+  const employeeRows: PersonRow[] = useMemo(() => {
+    return staff
+      .filter((e) => !e.excludeFromPayroll)
+      .filter((e) => scheduledStaffIds.has(e.id) || manuallyAdded.has(`staff:${e.id}`) || savedEntries[`staff:${e.id}`])
+      .map((e) => ({ personKey: `staff:${e.id}`, personName: e.name, isTemp: false, employee: e }))
+      .sort((a, b) => a.personName.localeCompare(b.personName));
+  }, [staff, scheduledStaffIds, manuallyAdded, savedEntries]);
+
+  const tempRows: PersonRow[] = useMemo(() => {
+    return temps
+      .filter((t) => scheduledTempIds.has(t.id) || manuallyAdded.has(`temp:${t.id}`) || savedEntries[`temp:${t.id}`])
+      .map((t) => ({ personKey: `temp:${t.id}`, personName: t.name, isTemp: true }))
+      .sort((a, b) => a.personName.localeCompare(b.personName));
+  }, [temps, scheduledTempIds, manuallyAdded, savedEntries]);
+
+  const addablePeople: PersonRow[] = useMemo(() => {
+    const shown = new Set([...employeeRows, ...tempRows].map((p) => p.personKey));
+    const staffOptions = staff
+      .filter((e) => !e.excludeFromPayroll && !shown.has(`staff:${e.id}`))
+      .map((e) => ({ personKey: `staff:${e.id}`, personName: e.name + (e.archived ? " (archived)" : ""), isTemp: false, employee: e }));
+    const tempOptions = temps
+      .filter((t) => !shown.has(`temp:${t.id}`))
+      .map((t) => ({ personKey: `temp:${t.id}`, personName: t.name, isTemp: true }));
+    return [...staffOptions, ...tempOptions].sort((a, b) => a.personName.localeCompare(b.personName));
+  }, [staff, temps, employeeRows, tempRows]);
+
+  function sumApprovedHours(employeeId: number, reason: "pto" | "sick"): number {
+    return leaveRequests
+      .filter((r) => r.employeeId === employeeId && r.status === "approved" && r.reason === reason)
+      .filter((r) => overlaps(r.startDate, r.endDate, period.start, period.end))
+      .reduce((sum, r) => sum + (r.paidHours ?? r.totalDays * 8), 0);
+  }
+
+  const holidayHoursInPeriod = useMemo(() => {
+    const count = holidays.filter((h) => h.type === "holiday" && h.date >= period.start && h.date <= period.end).length;
+    return count * 8;
+  }, [holidays, period]);
+
   useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(IDENTITY_SESSION_KEY);
-      if (saved) setIdentity(JSON.parse(saved));
-    } catch {
-      // sessionStorage unavailable — treat as not logged in
-    }
-  }, []);
-  return identity;
-}
-
-function hasAccess(permission: PermissionLevel, identity: StoredIdentity | null): boolean {
-  if (permission === "public") return true;
-  if (!identity) return false;
-  if (permission === "any") return true;
-  return !!identity[permission];
-}
-
-function useLowBalanceWarning(identity: StoredIdentity | null): boolean {
-  const [warning, setWarning] = useState(false);
-  useEffect(() => {
-    if (!identity?.canManagePayroll) return;
-    let cancelled = false;
-    Promise.all([loadLatestBalances(), loadMinComfortableBalance()]).then(([balances, minComfortable]) => {
-      if (cancelled) return;
-      const current = balances[PRIMARY_CASH_ACCOUNT]?.balance ?? 0;
-      setWarning(current < minComfortable);
-    });
-    return () => { cancelled = true; };
-  }, [identity?.canManagePayroll]);
-  return warning;
-}
-
-function usePendingSignature(identity: StoredIdentity | null): boolean {
-  const [pending, setPending] = useState(false);
-  useEffect(() => {
-    if (identity?.employeeId == null || identity.exemptFromPolicySigning) return;
-    let cancelled = false;
-    (async () => {
-      const { data: docs } = await supabase.from("policy_documents").select("id");
-      for (const doc of docs ?? []) {
-        const { data: reqRow } = await supabase.from("policy_requirements").select("id")
-          .eq("document_id", doc.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-        if (!reqRow) continue;
-        const { data: sig } = await supabase.from("policy_signatures").select("id")
-          .eq("requirement_id", reqRow.id).eq("employee_id", identity.employeeId).maybeSingle();
-        if (!sig && !cancelled) { setPending(true); return; }
+    if (loading) return;
+    const next: Record<string, RowFields> = {};
+    for (const p of [...employeeRows, ...tempRows]) {
+      const saved = savedEntries[p.personKey];
+      if (saved) {
+        next[p.personKey] = {
+          hoursWorked: saved.hoursWorked, overtimeHours: saved.overtimeHours,
+          ptoHours: saved.ptoHours, sickHours: saved.sickHours,
+          paidHolidayHours: saved.paidHolidayHours, paidMeetingHours: saved.paidMeetingHours,
+          bonusAmount: saved.bonusAmount, hygienePatientCount: saved.hygienePatientCount,
+          notes: saved.notes, skipped: saved.skipped ?? false,
+        };
+      } else {
+        next[p.personKey] = {
+          ...EMPTY_ROW,
+          ptoHours: p.employee ? sumApprovedHours(p.employee.id, "pto") : 0,
+          sickHours: p.employee ? sumApprovedHours(p.employee.id, "sick") : 0,
+          paidHolidayHours: p.employee ? holidayHoursInPeriod : 0,
+        };
       }
-      if (!cancelled) setPending(false);
-    })();
-    return () => { cancelled = true; };
-  }, [identity?.employeeId]);
-  return pending;
-}
+    }
+    setRows(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, savedEntries, employeeRows.length, tempRows.length]);
 
-function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
-  const identity = useIdentity();
-  const lowBalanceWarning = useLowBalanceWarning(identity);
-  const pendingSignature = usePendingSignature(identity);
+  function updateRow(personKey: string, field: keyof RowFields, value: number | string | boolean) {
+    setRows((r) => ({ ...r, [personKey]: { ...r[personKey], [field]: value } }));
+  }
+
+  function toggleSkip(personKey: string) {
+    setRows((r) => ({ ...r, [personKey]: { ...r[personKey], skipped: !r[personKey]?.skipped } }));
+  }
+
+  function recomputeAuto(p: PersonRow) {
+    if (!p.employee) return;
+    setRows((r) => ({
+      ...r,
+      [p.personKey]: {
+        ...r[p.personKey],
+        ptoHours: sumApprovedHours(p.employee!.id, "pto"),
+        sickHours: sumApprovedHours(p.employee!.id, "sick"),
+        paidHolidayHours: holidayHoursInPeriod,
+      },
+    }));
+  }
+
+  async function saveOne(p: PersonRow): Promise<boolean> {
+    const fields = rows[p.personKey] ?? EMPTY_ROW;
+    const saved = await savePayrollEntry({
+      payPeriodStart: period.start, payPeriodEnd: period.end,
+      personKey: p.personKey, personName: p.personName,
+      ...fields,
+    });
+    if (saved) setSavedEntries((e) => ({ ...e, [p.personKey]: saved }));
+    return !!saved;
+  }
+
+  async function handleSave(p: PersonRow) {
+    setSavingKey(p.personKey);
+    const ok = await saveOne(p);
+    setSavingKey(null);
+    setSavedMsg((m) => ({ ...m, [p.personKey]: ok ? "Saved." : "Not saved — try again." }));
+  }
+
+  async function handleSaveAll() {
+    setSavingAll(true);
+    setGlobalMsg("");
+    const all = [...employeeRows, ...tempRows];
+    const results = await Promise.all(all.map((p) => saveOne(p)));
+    setSavingAll(false);
+    const failed = results.filter((ok) => !ok).length;
+    setGlobalMsg(failed === 0 ? `Saved ${all.length} people.` : `Saved ${all.length - failed} of ${all.length} — ${failed} failed, try again.`);
+  }
+
+  async function handleBalanceChange(employee: Employee, field: "pto" | "sick", hours: number) {
+    await setLeaveBalance(employee.id, field, hours);
+    await refresh();
+  }
+
+  function handleAddPerson(p: PersonRow) {
+    setManuallyAdded((s) => new Set(s).add(p.personKey));
+    setShowAddPicker(false);
+  }
+
+  const isHygienist = (e?: Employee) => e && (e.role === "Hygienist" || e.skills.includes("Hygienist"));
+
+  function TableSection({ title, people }: { title: string; people: PersonRow[] }) {
+    if (people.length === 0) {
+      return (
+        <div>
+          <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">{title}</h2>
+          <p className="text-sm text-slate-400">Nobody in this group for this period.</p>
+        </div>
+      );
+    }
+    return (
+      <div>
+        <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">{title}</h2>
+        <div className="overflow-x-auto rounded-xl bg-white shadow-sm">
+          <table className="w-full text-sm border-collapse min-w-[900px]">
+            <thead>
+              <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-2 py-2 font-medium w-20">Hours</th>
+                <th className="px-2 py-2 font-medium w-16">OT</th>
+                <th className="px-2 py-2 font-medium w-16">PTO</th>
+                <th className="px-2 py-2 font-medium w-16">Sick</th>
+                <th className="px-2 py-2 font-medium w-16">Hol.</th>
+                <th className="px-2 py-2 font-medium w-16">Mtg</th>
+                <th className="px-2 py-2 font-medium w-20">Bonus $</th>
+                <th className="px-2 py-2 font-medium w-16">Hyg Pts</th>
+                <th className="px-3 py-2 font-medium">Notes</th>
+                <th className="px-2 py-2 font-medium w-20"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {people.map((p) => {
+                const fields = rows[p.personKey] ?? EMPTY_ROW;
+                const skipped = fields.skipped;
+                const cellClass = "w-full rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none disabled:bg-slate-50 disabled:text-slate-300";
+                return (
+                  <tr key={p.personKey} className={`border-b border-slate-50 last:border-0 ${skipped ? "opacity-50" : ""}`}>
+                    <td className="px-3 py-1.5 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                          style={{ backgroundColor: p.employee?.color ?? "#6b7280" }}>
+                          {p.personName.charAt(0)}
+                        </div>
+                        <span className="font-medium text-slate-700">{p.personName}</span>
+                      </div>
+                    </td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5">
+                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-1 py-1.5">
+                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-1 py-1.5">
+                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5">
+                      {isHygienist(p.employee) ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))} className={cellClass} title={`$${(fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT).toFixed(2)} bonus`} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-2 py-1.5"><input type="text" disabled={skipped} value={fields.notes} onChange={(e) => updateRow(p.personKey, "notes", e.target.value)} className={cellClass + " min-w-[100px]"} /></td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      <button onClick={() => toggleSkip(p.personKey)} className={`text-xs font-medium px-2 py-1 rounded ${skipped ? "bg-slate-100 text-slate-500" : "text-slate-400 hover:bg-slate-100"}`}>
+                        {skipped ? "Unskip" : "Skip"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderCard(p: PersonRow) {
+    const fields = rows[p.personKey] ?? EMPTY_ROW;
+    const expanded = expandedKey === p.personKey;
+    const hygieneBonus = fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT;
+    return (
+      <div key={p.personKey} className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <button onClick={() => setExpandedKey(expanded ? null : p.personKey)}
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
+          <div className="flex items-center gap-2.5">
+            <div className="h-7 w-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+              style={{ backgroundColor: p.employee?.color ?? "#6b7280" }}>
+              {p.personName.charAt(0)}
+            </div>
+            <span className="text-sm font-semibold text-slate-700">{p.personName}</span>
+            <span className="text-xs text-slate-400">{p.employee?.role ?? "Temp"}</span>
+          </div>
+          <span className="text-slate-300 text-xs">{expanded ? "▲" : "▼"}</span>
+        </button>
+
+        {expanded && (
+          <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
+            {p.employee && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">PTO Balance (hrs)</label>
+                  <input type="number" onFocus={(e) => e.target.select()} defaultValue={p.employee.ptoBalanceHours ?? 0}
+                    onBlur={(e) => handleBalanceChange(p.employee!, "pto", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">Sick Balance (hrs)</label>
+                  <input type="number" onFocus={(e) => e.target.select()} defaultValue={p.employee.sickBalanceHours ?? 0}
+                    onBlur={(e) => handleBalanceChange(p.employee!, "sick", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">Hours Worked</label>
+                <input type="number" onFocus={(e) => e.target.select()} value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">OT Hours</label>
+                <input type="number" onFocus={(e) => e.target.select()} value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">Bonus ($)</label>
+                <input type="number" onFocus={(e) => e.target.select()} value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+              </div>
+            </div>
+
+            {p.employee && (
+              <div>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs text-slate-400">PTO / Sick / Holiday (this period)</span>
+                  <button onClick={() => recomputeAuto(p)} className="text-xs text-orange-500 hover:underline">↺ recompute</button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-0.5">Paid Meeting/Day-off Hours</label>
+              <input type="number" onFocus={(e) => e.target.select()} value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))}
+                className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+            </div>
+
+            {isHygienist(p.employee) && (
+              <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-2.5 flex items-center gap-3">
+                <div>
+                  <label className="block text-xs text-emerald-700 mb-0.5">Hygiene Patients</label>
+                  <input type="number" onFocus={(e) => e.target.select()} value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))}
+                    className="w-20 rounded-lg border border-emerald-200 px-2 py-1 text-sm focus:outline-none" />
+                </div>
+                <span className="text-sm text-emerald-700">× ${HYGIENE_BONUS_PER_PATIENT} = <strong>${hygieneBonus.toFixed(2)}</strong></span>
+              </div>
+            )}
+
+            <input type="text" value={fields.notes} onChange={(e) => updateRow(p.personKey, "notes", e.target.value)}
+              placeholder="Notes (optional)" className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+
+            <div className="flex items-center gap-3">
+              <button onClick={() => handleSave(p)} disabled={savingKey === p.personKey}
+                className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50"
+                style={{ backgroundColor: "#e8622a" }}>
+                {savingKey === p.personKey ? "Saving…" : "Save"}
+              </button>
+              <button onClick={() => toggleSkip(p.personKey)} className="text-xs text-slate-400 hover:text-slate-600 underline">
+                {fields.skipped ? "Unskip (will be paid)" : "Skip (not paid this period)"}
+              </button>
+              {savedMsg[p.personKey] && <span className="text-xs text-slate-400">{savedMsg[p.personKey]}</span>}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
-    <>
-      <div className="px-5 py-5 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-        <div className="rounded-xl px-3 py-2.5 flex items-center justify-center" style={{ background: "white" }}>
-          <Image src="/logo.svg" alt="Deccan Dental Sleep Center" width={160} height={55} className="object-contain" priority />
-        </div>
-        <div className="mt-3 text-xs font-semibold tracking-widest uppercase text-center" style={{ color: "rgba(255,255,255,0.3)" }}>
-          Staff Scheduler
-        </div>
-      </div>
+    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+      <Sidebar />
+      <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+        <header className="mb-4">
+          <h1 className="text-2xl font-bold">Payroll Dashboard</h1>
+        </header>
 
-      <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-0.5">
-        {navItems.map((item, i) => {
-          const active = pathname === item.href;
-          const accessible = hasAccess(item.permission, identity);
-          const showGroupLabel = item.group && item.group !== navItems[i - 1]?.group;
-          return (
-            <div key={item.href}>
-              {showGroupLabel && (
-                <div className="px-3 pt-4 pb-1 text-xs font-semibold tracking-widest uppercase" style={{ color: "rgba(255,255,255,0.25)" }}>
-                  {item.group}
+        <div className="mb-4 flex rounded-lg border border-slate-200 bg-white overflow-hidden w-fit">
+          <button onClick={() => setMainTab("payroll")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "payroll" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Payroll
+          </button>
+          <button onClick={() => setMainTab("growth")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "growth" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Growth Bonus
+          </button>
+          <button onClick={() => setMainTab("pv")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "pv" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Net Production Bonus
+          </button>
+          <button onClick={() => setMainTab("ho")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "ho" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Dr. Ho
+          </button>
+          <button onClick={() => setMainTab("hygiene")} className="px-4 py-2 text-sm font-semibold transition"
+            style={mainTab === "hygiene" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+            Hygiene Bonus
+          </button>
+        </div>
+
+        {mainTab === "growth" && <GrowthBonusPanel />}
+        {mainTab === "pv" && <PvBonusPanel />}
+        {mainTab === "ho" && <HoBonusPanel />}
+        {mainTab === "hygiene" && <HygieneBonusPanel />}
+
+        {mainTab === "payroll" && (
+        <>
+        <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setPeriod((p) => stepPayPeriod(p, -1))} className="rounded-lg border px-3 py-1.5 text-slate-500 hover:bg-slate-50 transition bg-white">←</button>
+            <span className="font-bold min-w-[200px] text-center">{period.label}</span>
+            <button onClick={() => setPeriod((p) => stepPayPeriod(p, 1))} className="rounded-lg border px-3 py-1.5 text-slate-500 hover:bg-slate-50 transition bg-white">→</button>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden">
+              <button onClick={() => setViewMode("table")} className="px-3 py-1.5 text-sm font-semibold transition"
+                style={viewMode === "table" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                Table
+              </button>
+              <button onClick={() => setViewMode("cards")} className="px-3 py-1.5 text-sm font-semibold transition"
+                style={viewMode === "cards" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+                Cards
+              </button>
+            </div>
+            <div className="relative">
+              <button onClick={() => setShowAddPicker((s) => !s)}
+                className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                + Add Person
+              </button>
+              {showAddPicker && (
+                <div className="absolute right-0 mt-1 w-64 max-h-72 overflow-y-auto rounded-lg bg-white shadow-lg border border-slate-200 z-10">
+                  {addablePeople.length === 0 ? (
+                    <p className="text-xs text-slate-400 p-3">Everyone's already listed.</p>
+                  ) : addablePeople.map((p) => (
+                    <button key={p.personKey} onClick={() => handleAddPerson(p)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition border-b border-slate-50 last:border-0">
+                      {p.personName}
+                    </button>
+                  ))}
                 </div>
               )}
-              <Link
-                href={item.href}
-                onClick={onNavigate}
-                className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150"
-                style={
-                  active
-                    ? { background: "#e8622a", color: "white", boxShadow: "0 4px 14px rgba(232, 98, 42, 0.35)" }
-                    : accessible
-                    ? { color: "rgba(255,255,255,0.6)" }
-                    : { color: "rgba(255,255,255,0.25)" }
-                }
-                onMouseEnter={(e) => {
-                  if (!active) {
-                    (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
-                    (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.4)";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!active) {
-                    (e.currentTarget as HTMLElement).style.background = "transparent";
-                    (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)";
-                  }
-                }}
-              >
-                <span className="text-base leading-none w-5 text-center flex-shrink-0" style={{ opacity: accessible ? 1 : 0.4 }}>{item.icon}</span>
-                <span className="flex-1">{item.label}</span>
-                {item.href === "/cashflow" && lowBalanceWarning && (
-                  <span className="text-xs flex-shrink-0" title="Cash balance is low">🚨</span>
-                )}
-                {item.href === "/handbook" && pendingSignature && (
-                  <span className="text-xs flex-shrink-0" title="Signature needed">✍️</span>
-                )}
-                {!accessible && <span className="text-xs flex-shrink-0" style={{ opacity: 0.5 }}>🔒</span>}
-                {active && <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.85)" }} />}
-              </Link>
             </div>
-          );
-        })}
-      </nav>
-
-      <div className="px-5 py-4 flex-shrink-0" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>D</div>
-          <div>
-            <div className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>Deccan Dental</div>
-            <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Sleep Center</div>
           </div>
         </div>
+
+        {loading ? (
+          <p className="text-slate-400 text-sm">Loading…</p>
+        ) : (
+          <div className={viewMode === "table" ? "space-y-6" : "space-y-6 max-w-3xl"}>
+            {viewMode === "table" ? (
+              <>
+                <TableSection title="Employees" people={employeeRows} />
+                <TableSection title="Temps" people={tempRows} />
+                <div className="flex items-center gap-3">
+                  <button onClick={handleSaveAll} disabled={savingAll}
+                    className="rounded-lg px-5 py-2 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50"
+                    style={{ backgroundColor: "#e8622a" }}>
+                    {savingAll ? "Saving…" : `Save All (${employeeRows.length + tempRows.length})`}
+                  </button>
+                  {globalMsg && <span className="text-xs text-slate-400">{globalMsg}</span>}
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Employees</h2>
+                  <div className="space-y-2">
+                    {employeeRows.length === 0 ? <p className="text-sm text-slate-400">No employees scheduled this period.</p> : employeeRows.map(renderCard)}
+                  </div>
+                </div>
+                <div>
+                  <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Temps</h2>
+                  <div className="space-y-2">
+                    {tempRows.length === 0 ? <p className="text-sm text-slate-400">No temps assigned this period.</p> : tempRows.map(renderCard)}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        </>
+        )}
       </div>
-    </>
+    </main>
   );
 }
 
-export function Sidebar() {
-  const pathname = usePathname();
-  const [open, setOpen] = useState(false);
+const QUARTER_LABELS: Record<1 | 2 | 3 | 4, string> = { 1: "Q1 (Jan–Mar)", 2: "Q2 (Apr–Jun)", 3: "Q3 (Jul–Sep)", 4: "Q4 (Oct–Dec)" };
+
+function GrowthBonusPanel() {
+  const initial = getCurrentQuarter();
+  const [year, setYear] = useState(initial.year);
+  const [quarter, setQuarter] = useState<1 | 2 | 3 | 4>(initial.quarter);
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [yearQuarters, setYearQuarters] = useState<Record<number, GrowthBonusQuarter>>({});
+  const [yearEntries, setYearEntries] = useState<PayrollEntry[]>([]);
+  const [hoursOverrides, setHoursOverrides] = useState<Record<number, Record<number, number>>>({});
+  const [payments, setPayments] = useState<GrowthBonusPayment[]>([]);
+  const [form, setForm] = useState({ bamThreshold: 378000, netProductionCurrent: 0, netProductionPriorYear: 0 });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+  const [payingFor, setPayingFor] = useState<number | null>(null);
+  const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().split("T")[0], amount: "", notes: "" });
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editPaymentForm, setEditPaymentForm] = useState({ date: "", amount: "", notes: "" });
+  const [safeToPayTotal, setSafeToPayTotal] = useState<number | null>(null);
+
+  useEffect(() => { refresh(); }, [year]);
+
+  useEffect(() => {
+    const q = yearQuarters[quarter];
+    if (q) setForm({ bamThreshold: q.bamThreshold, netProductionCurrent: q.netProductionCurrent, netProductionPriorYear: q.netProductionPriorYear });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quarter, yearQuarters]);
+
+  async function refresh() {
+    setLoading(true);
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+    const [s, q1, q2, q3, q4, entries, pays, d1, d2, d3, d4] = await Promise.all([
+      loadStaff(),
+      loadGrowthBonusQuarter(year, 1), loadGrowthBonusQuarter(year, 2), loadGrowthBonusQuarter(year, 3), loadGrowthBonusQuarter(year, 4),
+      loadPayrollEntriesInRange(yearStart, yearEnd),
+      loadGrowthBonusPayments(),
+      loadGrowthBonusHoursOverrides(year, 1), loadGrowthBonusHoursOverrides(year, 2),
+      loadGrowthBonusHoursOverrides(year, 3), loadGrowthBonusHoursOverrides(year, 4),
+    ]);
+    setStaff(s);
+    setYearQuarters({ 1: q1, 2: q2, 3: q3, 4: q4 });
+    setYearEntries(entries);
+    setHoursOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
+    setPayments(pays.filter((p) => p.date >= yearStart && p.date <= yearEnd));
+
+    // How much bonus can safely be paid out right now, per the Cash Flow
+    // tool's own numbers — current Fifth Third balance minus everything else
+    // already scheduled to come out in the next 30 days, minus its cushion.
+    const today = new Date().toISOString().split("T")[0];
+    const [accounts, balances, cashBills, cashPayments] = await Promise.all([
+      loadCashAccounts(), loadLatestBalances(),
+      loadCashflowBills(), loadCashflowBillPayments(today, addCashflowDays(today, 30)),
+    ]);
+    const fifthThird = accounts.find((a) => a.name === "Fifth Third");
+    const currentCashBalance = fifthThird ? (balances[fifthThird.name]?.balance ?? 0) : 0;
+    const minComfortable = fifthThird?.cushionTarget ?? 10000;
+    const occurrences = buildCashflowOccurrences(cashBills, cashPayments, today, addCashflowDays(today, 30));
+    const safeToSpend30 = computeSafeToSpend(currentCashBalance, today, occurrences, 30);
+    setSafeToPayTotal(Math.max(0, safeToSpend30 - minComfortable));
+
+    setLoading(false);
+  }
+
+  async function handleSaveQuarter() {
+    setSaving(true);
+    await saveGrowthBonusQuarter({ year, quarter, ...form });
+    setSaving(false);
+    setSavedMsg("Saved.");
+    await refresh();
+  }
+
+  function splitForQuarter(q: 1 | 2 | 3 | 4, qData: GrowthBonusQuarter | undefined) {
+    if (!qData) return { calc: null as ReturnType<typeof computeQuarterCalc> | null, split: [] as (ReturnType<typeof splitBonusPool>[number] & { hours: number })[] };
+    const calc = computeQuarterCalc(qData);
+    const { start, end } = getQuarterDateRange(year, q);
+    const eligible = staff.filter((e) => isEligibleForQuarter(e, end));
+    const overridesForQ = hoursOverrides[q] ?? {};
+    const rows = eligible.map((e) => {
+      const hours = overridesForQ[e.id] ?? computeHoursWorkedInQuarter(e.id, start, end, yearEntries);
+      return { employee: e, hours, days: hoursToDays(hours) };
+    });
+    const splitRaw = calc.eligible ? splitBonusPool(calc.bonusPool, rows) : rows.map((r) => ({ employee: r.employee, days: r.days, multiplier: r.employee.growthBonusMultiplier ?? 1, points: 0, bonus: 0 }));
+    const split = splitRaw.map((r, i) => ({ ...r, hours: rows[i].hours }));
+    return { calc, split };
+  }
+
+  const { calc, split } = splitForQuarter(quarter, yearQuarters[quarter]);
+  const requiredProduction = calc ? Math.max(form.bamThreshold, form.netProductionPriorYear * 1.2) : 0;
+  const progressPct = requiredProduction > 0 ? Math.min(100, Math.round((form.netProductionCurrent / requiredProduction) * 100)) : 0;
+  const progressColor = calc?.eligible ? "#10b981" : progressPct >= 70 ? "#f59e0b" : progressPct >= 40 ? "#fb923c" : "#f87171";
+
+  async function handleHoursEdit(employeeId: number, hours: number) {
+    await saveGrowthBonusHoursOverride(year, quarter, employeeId, hours);
+    await refresh();
+  }
+
+  // YTD earned per employee: sum this year's quarters that actually qualified.
+  const ytdEarned: Record<number, number> = {};
+  ([1, 2, 3, 4] as const).forEach((q) => {
+    const { split: qSplit } = splitForQuarter(q, yearQuarters[q]);
+    qSplit.forEach((row) => { ytdEarned[row.employee.id] = (ytdEarned[row.employee.id] ?? 0) + row.bonus; });
+  });
+  const ytdPaid: Record<number, number> = {};
+  payments.forEach((p) => { ytdPaid[p.employeeId] = (ytdPaid[p.employeeId] ?? 0) + p.amount; });
+
+  // If cash is tight, split whatever's safely available proportionally
+  // across everyone with an outstanding balance — nobody's earned amount
+  // changes, this only affects how fast each person gets paid out.
+  const totalOwed = Object.keys(ytdEarned).reduce((sum, id) => sum + Math.max(0, (ytdEarned[Number(id)] ?? 0) - (ytdPaid[Number(id)] ?? 0)), 0);
+  const payableNow = safeToPayTotal != null ? Math.min(safeToPayTotal, totalOwed) : null;
+  const isConstrained = payableNow != null && totalOwed > 0 && payableNow < totalOwed;
+  function suggestedPayNow(employeeId: number): number {
+    if (payableNow == null || totalOwed <= 0) return 0;
+    const owed = Math.max(0, (ytdEarned[employeeId] ?? 0) - (ytdPaid[employeeId] ?? 0));
+    return Math.round(payableNow * (owed / totalOwed));
+  }
+
+  async function handleAddPayment(employeeId: number) {
+    const amount = Number(paymentForm.amount);
+    if (!amount || amount <= 0) return;
+    await addGrowthBonusPayment({ employeeId, date: paymentForm.date, amount, notes: paymentForm.notes });
+    setPayingFor(null);
+    setPaymentForm({ date: new Date().toISOString().split("T")[0], amount: "", notes: "" });
+    await refresh();
+  }
+
+  function startEditPayment(p: GrowthBonusPayment) {
+    setEditingPaymentId(p.id);
+    setEditPaymentForm({ date: p.date, amount: String(p.amount), notes: p.notes });
+  }
+
+  async function handleUpdatePayment(id: string) {
+    const amount = Number(editPaymentForm.amount);
+    if (!amount || amount <= 0) return;
+    await updateGrowthBonusPayment(id, { date: editPaymentForm.date, amount, notes: editPaymentForm.notes });
+    setEditingPaymentId(null);
+    await refresh();
+  }
+
+  async function handleDeletePayment(id: string) {
+    if (!confirm("Delete this logged payment? This can't be undone.")) return;
+    await deleteGrowthBonusPayment(id);
+    await refresh();
+  }
+
+  if (loading) return <p className="text-slate-400 text-sm">Loading…</p>;
 
   return (
-    <>
-      {/* ── Desktop sidebar (lg+) ── */}
-      <aside
-        className="hidden lg:flex fixed left-0 top-0 z-50 h-screen w-64 flex-col"
-        style={{ background: "linear-gradient(180deg, #2d3148 0%, #353a56 100%)", borderRight: "1px solid rgba(255,255,255,0.08)" }}
-      >
-        <NavContent pathname={pathname} />
-      </aside>
-
-      {/* ── Mobile top bar (< lg) ── */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-3 bg-white shadow-sm">
-        <div>
-          <div style={{ fontWeight: 700, color: "#5a5a5a", fontSize: 16 }}>
-            deccan<span style={{ color: "#e8622a" }}>|</span>dental
-          </div>
-          <div style={{ fontSize: 10, color: "#9a9a9a", letterSpacing: "0.1em" }}>STAFF SCHEDULER</div>
+    <div className="max-w-4xl space-y-6">
+      <div className="flex items-center gap-3">
+        <input type="number" onFocus={(e) => e.target.select()} value={year} onChange={(e) => setYear(Number(e.target.value))}
+          className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+        <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden">
+          {([1, 2, 3, 4] as const).map((q) => (
+            <button key={q} onClick={() => setQuarter(q)} className="px-3 py-1.5 text-sm font-semibold transition"
+              style={quarter === q ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
+              {QUARTER_LABELS[q]}
+            </button>
+          ))}
         </div>
-        <button onClick={() => setOpen(true)} style={{ fontSize: 24, color: "#5a5a5a", lineHeight: 1 }} aria-label="Open menu">☰</button>
       </div>
 
-      {/* ── Mobile drawer overlay ── */}
-      {open && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
-          <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setOpen(false)} />
-          <aside
-            className="relative flex flex-col w-72 h-full"
-            style={{ background: "linear-gradient(180deg, #2d3148 0%, #353a56 100%)" }}
-          >
-            <button
-              onClick={() => setOpen(false)}
-              className="absolute top-4 right-4 text-white text-xl opacity-60 hover:opacity-100 transition"
-              aria-label="Close menu"
-            >✕</button>
-            <NavContent pathname={pathname} onNavigate={() => setOpen(false)} />
-          </aside>
+      <div className="rounded-xl bg-white shadow-sm p-4 space-y-3">
+        <h2 className="font-bold text-slate-700 text-lg">{QUARTER_LABELS[quarter]} {year} Bonus</h2>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-0.5">Net Production ({year})</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={form.netProductionCurrent} onChange={(e) => setForm((f) => ({ ...f, netProductionCurrent: Number(e.target.value) }))}
+              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-0.5">Net Production ({year - 1}, same quarter)</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={form.netProductionPriorYear} onChange={(e) => setForm((f) => ({ ...f, netProductionPriorYear: Number(e.target.value) }))}
+              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-0.5">BAM Threshold</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={form.bamThreshold} onChange={(e) => setForm((f) => ({ ...f, bamThreshold: Number(e.target.value) }))}
+              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={handleSaveQuarter} disabled={saving}
+            className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+          {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
+        </div>
+
+        <div>
+          <div className="w-full h-3 rounded-full bg-slate-100 overflow-hidden">
+            <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: progressColor }} />
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            {progressPct}% of the way to this quarter's bonus target (${formatMoney(requiredProduction)}){calc?.eligible ? " — target met! 🎉" : ""}
+          </p>
+        </div>
+
+        {calc && (
+          <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
+            <div>Growth vs last year: <strong>{(calc.growthPct * 100).toFixed(1)}%</strong> (delta ${formatMoney(calc.delta)})</div>
+            <div>Production above BAM: <strong>${formatMoney(calc.excessOverBam)}</strong> — this is what the rate applies to</div>
+            <div className="flex gap-4 text-xs">
+              <span className={calc.meetsBam ? "text-green-600" : "text-red-500"}>{calc.meetsBam ? "✓" : "✗"} Exceeds BAM</span>
+              <span className={calc.meetsGrowth ? "text-green-600" : "text-red-500"}>{calc.meetsGrowth ? "✓" : "✗"} 20%+ growth</span>
+            </div>
+            {calc.eligible ? (
+              <div className="text-emerald-700 font-semibold">🎉 Bonus pool: ${formatMoney(calc.bonusPool)} (at {(calc.tierPct * 100).toFixed(0)}% of the excess over BAM)</div>
+            ) : (
+              <div className="text-slate-400">No bonus pool this quarter — thresholds not met.</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <h2 className="px-4 pt-3 font-bold text-slate-700 text-sm">{QUARTER_LABELS[quarter]} {year} — Bonus Split</h2>
+        <p className="px-4 pt-1 text-xs text-slate-400">"Hours" auto-fills from Payroll once that's in use for a period — you can also type a number directly (e.g. for quarters before Payroll was tracked). Days are calculated from hours ÷ 8.</p>
+
+        {totalOwed > 0 && (
+          <div className="mx-4 mt-3 rounded-lg p-3" style={{ background: isConstrained ? "#fef3c7" : "#d1fae5" }}>
+            {safeToPayTotal == null ? (
+              <p className="text-xs text-slate-500">Checking Cash Flow for what's safe to pay right now…</p>
+            ) : isConstrained ? (
+              <p className="text-sm text-amber-800">
+                <strong>💰 Safe to pay right now: ${formatMoney(payableNow ?? 0)}</strong> of ${formatMoney(totalOwed)} owed — cash is tight, so the "Suggested" column below splits what's available proportionally across everyone's balance. Nothing owed is reduced, this only paces out the timing.
+              </p>
+            ) : (
+              <p className="text-sm text-emerald-800">
+                <strong>💰 Safe to pay right now: ${formatMoney(payableNow ?? 0)}</strong> — enough to cover the full ${formatMoney(totalOwed)} currently owed.
+              </p>
+            )}
+          </div>
+        )}
+
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+              <th className="px-3 py-2 font-medium">Name</th>
+              <th className="px-2 py-2 font-medium">Hours</th>
+              <th className="px-2 py-2 font-medium">Days</th>
+              <th className="px-2 py-2 font-medium">Mult.</th>
+              <th className="px-2 py-2 font-medium">Points</th>
+              <th className="px-2 py-2 font-medium">This Qtr</th>
+              <th className="px-2 py-2 font-medium">Earned YTD</th>
+              <th className="px-2 py-2 font-medium">Paid YTD</th>
+              <th className="px-2 py-2 font-medium">Balance</th>
+              {isConstrained && <th className="px-2 py-2 font-medium">Suggested</th>}
+              <th className="px-2 py-2 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {split.length === 0 ? (
+              <tr><td colSpan={isConstrained ? 11 : 10} className="px-3 py-4 text-slate-400 text-sm">No one is eligible yet for this quarter.</td></tr>
+            ) : split.map((row) => {
+              const earned = ytdEarned[row.employee.id] ?? 0;
+              const paid = ytdPaid[row.employee.id] ?? 0;
+              const balance = earned - paid;
+              return (
+                <tr key={row.employee.id} className="border-b border-slate-50 last:border-0">
+                  <td className="px-3 py-2 font-medium text-slate-700">{row.employee.name}</td>
+                  <td className="px-2 py-2">
+                    <input type="number" onFocus={(e) => e.target.select()} defaultValue={row.hours} onBlur={(e) => handleHoursEdit(row.employee.id, Number(e.target.value))}
+                      className="w-20 rounded border border-slate-200 px-1.5 py-0.5 text-xs focus:outline-none" />
+                  </td>
+                  <td className="px-2 py-2 text-slate-500">{row.days}</td>
+                  <td className="px-2 py-2">{row.multiplier}</td>
+                  <td className="px-2 py-2">{row.points}</td>
+                  <td className="px-2 py-2 font-semibold">${formatMoney(row.bonus)}</td>
+                  <td className="px-2 py-2">${formatMoney(earned)}</td>
+                  <td className="px-2 py-2">${formatMoney(paid)}</td>
+                  <td className={`px-2 py-2 font-semibold ${balance > 0 ? "text-amber-600" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                  {isConstrained && (
+                    <td className="px-2 py-2 font-semibold text-amber-600">${formatMoney(suggestedPayNow(row.employee.id))}</td>
+                  )}
+                  <td className="px-2 py-2">
+                    {payingFor === row.employee.id ? (
+                      <div className="flex items-center gap-1">
+                        <input type="date" value={paymentForm.date} onChange={(e) => setPaymentForm((f) => ({ ...f, date: e.target.value }))}
+                          className="rounded border border-slate-200 px-1 py-0.5 text-xs w-28" />
+                        <input type="number" onFocus={(e) => e.target.select()} placeholder="$" value={paymentForm.amount} onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                          className="rounded border border-slate-200 px-1 py-0.5 text-xs w-16" />
+                        <button onClick={() => handleAddPayment(row.employee.id)} className="text-xs text-white px-2 py-0.5 rounded" style={{ backgroundColor: "#e8622a" }}>Log</button>
+                        <button onClick={() => setPayingFor(null)} className="text-xs text-slate-400">✕</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setPayingFor(row.employee.id)} className="text-xs text-orange-500 hover:underline">+ Log payment</button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="rounded-xl bg-white shadow-sm p-4">
+        <h2 className="font-bold text-slate-700 mb-2 text-sm">Payment log ({year})</h2>
+        {payments.length === 0 ? <p className="text-sm text-slate-400">No payments logged yet.</p> : (
+          <div className="space-y-1 text-sm max-h-64 overflow-y-auto">
+            {payments.map((p) => {
+              const emp = staff.find((e) => e.id === p.employeeId);
+              if (editingPaymentId === p.id) {
+                return (
+                  <div key={p.id} className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-500">{emp?.name ?? "Unknown"}</span>
+                    <input type="date" value={editPaymentForm.date} onChange={(e) => setEditPaymentForm((f) => ({ ...f, date: e.target.value }))}
+                      className="rounded border border-slate-200 px-1 py-0.5 text-xs w-28" />
+                    <input type="number" onFocus={(e) => e.target.select()} placeholder="$" value={editPaymentForm.amount} onChange={(e) => setEditPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                      className="rounded border border-slate-200 px-1 py-0.5 text-xs w-20" />
+                    <input type="text" placeholder="Notes" value={editPaymentForm.notes} onChange={(e) => setEditPaymentForm((f) => ({ ...f, notes: e.target.value }))}
+                      className="rounded border border-slate-200 px-1 py-0.5 text-xs flex-1 min-w-[100px]" />
+                    <button onClick={() => handleUpdatePayment(p.id)} className="text-xs text-white px-2 py-0.5 rounded" style={{ backgroundColor: "#e8622a" }}>Save</button>
+                    <button onClick={() => setEditingPaymentId(null)} className="text-xs text-slate-400">Cancel</button>
+                  </div>
+                );
+              }
+              return (
+                <div key={p.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 gap-2">
+                  <span className="truncate">{emp?.name ?? "Unknown"} — {new Date(p.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{p.notes ? ` · ${p.notes}` : ""}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="font-semibold">${formatMoney(p.amount)}</span>
+                    <button onClick={() => startEditPayment(p)} className="text-xs text-orange-500 hover:underline">Edit</button>
+                    <button onClick={() => handleDeletePayment(p.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PvBonusPanel() {
+  const currentYear = new Date().getFullYear();
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [employeeId, setEmployeeId] = useState<number | null>(null);
+  const [years, setYears] = useState<number[]>([currentYear]);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set([currentYear]));
+  const [rows, setRows] = useState<Record<number, PvBonusQuarter[]>>({});
+  const [loading, setLoading] = useState(true);
+  const [savingYear, setSavingYear] = useState<number | null>(null);
+  const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
+  const [newYearInput, setNewYearInput] = useState("");
+
+  useEffect(() => {
+    loadStaff().then((s) => {
+      setStaff(s);
+      const eligible = s.filter((e) => e.pvBonusEligible);
+      if (eligible.length > 0) setEmployeeId(eligible[0].id);
+      else setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => { if (employeeId != null) loadYears(years); }, [employeeId]);
+
+  async function loadYears(ys: number[]) {
+    if (employeeId == null) return;
+    setLoading(true);
+    const results = await Promise.all(ys.map((y) => loadPvBonusYear(employeeId, y)));
+    setRows((r) => { const next = { ...r }; ys.forEach((y, i) => { next[y] = results[i]; }); return next; });
+    setLoading(false);
+  }
+
+  function toggleExpanded(y: number) {
+    setExpanded((s) => { const next = new Set(s); if (next.has(y)) next.delete(y); else next.add(y); return next; });
+  }
+
+  function addYear() {
+    const y = Number(newYearInput);
+    if (!y || years.includes(y)) return;
+    setYears((ys) => [...ys, y]);
+    setExpanded((s) => new Set(s).add(y));
+    setNewYearInput("");
+    loadYears([y]);
+  }
+
+  function updateCell(year: number, quarter: number, field: "totalIncome" | "amountPaid" | "notes" | "paid", value: number | string | boolean) {
+    setRows((r) => ({ ...r, [year]: (r[year] ?? []).map((q) => q.quarter === quarter ? { ...q, [field]: value } : q) }));
+  }
+
+  async function handleSaveYear(year: number) {
+    setSavingYear(year);
+    await Promise.all((rows[year] ?? []).map((q) => savePvBonusQuarter(q)));
+    setSavingYear(null);
+    setSavedMsg((m) => ({ ...m, [year]: "Saved." }));
+  }
+
+  const eligibleStaff = staff.filter((e) => e.pvBonusEligible);
+  const selectedEmployee = staff.find((e) => e.id === employeeId);
+  const percent = selectedEmployee?.netProductionBonusPercent ?? 30;
+  const sortedYears = [...years].sort((a, b) => b - a);
+  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+
+  if (eligibleStaff.length === 0 && !loading) {
+    return <p className="text-sm text-slate-400">No one is marked "Eligible for Net Production Based Bonus" yet — set that on the Staff page first.</p>;
+  }
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      <div className="flex items-center gap-2">
+        <select value={employeeId ?? ""} onChange={(e) => setEmployeeId(Number(e.target.value))}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {eligibleStaff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+        <input type="number" onFocus={(e) => e.target.select()} value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
+          className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+        <button onClick={addYear} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+          + Add Year
+        </button>
+      </div>
+
+      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : sortedYears.map((year) => {
+        const yearRows = rows[year] ?? [];
+        const isExpanded = expanded.has(year);
+        return (
+          <div key={year} className="rounded-xl bg-white shadow-sm overflow-hidden">
+            <button onClick={() => toggleExpanded(year)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
+              <span className="font-bold text-slate-700">{year}</span>
+              <span className="text-slate-300 text-xs">{isExpanded ? "▲" : "▼"}</span>
+            </button>
+            {isExpanded && (
+              <div className="border-t border-slate-100">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse min-w-[760px]">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                        <th className="px-3 py-2 font-medium">Quarter</th>
+                        <th className="px-2 py-2 font-medium">Total Income</th>
+                        <th className="px-2 py-2 font-medium">{percent}%</th>
+                        <th className="px-2 py-2 font-medium">Paid Amount</th>
+                        <th className="px-2 py-2 font-medium">Balance</th>
+                        <th className="px-2 py-2 font-medium">Paid?</th>
+                        <th className="px-3 py-2 font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {yearRows.map((q) => {
+                        const owed = q.totalIncome * (percent / 100);
+                        const balance = owed - q.amountPaid;
+                        return (
+                          <tr key={q.quarter} className="border-b border-slate-50 last:border-0">
+                            <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{QUARTER_LABELS[q.quarter as 1 | 2 | 3 | 4]}</td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={q.totalIncome} onChange={(e) => updateCell(year, q.quarter, "totalIncome", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
+                            <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={q.amountPaid} onChange={(e) => updateCell(year, q.quarter, "amountPaid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
+                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                            <td className="px-2 py-2 text-center">
+                              <input type="checkbox" checked={q.paid} onChange={(e) => updateCell(year, q.quarter, "paid", e.target.checked)} />
+                            </td>
+                            <td className="px-2 py-2"><input type="text" value={q.notes} onChange={(e) => updateCell(year, q.quarter, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex items-center gap-3 p-3">
+                  <button onClick={() => handleSaveYear(year)} disabled={savingYear === year}
+                    className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                    {savingYear === year ? "Saving…" : "Save"}
+                  </button>
+                  {savedMsg[year] && <span className="text-xs text-slate-400">{savedMsg[year]}</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function HoBonusPanel() {
+  const currentYear = new Date().getFullYear();
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [employeeId, setEmployeeId] = useState<number | null>(null);
+  const [years, setYears] = useState<number[]>([currentYear]);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set([currentYear]));
+  const [rows, setRows] = useState<Record<number, HoBonusMonth[]>>({});
+  const [loading, setLoading] = useState(true);
+  const [savingYear, setSavingYear] = useState<number | null>(null);
+  const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
+  const [newYearInput, setNewYearInput] = useState("");
+
+  useEffect(() => {
+    loadStaff().then((s) => {
+      setStaff(s);
+      const eligible = s.filter((e) => e.hoBonusEligible);
+      if (eligible.length > 0) setEmployeeId(eligible[0].id);
+      else setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => { if (employeeId != null) loadYears(years); }, [employeeId]);
+
+  async function loadYears(ys: number[]) {
+    if (employeeId == null) return;
+    setLoading(true);
+    const results = await Promise.all(ys.map((y) => loadHoBonusPayoutYear(employeeId, y)));
+    setRows((r) => { const next = { ...r }; ys.forEach((y, i) => { next[y] = results[i]; }); return next; });
+    setLoading(false);
+  }
+
+  function toggleExpanded(y: number) {
+    setExpanded((s) => { const next = new Set(s); if (next.has(y)) next.delete(y); else next.add(y); return next; });
+  }
+
+  function addYear() {
+    const y = Number(newYearInput);
+    if (!y || years.includes(y)) return;
+    setYears((ys) => [...ys, y]);
+    setExpanded((s) => new Set(s).add(y));
+    setNewYearInput("");
+    loadYears([y]);
+  }
+
+  function updateCell(year: number, month: number, field: "production" | "paid" | "notes", value: number | string) {
+    setRows((r) => ({ ...r, [year]: (r[year] ?? []).map((m) => m.month === month ? { ...m, [field]: value } : m) }));
+  }
+
+  async function handleSaveYear(year: number) {
+    setSavingYear(year);
+    await Promise.all((rows[year] ?? []).map((m) => saveHoBonusMonth(m)));
+    setSavingYear(null);
+    setSavedMsg((m) => ({ ...m, [year]: "Saved." }));
+  }
+
+  const eligibleStaff = staff.filter((e) => e.hoBonusEligible);
+  const sortedYears = [...years].sort((a, b) => b - a);
+  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+
+  if (eligibleStaff.length === 0 && !loading) {
+    return <p className="text-sm text-slate-400">No one is marked "Eligible for Dr. Ho-style Compensation" yet — set that on the Staff page first.</p>;
+  }
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      <p className="text-sm text-slate-500">Production-based — 40% of that month's production, paid out over the following month's pay periods. Each year's table starts with December of the prior year (paid out the following January) through November.</p>
+      <div className="flex items-center gap-2">
+        <select value={employeeId ?? ""} onChange={(e) => setEmployeeId(Number(e.target.value))}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {eligibleStaff.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+        <input type="number" onFocus={(e) => e.target.select()} value={newYearInput} onChange={(e) => setNewYearInput(e.target.value)} placeholder="Add year"
+          className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+        <button onClick={addYear} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+          + Add Year
+        </button>
+      </div>
+
+      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : sortedYears.map((year) => {
+        const yearRows = rows[year] ?? [];
+        const isExpanded = expanded.has(year);
+        const yearTotals = yearRows.reduce((acc, m) => ({
+          income: acc.income + m.production, owed: acc.owed + m.production * 0.4, paid: acc.paid + m.paid,
+        }), { income: 0, owed: 0, paid: 0 });
+        return (
+          <div key={year} className="rounded-xl bg-white shadow-sm overflow-hidden">
+            <button onClick={() => toggleExpanded(year)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
+              <span className="font-bold text-slate-700">{year}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400 hidden sm:inline">Income ${formatMoney(yearTotals.income)} · 40% ${formatMoney(yearTotals.owed)} · Paid ${formatMoney(yearTotals.paid)}</span>
+                <span className="text-slate-300 text-xs">{isExpanded ? "▲" : "▼"}</span>
+              </div>
+            </button>
+            {isExpanded && (
+              <div className="border-t border-slate-100">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse min-w-[700px]">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                        <th className="px-3 py-2 font-medium">Month</th>
+                        <th className="px-2 py-2 font-medium">Production</th>
+                        <th className="px-2 py-2 font-medium">40%</th>
+                        <th className="px-2 py-2 font-medium">Paid</th>
+                        <th className="px-2 py-2 font-medium">Balance</th>
+                        <th className="px-3 py-2 font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {yearRows.map((m) => {
+                        const owed = m.production * 0.4;
+                        const balance = owed - m.paid;
+                        return (
+                          <tr key={m.month} className="border-b border-slate-50 last:border-0">
+                            <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={m.production} onChange={(e) => updateCell(year, m.month, "production", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
+                            <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
+                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={m.paid} onChange={(e) => updateCell(year, m.month, "paid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
+                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                            <td className="px-2 py-2"><input type="text" value={m.notes} onChange={(e) => updateCell(year, m.month, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex items-center gap-3 p-3">
+                  <button onClick={() => handleSaveYear(year)} disabled={savingYear === year}
+                    className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                    {savingYear === year ? "Saving…" : "Save"}
+                  </button>
+                  {savedMsg[year] && <span className="text-xs text-slate-400">{savedMsg[year]}</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HygieneBonusPanel() {
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [hygienistId, setHygienistId] = useState<number | null>(null);
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>([]);
+  const [overrides, setOverrides] = useState<Record<string, HygieneBonusEntry>>({});
+  const [rows, setRows] = useState<Record<string, { patientCount: number; amountPaid: number }>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  const isHygienistRole = (e: Employee) => e.role === "Hygienist" || e.skills.includes("Hygienist");
+
+  useEffect(() => {
+    loadStaff().then((s) => {
+      setStaff(s);
+      const hygienists = s.filter(isHygienistRole);
+      if (hygienists.length > 0) setHygienistId(hygienists[0].id);
+      else setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => { if (hygienistId != null) refresh(); }, [hygienistId, year]);
+
+  async function refresh() {
+    if (hygienistId == null) return;
+    setLoading(true);
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+    const [entries, overrideRows] = await Promise.all([
+      loadPayrollEntriesInRange(yearStart, yearEnd),
+      loadHygieneBonusEntries(hygienistId, yearStart, yearEnd),
+    ]);
+    setPayrollEntries(entries);
+    const overrideMap: Record<string, HygieneBonusEntry> = {};
+    overrideRows.forEach((o) => { overrideMap[o.payPeriodStart] = o; });
+    setOverrides(overrideMap);
+
+    const periods = getPayPeriodsInYear(year);
+    const nextRows: Record<string, { patientCount: number; amountPaid: number }> = {};
+    for (const p of periods) {
+      const override = overrideMap[p.start];
+      const payrollRow = entries.find((e) => e.personKey === `staff:${hygienistId}` && e.payPeriodStart === p.start);
+      nextRows[p.start] = {
+        patientCount: override?.patientCount ?? payrollRow?.hygienePatientCount ?? 0,
+        amountPaid: override?.amountPaid ?? 0,
+      };
+    }
+    setRows(nextRows);
+    setLoading(false);
+  }
+
+  function updateRow(payPeriodStart: string, field: "patientCount" | "amountPaid", value: number) {
+    setRows((r) => ({ ...r, [payPeriodStart]: { ...r[payPeriodStart], [field]: value } }));
+  }
+
+  async function handleSaveAll() {
+    if (hygienistId == null) return;
+    setSaving(true);
+    const periods = getPayPeriodsInYear(year);
+    await Promise.all(periods.map((p) => saveHygieneBonusEntry({
+      employeeId: hygienistId, payPeriodStart: p.start, payPeriodEnd: p.end,
+      patientCount: rows[p.start]?.patientCount ?? 0, amountPaid: rows[p.start]?.amountPaid ?? 0,
+    })));
+    setSaving(false);
+    setSavedMsg("Saved.");
+    await refresh();
+  }
+
+  const hygienists = staff.filter(isHygienistRole);
+  const periods = getPayPeriodsInYear(year);
+  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+
+  let runningEarned = 0;
+  let runningPaid = 0;
+
+  if (hygienists.length === 0 && !loading) {
+    return <p className="text-sm text-slate-400">No one is marked as a Hygienist yet on the Staff page.</p>;
+  }
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      <p className="text-sm text-slate-500">Patient count × ${HYGIENE_BONUS_PER_PATIENT}/patient — auto-fills from the Payroll tab's hygiene count, editable here too.</p>
+      <div className="flex items-center gap-2">
+        <select value={hygienistId ?? ""} onChange={(e) => setHygienistId(Number(e.target.value))}
+          className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {hygienists.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+        <input type="number" onFocus={(e) => e.target.select()} value={year} onChange={(e) => setYear(Number(e.target.value))}
+          className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+      </div>
+
+      {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
+        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+          <div className="overflow-x-auto max-h-[32rem]">
+            <table className="w-full text-sm border-collapse min-w-[700px]">
+              <thead className="sticky top-0 bg-white">
+                <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                  <th className="px-3 py-2 font-medium">Pay Period</th>
+                  <th className="px-2 py-2 font-medium">Patients</th>
+                  <th className="px-2 py-2 font-medium">Earned</th>
+                  <th className="px-2 py-2 font-medium">Paid</th>
+                  <th className="px-2 py-2 font-medium">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {periods.map((p) => {
+                  const row = rows[p.start] ?? { patientCount: 0, amountPaid: 0 };
+                  const earned = row.patientCount * HYGIENE_BONUS_PER_PATIENT;
+                  runningEarned += earned;
+                  runningPaid += row.amountPaid;
+                  const balance = runningEarned - runningPaid;
+                  return (
+                    <tr key={p.start} className="border-b border-slate-50 last:border-0">
+                      <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{p.label}</td>
+                      <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={row.patientCount} onChange={(e) => updateRow(p.start, "patientCount", Number(e.target.value))} className={`${cellClass} w-16`} /></td>
+                      <td className="px-2 py-2 text-slate-500">${formatMoney(earned)}</td>
+                      <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={row.amountPaid} onChange={(e) => updateRow(p.start, "amountPaid", Number(e.target.value))} className={`${cellClass} w-20`} /></td>
+                      <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-3 p-3 border-t border-slate-100">
+            <button onClick={handleSaveAll} disabled={saving}
+              className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+              {saving ? "Saving…" : "Save All"}
+            </button>
+            {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
+            <span className="text-sm text-slate-500 ml-auto">
+              {year} balance: <strong className={runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${formatMoney(runningEarned - runningPaid)}</strong>
+            </span>
+          </div>
         </div>
       )}
-    </>
+    </div>
+  );
+}
+
+export default function PayrollPage() {
+  return (
+    <AppIdentityGate>
+      {(identity, logout) => identity.canManagePayroll ? <PayrollPageBody /> : <AccessDenied logout={logout} />}
+    </AppIdentityGate>
   );
 }
