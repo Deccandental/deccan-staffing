@@ -131,11 +131,12 @@ export async function loadStatementHistoryForCard(creditCardId: string): Promise
 
 // Backfills or corrects a specific past month's statement balance without
 // touching the card's "current" snapshot fields.
-export async function backfillStatementMonth(creditCardId: string, month: string, balance: number): Promise<void> {
+export async function backfillStatementMonth(creditCardId: string, month: string, balance: number): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("card_statement_entries").upsert({
     credit_card_id: creditCardId, month, balance, entered_at: new Date().toISOString(),
   }, { onConflict: "credit_card_id,month" });
-  if (error) console.error("backfillStatementMonth error:", error);
+  if (error) { console.error("backfillStatementMonth error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
 }
 
 export async function deleteStatementEntry(id: string): Promise<void> {
@@ -366,9 +367,10 @@ export async function deleteBalanceCheck(id: string): Promise<void> {
   if (error) console.error("deleteBalanceCheck error:", error);
 }
 
-export async function addBalanceCheck(accountName: string, balance: number, checkedAt?: string): Promise<void> {
+export async function addBalanceCheck(accountName: string, balance: number, checkedAt?: string): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("balance_checks").insert({ account_name: accountName, balance, checked_at: checkedAt ?? new Date().toISOString() });
-  if (error) console.error("addBalanceCheck error:", error);
+  if (error) { console.error("addBalanceCheck error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
 }
 
 // ---------------- Weekly Friday Cash Review ----------------
