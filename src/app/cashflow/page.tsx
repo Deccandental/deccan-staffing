@@ -1085,18 +1085,13 @@ function TrendLineChart({ series, height = 220 }: { series: { label: string; col
 // ---------------- Trends Panel ----------------
 
 function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAccount[]; cards: CreditCard[]; refreshAll: () => void }) {
-  const [backfillCardId, setBackfillCardId] = useState("");
+  const [backfillEntityKey, setBackfillEntityKey] = useState(""); // "card:<id>" or "account:<name>"
   const [backfillMonth, setBackfillMonth] = useState(new Date().toISOString().slice(0, 7));
   const [backfillAmount, setBackfillAmount] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [backfillConfirmation, setBackfillConfirmation] = useState<string | null>(null);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
   const [statementHistories, setStatementHistories] = useState<Record<string, CardStatementEntry[]>>({});
   const [reviewHistory, setReviewHistory] = useState<WeeklyCashReview[]>([]);
-  const [backfillAccountName, setBackfillAccountName] = useState("");
-  const [backfillDate, setBackfillDate] = useState(todayStr());
-  const [backfillBalanceAmount, setBackfillBalanceAmount] = useState("");
-  const [balanceSaved, setBalanceSaved] = useState(false);
-  const [backfillError, setBackfillError] = useState<string | null>(null);
-  const [balanceBackfillError, setBalanceBackfillError] = useState<string | null>(null);
   const [depthView, setDepthView] = useState<string | null>(null); // 'cardStatement' | 'dental' | null
 
   async function loadAll() {
@@ -1114,33 +1109,39 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
 
   async function handleBackfill() {
     const amount = Number(backfillAmount);
-    if (!backfillCardId || !backfillMonth || !backfillAmount || isNaN(amount)) return;
-    const result = await backfillStatementMonth(backfillCardId, backfillMonth, amount);
-    if (!result.ok) {
-      setBackfillError(result.error ?? "Save failed — the card_statement_entries table may not exist yet. Check that the SQL migration has been run.");
-      return;
+    if (!backfillEntityKey || !backfillMonth || !backfillAmount || isNaN(amount)) return;
+    const [kind, ...rest] = backfillEntityKey.split(":");
+    const monthLabel = new Date(backfillMonth + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+    if (kind === "card") {
+      const cardId = rest.join(":");
+      const card = cards.find((c) => c.id === cardId);
+      const result = await backfillStatementMonth(cardId, backfillMonth, amount);
+      if (!result.ok) {
+        setBackfillError(result.error ?? "Save failed — the card_statement_entries table may not exist yet. Check that the SQL migration has been run.");
+        setBackfillConfirmation(null);
+        return;
+      }
+      setBackfillConfirmation(`✓ Saved ${card?.name ?? "card"} — ${monthLabel} — $${formatMoney(amount)}`);
+    } else {
+      const accountName = rest.join(":");
+      // Bank accounts don't have a "statement" concept — record this as the
+      // balance on the last day of the selected month.
+      const [y, m] = backfillMonth.split("-").map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      const isoTimestamp = new Date(`${backfillMonth}-${String(lastDay).padStart(2, "0")}T12:00:00`).toISOString();
+      const result = await addBalanceCheck(accountName, amount, isoTimestamp);
+      if (!result.ok) {
+        setBackfillError(result.error ?? "Save failed.");
+        setBackfillConfirmation(null);
+        return;
+      }
+      setBackfillConfirmation(`✓ Saved ${accountName} — ${monthLabel} (as of the ${lastDay}${lastDay === 31 ? "st" : "th"}) — $${formatMoney(amount)}`);
     }
     setBackfillError(null);
     setBackfillAmount("");
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    setTimeout(() => setBackfillConfirmation(null), 5000);
     await loadAll();
-    refreshAll();
-  }
-
-  async function handleBackfillBalance() {
-    const amount = Number(backfillBalanceAmount);
-    if (!backfillAccountName || !backfillDate || !backfillBalanceAmount || isNaN(amount)) return;
-    const isoTimestamp = new Date(backfillDate + "T12:00:00").toISOString();
-    const result = await addBalanceCheck(backfillAccountName, amount, isoTimestamp);
-    if (!result.ok) {
-      setBalanceBackfillError(result.error ?? "Save failed.");
-      return;
-    }
-    setBalanceBackfillError(null);
-    setBackfillBalanceAmount("");
-    setBalanceSaved(true);
-    setTimeout(() => setBalanceSaved(false), 3000);
     refreshAll();
   }
 
@@ -1176,14 +1177,19 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   return (
     <div className="space-y-4">
       <div className="rounded-2xl bg-white shadow p-5">
-        <h2 className="font-bold text-slate-700 mb-1">Add / Backfill a Statement Balance</h2>
-        <p className="text-sm text-slate-500 mb-4">Enter a statement balance for any month — past or present — to build out the trend history below.</p>
+        <h2 className="font-bold text-slate-700 mb-1">Add / Backfill a Monthly Balance</h2>
+        <p className="text-sm text-slate-500 mb-4">Works for any bank account or credit card — enter a balance for any month, past or present, to build out the trend history below.</p>
         <div className="grid gap-3 sm:grid-cols-4">
           <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Card</label>
-            <select value={backfillCardId} onChange={(e) => setBackfillCardId(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Account / Card</label>
+            <select value={backfillEntityKey} onChange={(e) => setBackfillEntityKey(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
               <option value="">Select…</option>
-              {cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <optgroup label="Bank Accounts">
+                {cashAccounts.map((a) => <option key={a.id} value={`account:${a.name}`}>{a.name}</option>)}
+              </optgroup>
+              <optgroup label="Credit Cards">
+                {cards.map((c) => <option key={c.id} value={`card:${c.id}`}>{c.name}</option>)}
+              </optgroup>
             </select>
           </div>
           <div>
@@ -1191,42 +1197,15 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
             <input type="month" value={backfillMonth} onChange={(e) => setBackfillMonth(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
           <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Statement Balance</label>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Balance</label>
             <input type="number" onFocus={(e) => e.target.select()} value={backfillAmount} onChange={(e) => setBackfillAmount(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
           <div className="flex items-end">
             <button onClick={handleBackfill} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition w-full" style={{ backgroundColor: "#e8622a" }}>Save</button>
           </div>
         </div>
-        {saved && <span className="text-xs text-emerald-600 font-semibold mt-2 block">✓ Saved</span>}
-        {backfillError && <span className="text-xs text-red-600 font-semibold mt-2 block">⚠️ {backfillError}</span>}
-      </div>
-
-      <div className="rounded-2xl bg-white shadow p-5">
-        <h2 className="font-bold text-slate-700 mb-1">Add / Backfill an Account or Card Balance</h2>
-        <p className="text-sm text-slate-500 mb-4">Enter a balance for any date — past or present — for any bank account or card.</p>
-        <div className="grid gap-3 sm:grid-cols-4">
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Account / Card</label>
-            <select value={backfillAccountName} onChange={(e) => setBackfillAccountName(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
-              <option value="">Select…</option>
-              {[...cashAccounts, ...cards].map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Date</label>
-            <input type="date" value={backfillDate} onChange={(e) => setBackfillDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Balance</label>
-            <input type="number" onFocus={(e) => e.target.select()} value={backfillBalanceAmount} onChange={(e) => setBackfillBalanceAmount(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-          <div className="flex items-end">
-            <button onClick={handleBackfillBalance} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition w-full" style={{ backgroundColor: "#e8622a" }}>Save</button>
-          </div>
-        </div>
-        {balanceSaved && <span className="text-xs text-emerald-600 font-semibold mt-2 block">✓ Saved</span>}
-        {balanceBackfillError && <span className="text-xs text-red-600 font-semibold mt-2 block">⚠️ {balanceBackfillError}</span>}
+        {backfillConfirmation && <span className="text-sm text-emerald-600 font-semibold mt-2 block">{backfillConfirmation}</span>}
+        {backfillError && <span className="text-sm text-red-600 font-semibold mt-2 block">⚠️ {backfillError}</span>}
       </div>
 
       <div className="rounded-2xl bg-white shadow p-5">
