@@ -624,7 +624,7 @@ export default function CashFlowPage() {
     setBills(b);
     setPayments(p);
     setLatestBalances(bal);
-    if (!activeTab && accounts.length > 0) setActiveTab(accounts[0].id);
+    if (!activeTab) setActiveTab("review");
     setLoading(false);
   }
 
@@ -640,14 +640,14 @@ export default function CashFlowPage() {
         {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
           <div className="max-w-5xl">
             <div className="mb-4 flex rounded-lg border border-slate-200 bg-white overflow-hidden w-fit flex-wrap">
+              <button onClick={() => setActiveTab("review")} className="px-4 py-2 text-sm font-semibold transition"
+                style={activeTab === "review" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>Weekly Review</button>
               {cashAccounts.map((a) => (
                 <button key={a.id} onClick={() => setActiveTab(a.id)} className="px-4 py-2 text-sm font-semibold transition"
                   style={activeTab === a.id ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>{a.name}</button>
               ))}
               <button onClick={() => setActiveTab("cards")} className="px-4 py-2 text-sm font-semibold transition"
                 style={activeTab === "cards" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>Credit Cards</button>
-              <button onClick={() => setActiveTab("review")} className="px-4 py-2 text-sm font-semibold transition"
-                style={activeTab === "review" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>Weekly Review</button>
             </div>
 
             {cashAccounts.map((a) => activeTab === a.id && (
