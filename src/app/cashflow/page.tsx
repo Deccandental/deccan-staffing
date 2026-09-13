@@ -202,29 +202,29 @@ function AccountPanel({ account, allBills, allPayments, latestBalances, cards, r
         {showAddBill && (
           <div className="rounded-xl bg-slate-50 p-3 mx-5 mb-3 grid gap-3 sm:grid-cols-2">
             <div>
-              <label className="block text-sm text-slate-600 font-medium mb-1">Name</label>
+              <label className="block text-sm text-slate-800 font-semibold mb-1">Name</label>
               <input type="text" value={billForm.name} onChange={(e) => setBillForm((f) => ({ ...f, name: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
             </div>
             <div>
-              <label className="block text-sm text-slate-600 font-medium mb-1">Estimated Amount</label>
+              <label className="block text-sm text-slate-800 font-semibold mb-1">Estimated Amount</label>
               <input type="number" onFocus={(e) => e.target.select()} value={billForm.estimatedAmount} onChange={(e) => setBillForm((f) => ({ ...f, estimatedAmount: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
             </div>
             <div>
-              <label className="block text-sm text-slate-600 font-medium mb-1">Direction</label>
+              <label className="block text-sm text-slate-800 font-semibold mb-1">Direction</label>
               <div className="flex rounded-lg border border-slate-200 overflow-hidden w-fit">
                 <button type="button" onClick={() => setBillForm((f) => ({ ...f, direction: "outflow" }))} className="px-3 py-1.5 text-sm font-medium transition" style={billForm.direction === "outflow" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>Money Out</button>
                 <button type="button" onClick={() => setBillForm((f) => ({ ...f, direction: "inflow" }))} className="px-3 py-1.5 text-sm font-medium transition" style={billForm.direction === "inflow" ? { backgroundColor: "#059669", color: "white" } : { color: "#6b7280" }}>Money In</button>
               </div>
             </div>
             <div>
-              <label className="block text-sm text-slate-600 font-medium mb-1">Priority</label>
+              <label className="block text-sm text-slate-800 font-semibold mb-1">Priority</label>
               <div className="flex rounded-lg border border-slate-200 overflow-hidden w-fit">
                 <button type="button" onClick={() => setBillForm((f) => ({ ...f, essential: true }))} className="px-3 py-1.5 text-sm font-medium transition" style={billForm.essential ? { backgroundColor: "#dc2626", color: "white" } : { color: "#6b7280" }}>Essential</button>
                 <button type="button" onClick={() => setBillForm((f) => ({ ...f, essential: false }))} className="px-3 py-1.5 text-sm font-medium transition" style={!billForm.essential ? { backgroundColor: "#64748b", color: "white" } : { color: "#6b7280" }}>Discretionary</button>
               </div>
             </div>
             <div>
-              <label className="block text-sm text-slate-600 font-medium mb-1">Frequency</label>
+              <label className="block text-sm text-slate-800 font-semibold mb-1">Frequency</label>
               <div className="flex rounded-lg border border-slate-200 overflow-hidden w-fit">
                 {(["monthly", "biweekly", "weekly", "once"] as BillFrequency[]).map((f) => (
                   <button key={f} type="button" onClick={() => setBillForm((form) => ({ ...form, frequency: f }))} className="px-3 py-1.5 text-sm font-medium transition"
@@ -233,11 +233,11 @@ function AccountPanel({ account, allBills, allPayments, latestBalances, cards, r
               </div>
             </div>
             <div>
-              <label className="block text-sm text-slate-600 font-medium mb-1">{billForm.frequency === "once" ? "Due Date" : "First/Next Due Date"}</label>
+              <label className="block text-sm text-slate-800 font-semibold mb-1">{billForm.frequency === "once" ? "Due Date" : "First/Next Due Date"}</label>
               <input type="date" value={billForm.anchorDate} onChange={(e) => setBillForm((f) => ({ ...f, anchorDate: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
             </div>
             <div className="sm:col-span-2">
-              <label className="block text-sm text-slate-600 font-medium mb-1">Category (optional)</label>
+              <label className="block text-sm text-slate-800 font-semibold mb-1">Category (optional)</label>
               <input type="text" value={billForm.categoryLabel} onChange={(e) => setBillForm((f) => ({ ...f, categoryLabel: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
             </div>
             <button onClick={handleAddBill} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition sm:col-span-2" style={{ backgroundColor: "#e8622a" }}>Add</button>
@@ -423,7 +423,7 @@ function CreditCardsPanel({ cards, charges, cashAccounts, latestBalances, allBil
 
             <div className="grid gap-3 sm:grid-cols-2 mb-3">
               <div>
-                <label className="block text-sm text-slate-600 font-medium mb-1">Update Current Balance</label>
+                <label className="block text-sm text-slate-800 font-semibold mb-1">Update Current Balance</label>
                 <div className="flex items-center gap-2">
                   <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
                     placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
@@ -756,7 +756,7 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
             <div className="grid gap-3 sm:grid-cols-2 mb-3">
               {cashAccounts.map((acct) => (
                 <div key={acct.id}>
-                  <label className="block text-sm text-slate-600 font-medium mb-1">{acct.name} Balance <span className="text-slate-300">— current: ${formatMoney(latestBalances[acct.name]?.balance ?? 0)}</span></label>
+                  <label className="block text-sm text-slate-800 font-semibold mb-1">{acct.name} Balance <span className="text-slate-300">— current: ${formatMoney(latestBalances[acct.name]?.balance ?? 0)}</span></label>
                   <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[acct.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
                     placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                 </div>
@@ -768,12 +768,12 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
                   <p className="text-xs font-semibold text-slate-600 mb-2">{card.name}</p>
                   <div className="grid gap-2 sm:grid-cols-2">
                     <div>
-                      <label className="block text-sm text-slate-600 font-medium mb-1">Current Balance <span className="text-slate-300">— ${formatMoney(latestBalances[card.name]?.balance ?? 0)}</span></label>
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Current Balance <span className="text-slate-300">— ${formatMoney(latestBalances[card.name]?.balance ?? 0)}</span></label>
                       <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
                         placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                     </div>
                     <div>
-                      <label className="block text-sm text-slate-600 font-medium mb-1">Statement Balance <span className="text-slate-300">— ${formatMoney(card.statementBalance)}</span></label>
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Statement Balance <span className="text-slate-300">— ${formatMoney(card.statementBalance)}</span></label>
                       <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? ""} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
                         placeholder="From statement" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                     </div>
@@ -801,25 +801,25 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
           <div className="px-5 pb-5">
             <div className="grid gap-3 sm:grid-cols-2 mb-4">
               <div>
-                <label className="block text-sm text-slate-600 font-medium mb-1">Projected Total Production (month-end estimate)</label>
+                <label className="block text-sm text-slate-800 font-semibold mb-1">Projected Total Production (month-end estimate)</label>
                 <input type="number" onFocus={(e) => e.target.select()} value={projectedProduction} onChange={(e) => setProjectedProduction(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
               </div>
           <div>
-            <label className="block text-sm text-slate-600 font-medium mb-1">Current Income (patient + insurance, so far this month)</label>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Current Income (patient + insurance, so far this month)</label>
             <input type="number" onFocus={(e) => e.target.select()} value={currentIncome} onChange={(e) => setCurrentIncome(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
           <div>
-            <label className="block text-sm text-slate-600 font-medium mb-1">Current Patient Income (so far this month)</label>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Current Patient Income (so far this month)</label>
             <input type="number" onFocus={(e) => e.target.select()} value={currentPatientIncome} onChange={(e) => setCurrentPatientIncome(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
           <div>
-            <label className="block text-sm text-slate-600 font-medium mb-1">Insurance Income <span className="text-slate-300">(calculated)</span></label>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Insurance Income <span className="text-slate-300">(calculated)</span></label>
             <div className="w-full rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 text-sm text-slate-600">
               {insuranceIncome != null ? `$${formatMoney(insuranceIncome)}` : "—"}
             </div>
           </div>
           <div className="sm:col-span-2">
-            <label className="block text-sm text-slate-600 font-medium mb-1">Notes (optional)</label>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Notes (optional)</label>
             <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
         </div>
