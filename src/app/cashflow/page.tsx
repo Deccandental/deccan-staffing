@@ -583,53 +583,141 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
     }
   }
 
+  const [showBalanceForm, setShowBalanceForm] = useState(false);
+  const [showIncomeForm, setShowIncomeForm] = useState(false);
+
+  const STALE_DAYS = 7;
+  const balanceTimestamps = [
+    ...cashAccounts.map((a) => latestBalances[a.name]?.checkedAt),
+    ...cards.map((c) => latestBalances[c.name]?.checkedAt),
+    ...cards.map((c) => c.statementBalanceUpdatedAt ?? undefined),
+  ].filter((t): t is string => !!t);
+  const oldestBalanceTimestamp = balanceTimestamps.length > 0 ? balanceTimestamps.reduce((oldest, t) => (t < oldest ? t : oldest)) : null;
+  const balanceDaysStale = oldestBalanceTimestamp ? (Date.now() - new Date(oldestBalanceTimestamp).getTime()) / 86400000 : Infinity;
+  const anyBalanceMissing = cashAccounts.some((a) => !latestBalances[a.name]) || cards.some((c) => !latestBalances[c.name]);
+  const balancesStale = balanceDaysStale >= STALE_DAYS || anyBalanceMissing;
+
+  const reviewDaysStale = latestReview ? (Date.now() - new Date(latestReview.reviewDate).getTime()) / 86400000 : Infinity;
+  const incomeStale = reviewDaysStale >= STALE_DAYS;
+
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl bg-white shadow p-5">
-        <h2 className="font-bold text-slate-700 mb-1">Update All Balances</h2>
-        <p className="text-xs text-slate-400 mb-4">One place to update everything for this week — these are the same numbers shown on each account/card's own tab, so updating here updates everywhere.</p>
-        <div className="grid gap-3 sm:grid-cols-2 mb-3">
-          {cashAccounts.map((acct) => (
-            <div key={acct.id}>
-              <label className="block text-xs text-slate-400 mb-0.5">{acct.name} Balance <span className="text-slate-300">— current: ${formatMoney(latestBalances[acct.name]?.balance ?? 0)}</span></label>
-              <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[acct.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
-                placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-            </div>
-          ))}
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {cards.map((card) => (
-            <div key={card.id} className="rounded-lg bg-slate-50 p-3">
-              <p className="text-xs font-semibold text-slate-600 mb-2">{card.name}</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-0.5">Current Balance <span className="text-slate-300">— ${formatMoney(latestBalances[card.name]?.balance ?? 0)}</span></label>
-                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
-                    placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-0.5">Statement Balance <span className="text-slate-300">— ${formatMoney(card.statementBalance)}</span></label>
-                  <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? ""} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
-                    placeholder="From statement" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                </div>
+      {ffForecast && chaseForecast && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {[ffForecast, chaseForecast].map((f) => (
+            <div key={f.accountId} className="rounded-2xl p-5 shadow" style={{ background: `linear-gradient(135deg, ${safeColor(f.excessOrShortfall)}22, ${safeColor(f.excessOrShortfall)}44)` }}>
+              <p className="text-xs text-slate-500 uppercase tracking-wide font-semibold">{f.accountName} — Forecast Excess/(Shortfall)</p>
+              <p className="text-2xl font-bold mt-1" style={{ color: safeColor(f.excessOrShortfall) }}>${formatMoney(f.excessOrShortfall)}</p>
+              <div className="text-xs text-slate-500 mt-2 space-y-0.5">
+                <p>Balance: ${formatMoney(f.currentBalance)} + Deposits (14d): ${formatMoney(f.expectedDeposits14d)}</p>
+                <p>− Obligations (14d): ${formatMoney(f.obligations14d)} − Cushion: ${formatMoney(f.cushion)}</p>
               </div>
             </div>
           ))}
         </div>
-        <button onClick={handleSaveAllBalances} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition mt-4" style={{ backgroundColor: "#e8622a" }}>
-          Save All Balances
-        </button>
-        {balancesSaved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
-      </div>
+      )}
+
+      {transfer && (
+        <div className="rounded-2xl p-5 shadow" style={{ background: transfer.amount > 0 ? "linear-gradient(135deg, #dbeafe, #bfdbfe)" : "#f8fafc" }}>
+          <h3 className="font-bold text-slate-700 text-sm mb-1">Transfer Recommendation</h3>
+          {transfer.amount > 0 ? (
+            <p className="text-sm text-blue-900"><strong>Transfer ${formatMoney(transfer.amount)}</strong> from {transfer.fromAccountName} to {transfer.toAccountName}. {transfer.reason}</p>
+          ) : (
+            <p className="text-sm text-slate-500">{transfer.reason}</p>
+          )}
+        </div>
+      )}
 
       <div className="rounded-2xl bg-white shadow p-5">
-        <h2 className="font-bold text-slate-700 mb-1">This Week's Open Dental Numbers</h2>
-        <p className="text-xs text-slate-400 mb-4">Enter your projected month-end production and current collections — insurance income is calculated for you.</p>
-        <div className="grid gap-3 sm:grid-cols-2 mb-4">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <h3 className="font-bold text-slate-700 text-sm">Production & Collections Pace</h3>
+          <span className={`text-xs font-semibold ${incomeStale ? "text-amber-600" : "text-slate-400"}`}>
+            {latestReview ? `Last updated ${new Date(latestReview.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}${incomeStale ? " — ⚠️ over a week ago" : ""}` : "⚠️ Never entered"}
+          </span>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-0.5">Projected Total Production (month-end estimate)</label>
-            <input type="number" onFocus={(e) => e.target.select()} value={projectedProduction} onChange={(e) => setProjectedProduction(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            <p className="text-xs text-slate-400">Projected Production vs ~${formatMoney(productionTarget)}/month target</p>
+            <p className="text-xl font-bold" style={{ color: productionNum != null && productionNum >= productionTarget ? "#059669" : "#f59e0b" }}>{productionNum != null ? `$${formatMoney(productionNum)}` : "Not entered"}</p>
           </div>
+          <div>
+            <p className="text-xs text-slate-400">Current Income vs ~${formatMoney(collectionsTarget)}/month target</p>
+            <p className="text-xl font-bold" style={{ color: incomeNum != null && incomeNum >= collectionsTarget ? "#059669" : "#f59e0b" }}>{incomeNum != null ? `$${formatMoney(incomeNum)}` : "Not entered"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-400">Insurance Income (calculated)</p>
+            <p className="text-xl font-bold text-slate-700">{insuranceIncome != null ? `$${formatMoney(insuranceIncome)}` : "Not entered"}</p>
+          </div>
+        </div>
+        {incomeNum != null && productionNum != null && incomeNum < productionNum * 0.8 && (
+          <p className="text-xs text-amber-600 mt-2">Collections are lagging materially behind production — consider reviewing insurance AR aging before discretionary spending.</p>
+        )}
+      </div>
+
+      <div className="rounded-2xl shadow overflow-hidden" style={{ background: balancesStale ? "#fef3c7" : "white" }}>
+        <button onClick={() => setShowBalanceForm((s) => !s)} className="w-full flex items-center justify-between p-5 text-left">
+          <div>
+            <h2 className="font-bold text-slate-700">Account & Card Balances {balancesStale && <span className="text-amber-700">⚠️ Update due</span>}</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {oldestBalanceTimestamp ? `Oldest entry: ${new Date(oldestBalanceTimestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Nothing entered yet"}
+              {anyBalanceMissing ? " — some accounts/cards have no balance at all" : ""}
+            </p>
+          </div>
+          <span className="text-slate-400 text-sm">{showBalanceForm ? "Hide ▲" : "Update ▼"}</span>
+        </button>
+        {showBalanceForm && (
+          <div className="px-5 pb-5">
+            <div className="grid gap-3 sm:grid-cols-2 mb-3">
+              {cashAccounts.map((acct) => (
+                <div key={acct.id}>
+                  <label className="block text-xs text-slate-400 mb-0.5">{acct.name} Balance <span className="text-slate-300">— current: ${formatMoney(latestBalances[acct.name]?.balance ?? 0)}</span></label>
+                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[acct.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
+                    placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                </div>
+              ))}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {cards.map((card) => (
+                <div key={card.id} className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-xs font-semibold text-slate-600 mb-2">{card.name}</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-0.5">Current Balance <span className="text-slate-300">— ${formatMoney(latestBalances[card.name]?.balance ?? 0)}</span></label>
+                      <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
+                        placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-0.5">Statement Balance <span className="text-slate-300">— ${formatMoney(card.statementBalance)}</span></label>
+                      <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? ""} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
+                        placeholder="From statement" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={handleSaveAllBalances} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition mt-4" style={{ backgroundColor: "#e8622a" }}>
+              Save All Balances
+            </button>
+            {balancesSaved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl shadow overflow-hidden" style={{ background: incomeStale ? "#fef3c7" : "white" }}>
+        <button onClick={() => setShowIncomeForm((s) => !s)} className="w-full flex items-center justify-between p-5 text-left">
+          <div>
+            <h2 className="font-bold text-slate-700">Open Dental Numbers {incomeStale && <span className="text-amber-700">⚠️ Update due</span>}</h2>
+            <p className="text-xs text-slate-500 mt-0.5">{latestReview ? `Last entered ${new Date(latestReview.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Nothing entered yet"}</p>
+          </div>
+          <span className="text-slate-400 text-sm">{showIncomeForm ? "Hide ▲" : "Update ▼"}</span>
+        </button>
+        {showIncomeForm && (
+          <div className="px-5 pb-5">
+            <div className="grid gap-3 sm:grid-cols-2 mb-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-0.5">Projected Total Production (month-end estimate)</label>
+                <input type="number" onFocus={(e) => e.target.select()} value={projectedProduction} onChange={(e) => setProjectedProduction(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+              </div>
           <div>
             <label className="block text-xs text-slate-400 mb-0.5">Current Income (patient + insurance, so far this month)</label>
             <input type="number" onFocus={(e) => e.target.select()} value={currentIncome} onChange={(e) => setCurrentIncome(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
@@ -651,6 +739,8 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
         </div>
         <button onClick={handleSave} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Save This Week's Review</button>
         {saved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #e0f2fe, #bae6fd)" }}>
@@ -714,53 +804,6 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
               <p className="text-sm text-red-800">⚠️ Not safe on that date, and no safer date found in the next 60 days. This may need to wait for more cash flow.</p>
             )}
           </div>
-        )}
-      </div>
-
-      {ffForecast && chaseForecast && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {[ffForecast, chaseForecast].map((f) => (
-            <div key={f.accountId} className="rounded-2xl p-5 shadow" style={{ background: `linear-gradient(135deg, ${safeColor(f.excessOrShortfall)}22, ${safeColor(f.excessOrShortfall)}44)` }}>
-              <p className="text-xs text-slate-500 uppercase tracking-wide font-semibold">{f.accountName} — Forecast Excess/(Shortfall)</p>
-              <p className="text-2xl font-bold mt-1" style={{ color: safeColor(f.excessOrShortfall) }}>${formatMoney(f.excessOrShortfall)}</p>
-              <div className="text-xs text-slate-500 mt-2 space-y-0.5">
-                <p>Balance: ${formatMoney(f.currentBalance)} + Deposits (14d): ${formatMoney(f.expectedDeposits14d)}</p>
-                <p>− Obligations (14d): ${formatMoney(f.obligations14d)} − Cushion: ${formatMoney(f.cushion)}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {transfer && (
-        <div className="rounded-2xl p-5 shadow" style={{ background: transfer.amount > 0 ? "linear-gradient(135deg, #dbeafe, #bfdbfe)" : "#f8fafc" }}>
-          <h3 className="font-bold text-slate-700 text-sm mb-1">Transfer Recommendation</h3>
-          {transfer.amount > 0 ? (
-            <p className="text-sm text-blue-900"><strong>Transfer ${formatMoney(transfer.amount)}</strong> from {transfer.fromAccountName} to {transfer.toAccountName}. {transfer.reason}</p>
-          ) : (
-            <p className="text-sm text-slate-500">{transfer.reason}</p>
-          )}
-        </div>
-      )}
-
-      <div className="rounded-2xl bg-white shadow p-5">
-        <h3 className="font-bold text-slate-700 text-sm mb-3">Production & Collections Pace</h3>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div>
-            <p className="text-xs text-slate-400">Projected Production vs ~${formatMoney(productionTarget)}/month target</p>
-            <p className="text-xl font-bold" style={{ color: productionNum != null && productionNum >= productionTarget ? "#059669" : "#f59e0b" }}>{productionNum != null ? `$${formatMoney(productionNum)}` : "Not entered"}</p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-400">Current Income vs ~${formatMoney(collectionsTarget)}/month target</p>
-            <p className="text-xl font-bold" style={{ color: incomeNum != null && incomeNum >= collectionsTarget ? "#059669" : "#f59e0b" }}>{incomeNum != null ? `$${formatMoney(incomeNum)}` : "Not entered"}</p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-400">Insurance Income (calculated)</p>
-            <p className="text-xl font-bold text-slate-700">{insuranceIncome != null ? `$${formatMoney(insuranceIncome)}` : "Not entered"}</p>
-          </div>
-        </div>
-        {incomeNum != null && productionNum != null && incomeNum < productionNum * 0.8 && (
-          <p className="text-xs text-amber-600 mt-2">Collections are lagging materially behind production — consider reviewing insurance AR aging before discretionary spending.</p>
         )}
       </div>
 
