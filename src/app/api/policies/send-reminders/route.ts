@@ -18,8 +18,9 @@ export async function GET(req: NextRequest) {
   const { data: docs, error: docsErr } = await supabase.from("policy_documents").select("*");
   if (docsErr) { console.error("policies/send-reminders load docs error:", docsErr); return NextResponse.json({ ok: false }, { status: 500 }); }
 
-  const { data: staffRows, error: staffErr } = await supabase.from("staff").select("id, name, email").eq("archived", false);
+  const { data: staffRows, error: staffErr } = await supabase.from("staff").select("id, name, email, exempt_from_policy_signing").eq("archived", false);
   if (staffErr) { console.error("policies/send-reminders load staff error:", staffErr); return NextResponse.json({ ok: false }, { status: 500 }); }
+  const activeStaff = (staffRows ?? []).filter((e) => !e.exempt_from_policy_signing);
 
   const results: { document: string; employeeId: number; sent: boolean }[] = [];
   const now = Date.now();
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
 
     const { data: sigs } = await supabase.from("policy_signatures").select("employee_id").eq("requirement_id", req.id);
     const signedIds = new Set((sigs ?? []).map((s) => s.employee_id));
-    const pending = (staffRows ?? []).filter((e) => !signedIds.has(e.id));
+    const pending = activeStaff.filter((e) => !signedIds.has(e.id));
 
     for (const emp of pending) {
       const { data: reminderRow } = await supabase.from("policy_reminders_sent").select("sent_at")
