@@ -99,9 +99,48 @@ export async function updateCreditCard(id: string, updates: Partial<{ creditLimi
   if (error) console.error("updateCreditCard error:", error);
 }
 
-export async function updateStatementBalance(id: string, balance: number): Promise<void> {
+export async function updateStatementBalance(id: string, balance: number, month?: string): Promise<void> {
   const { error } = await supabase.from("credit_cards").update({ statement_balance: balance, statement_balance_updated_at: new Date().toISOString() }).eq("id", id);
   if (error) console.error("updateStatementBalance error:", error);
+  // Also record this into the monthly history log, defaulting to the
+  // current calendar month unless backfilling a specific past one.
+  const targetMonth = month ?? new Date().toISOString().slice(0, 7);
+  const { error: histError } = await supabase.from("card_statement_entries").upsert({
+    credit_card_id: id, month: targetMonth, balance, entered_at: new Date().toISOString(),
+  }, { onConflict: "credit_card_id,month" });
+  if (histError) console.error("updateStatementBalance (history) error:", histError);
+}
+
+export interface CardStatementEntry {
+  id: string;
+  creditCardId: string;
+  month: string; // YYYY-MM
+  balance: number;
+  enteredAt: string;
+}
+
+function fromStatementEntryRow(row: any): CardStatementEntry {
+  return { id: row.id, creditCardId: row.credit_card_id, month: row.month, balance: row.balance, enteredAt: row.entered_at };
+}
+
+export async function loadStatementHistoryForCard(creditCardId: string): Promise<CardStatementEntry[]> {
+  const { data, error } = await supabase.from("card_statement_entries").select("*").eq("credit_card_id", creditCardId).order("month", { ascending: false });
+  if (error) { console.error("loadStatementHistoryForCard error:", error); return []; }
+  return (data ?? []).map(fromStatementEntryRow);
+}
+
+// Backfills or corrects a specific past month's statement balance without
+// touching the card's "current" snapshot fields.
+export async function backfillStatementMonth(creditCardId: string, month: string, balance: number): Promise<void> {
+  const { error } = await supabase.from("card_statement_entries").upsert({
+    credit_card_id: creditCardId, month, balance, entered_at: new Date().toISOString(),
+  }, { onConflict: "credit_card_id,month" });
+  if (error) console.error("backfillStatementMonth error:", error);
+}
+
+export async function deleteStatementEntry(id: string): Promise<void> {
+  const { error } = await supabase.from("card_statement_entries").delete().eq("id", id);
+  if (error) console.error("deleteStatementEntry error:", error);
 }
 
 // ---------------- Card charges (itemized recurring vendor activity — informational only) ----------------
@@ -315,8 +354,20 @@ export async function loadBalanceHistory(limit: number = 20): Promise<BalanceChe
   return (data ?? []).map(fromBalanceRow);
 }
 
-export async function addBalanceCheck(accountName: string, balance: number): Promise<void> {
-  const { error } = await supabase.from("balance_checks").insert({ account_name: accountName, balance, checked_at: new Date().toISOString() });
+// History for one specific account/card, most recent first.
+export async function loadBalanceHistoryForAccount(accountName: string, limit: number = 20): Promise<BalanceCheck[]> {
+  const { data, error } = await supabase.from("balance_checks").select("*").eq("account_name", accountName).order("checked_at", { ascending: false }).limit(limit);
+  if (error) { console.error("loadBalanceHistoryForAccount error:", error); return []; }
+  return (data ?? []).map(fromBalanceRow);
+}
+
+export async function deleteBalanceCheck(id: string): Promise<void> {
+  const { error } = await supabase.from("balance_checks").delete().eq("id", id);
+  if (error) console.error("deleteBalanceCheck error:", error);
+}
+
+export async function addBalanceCheck(accountName: string, balance: number, checkedAt?: string): Promise<void> {
+  const { error } = await supabase.from("balance_checks").insert({ account_name: accountName, balance, checked_at: checkedAt ?? new Date().toISOString() });
   if (error) console.error("addBalanceCheck error:", error);
 }
 
