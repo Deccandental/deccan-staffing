@@ -1,12 +1,13 @@
 import { supabase } from "./supabase";
 import { Certification } from "./certsStore";
 
-export type CertEmailType = "reminder-7day" | "reminder-30day" | "reminder-60day" | "manual";
+export type CertEmailType = "reminder-7day" | "reminder-30day" | "reminder-60day" | "reminder-expired" | "manual";
 
 const LABELS: Record<CertEmailType, string> = {
   "reminder-60day": "Expiring in 60 Days",
   "reminder-30day": "Expiring in 30 Days",
   "reminder-7day": "Expiring in 7 Days",
+  "reminder-expired": "Already Expired",
   manual: "Certification Reminder",
 };
 
