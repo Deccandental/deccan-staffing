@@ -894,7 +894,7 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
   }
 
   async function handleSaveAllBalances() {
-    const jobs: Promise<void>[] = [];
+    const jobs: Promise<any>[] = [];
     for (const acct of cashAccounts) {
       const raw = balanceInputs[acct.id];
       if (raw && !isNaN(Number(raw))) jobs.push(addBalanceCheck(acct.name, Number(raw)));
@@ -1061,9 +1061,9 @@ function TrendLineChart({ series, height = 220 }: { series: { label: string; col
           const pathD = s.points.map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(p.date)} ${yScale(p.value)}`).join(" ");
           return <path key={s.label} d={pathD} fill="none" stroke={s.color} strokeWidth={2} />;
         })}
-        {series.map((s) => s.points.map((p, i) => (
+        {series.map((s) => s.points.length === 1 ? s.points.map((p, i) => (
           <circle key={`${s.label}-${i}`} cx={xScale(p.date)} cy={yScale(p.value)} r={3} fill={s.color} />
-        )))}
+        )) : null)}
         {allDates.filter((_, i) => i % xLabelStep === 0).map((date) => (
           <text key={date} x={xScale(date)} y={height - 5} textAnchor="middle" fontSize={9} fill="#94a3b8">
             {new Date(date.length === 7 ? date + "-02" : date.slice(0, 10) + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: date.length === 7 ? undefined : "numeric" })}
@@ -1095,6 +1095,8 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const [backfillDate, setBackfillDate] = useState(todayStr());
   const [backfillBalanceAmount, setBackfillBalanceAmount] = useState("");
   const [balanceSaved, setBalanceSaved] = useState(false);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
+  const [balanceBackfillError, setBalanceBackfillError] = useState<string | null>(null);
   const [depthView, setDepthView] = useState<string | null>(null); // 'cardStatement' | 'dental' | null
 
   async function loadAll() {
@@ -1113,7 +1115,12 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   async function handleBackfill() {
     const amount = Number(backfillAmount);
     if (!backfillCardId || !backfillMonth || !backfillAmount || isNaN(amount)) return;
-    await backfillStatementMonth(backfillCardId, backfillMonth, amount);
+    const result = await backfillStatementMonth(backfillCardId, backfillMonth, amount);
+    if (!result.ok) {
+      setBackfillError(result.error ?? "Save failed — the card_statement_entries table may not exist yet. Check that the SQL migration has been run.");
+      return;
+    }
+    setBackfillError(null);
     setBackfillAmount("");
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
@@ -1125,7 +1132,12 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     const amount = Number(backfillBalanceAmount);
     if (!backfillAccountName || !backfillDate || !backfillBalanceAmount || isNaN(amount)) return;
     const isoTimestamp = new Date(backfillDate + "T12:00:00").toISOString();
-    await addBalanceCheck(backfillAccountName, amount, isoTimestamp);
+    const result = await addBalanceCheck(backfillAccountName, amount, isoTimestamp);
+    if (!result.ok) {
+      setBalanceBackfillError(result.error ?? "Save failed.");
+      return;
+    }
+    setBalanceBackfillError(null);
     setBackfillBalanceAmount("");
     setBalanceSaved(true);
     setTimeout(() => setBalanceSaved(false), 3000);
@@ -1187,6 +1199,7 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
           </div>
         </div>
         {saved && <span className="text-xs text-emerald-600 font-semibold mt-2 block">✓ Saved</span>}
+        {backfillError && <span className="text-xs text-red-600 font-semibold mt-2 block">⚠️ {backfillError}</span>}
       </div>
 
       <div className="rounded-2xl bg-white shadow p-5">
@@ -1213,6 +1226,7 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
           </div>
         </div>
         {balanceSaved && <span className="text-xs text-emerald-600 font-semibold mt-2 block">✓ Saved</span>}
+        {balanceBackfillError && <span className="text-xs text-red-600 font-semibold mt-2 block">⚠️ {balanceBackfillError}</span>}
       </div>
 
       <div className="rounded-2xl bg-white shadow p-5">
