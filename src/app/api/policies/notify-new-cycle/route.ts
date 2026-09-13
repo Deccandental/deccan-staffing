@@ -10,12 +10,13 @@ export async function POST(req: NextRequest) {
   if (reqErr || !reqRow) return NextResponse.json({ ok: false, error: "requirement not found" }, { status: 404 });
 
   const { data: doc } = await supabase.from("policy_documents").select("*").eq("id", reqRow.document_id).maybeSingle();
-  const { data: staffRows, error: staffErr } = await supabase.from("staff").select("id, name, email").eq("archived", false);
+  const { data: staffRows, error: staffErr } = await supabase.from("staff").select("id, name, email, exempt_from_policy_signing").eq("archived", false);
   if (staffErr) return NextResponse.json({ ok: false }, { status: 500 });
+  const activeStaff = (staffRows ?? []).filter((e) => !e.exempt_from_policy_signing);
 
   const { data: sigs } = await supabase.from("policy_signatures").select("employee_id").eq("requirement_id", requirementId);
   const signedIds = new Set((sigs ?? []).map((s) => s.employee_id));
-  const pending = (staffRows ?? []).filter((e) => !signedIds.has(e.id));
+  const pending = activeStaff.filter((e) => !signedIds.has(e.id));
 
   const results: { employeeId: number; sent: boolean }[] = [];
   for (const emp of pending) {
