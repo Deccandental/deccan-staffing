@@ -264,6 +264,7 @@ function HandbookPageBody({ identity }: { identity: AppIdentity }) {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [activeSlug, setActiveSlug] = useState<string>("handbook");
   const [loading, setLoading] = useState(true);
+  const [docNeedsAttention, setDocNeedsAttention] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     Promise.all([loadPolicyDocuments(), loadStaff()]).then(([docs, s]) => {
@@ -272,6 +273,22 @@ function HandbookPageBody({ identity }: { identity: AppIdentity }) {
       setLoading(false);
     });
   }, []);
+
+  useEffect(() => {
+    if (documents.length === 0 || identity.employeeId == null || identity.exemptFromPolicySigning) return;
+    let cancelled = false;
+    (async () => {
+      const result: Record<string, boolean> = {};
+      for (const doc of documents) {
+        const req = await loadLatestRequirement(doc.id);
+        if (!req) continue;
+        const sig = await loadMySignature(req.id, identity.employeeId!);
+        result[doc.slug] = !sig;
+      }
+      if (!cancelled) setDocNeedsAttention(result);
+    })();
+    return () => { cancelled = true; };
+  }, [documents, identity.employeeId, identity.exemptFromPolicySigning]);
 
   const activeDoc = documents.find((d) => d.slug === activeSlug);
 
@@ -287,12 +304,15 @@ function HandbookPageBody({ identity }: { identity: AppIdentity }) {
         {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
           <div className="max-w-3xl">
             <div className="mb-4 flex rounded-lg border border-slate-200 bg-white overflow-hidden w-fit print:hidden">
-              {documents.map((d) => (
-                <button key={d.slug} onClick={() => setActiveSlug(d.slug)} className="px-4 py-2 text-sm font-semibold transition"
-                  style={activeSlug === d.slug ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
-                  {d.title}
-                </button>
-              ))}
+              {documents.map((d) => {
+                const needsAttention = docNeedsAttention[d.slug];
+                return (
+                  <button key={d.slug} onClick={() => setActiveSlug(d.slug)} className="px-4 py-2 text-sm font-semibold transition"
+                    style={activeSlug === d.slug ? { backgroundColor: "#e8622a", color: "white" } : needsAttention ? { backgroundColor: "#fee2e2", color: "#991b1b" } : { backgroundColor: "#d1fae5", color: "#065f46" }}>
+                    {needsAttention && activeSlug !== d.slug ? "⚠️ " : ""}{d.title}
+                  </button>
+                );
+              })}
             </div>
             {activeDoc && <DocumentPanel doc={activeDoc} identity={identity} staff={staff} />}
           </div>
