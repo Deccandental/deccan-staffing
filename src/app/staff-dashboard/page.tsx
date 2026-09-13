@@ -21,6 +21,7 @@ import {
 import { PvBonusQuarter, loadPvBonusYear } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusPayoutYear } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
+import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
 import { formatMoney } from "@/lib/format";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
@@ -83,6 +84,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [shifts, setShifts] = useState<UpcomingShift[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [certs, setCerts] = useState<Certification[]>([]);
+  const [pendingPolicies, setPendingPolicies] = useState<{ title: string; cycleLabel: string }[]>([]);
   const [titleOptions, setTitleOptions] = useState<string[]>([]);
   const [events, setEvents] = useState<StaffEvent[]>([]);
   const [bonusYear] = useState(new Date().getFullYear());
@@ -146,6 +148,23 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       setBonusReceivedThisYear(payments.filter((p) => p.date.startsWith(String(bonusYear))).reduce((sum, p) => sum + p.amount, 0));
       setLoading(false);
     });
+    return () => { cancelled = true; };
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedId == null) return;
+    let cancelled = false;
+    (async () => {
+      const docs = await loadPolicyDocuments();
+      const pending: { title: string; cycleLabel: string }[] = [];
+      for (const doc of docs) {
+        const req = await loadLatestRequirement(doc.id);
+        if (!req) continue;
+        const sig = await loadMySignature(req.id, selectedId);
+        if (!sig) pending.push({ title: doc.title, cycleLabel: req.cycleLabel });
+      }
+      if (!cancelled) setPendingPolicies(pending);
+    })();
     return () => { cancelled = true; };
   }, [selectedId]);
 
@@ -310,6 +329,28 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   <div className="font-bold text-lg text-slate-700">{selectedEmployee.name}</div>
                   <div className="text-sm text-slate-400">{selectedEmployee.specialty ?? selectedEmployee.role}{selectedEmployee.email ? ` · ${selectedEmployee.email}` : ""}</div>
                 </div>
+              </div>
+            )}
+
+            {certs.some((c) => c.expirationDate && certBadge(c).label === "Expired") && (
+              <div className="lg:col-span-2 rounded-xl px-4 py-3 shadow flex items-center gap-3" style={{ background: "linear-gradient(135deg, #fee2e2, #fecaca)" }}>
+                <span className="text-lg flex-shrink-0">📄</span>
+                <p className="text-sm text-red-800">
+                  <strong>Certification expired:</strong>{" "}
+                  {certs.filter((c) => c.expirationDate && certBadge(c).label === "Expired").map((c) => c.title).join(", ")} — please renew and update it below.
+                </p>
+              </div>
+            )}
+
+            {pendingPolicies.length > 0 && (
+              <div className="lg:col-span-2 rounded-xl px-4 py-3 shadow flex items-center justify-between flex-wrap gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
+                <p className="text-sm text-amber-800 flex items-center gap-2">
+                  <span className="text-lg">✍️</span>
+                  <span>
+                    <strong>Signature needed:</strong> {pendingPolicies.map((p) => `${p.title} (${p.cycleLabel})`).join(", ")}
+                  </span>
+                </p>
+                <a href="/handbook" className="text-xs font-semibold text-amber-900 underline flex-shrink-0">Sign now →</a>
               </div>
             )}
 
