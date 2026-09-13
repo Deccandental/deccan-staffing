@@ -13,7 +13,7 @@ import {
   loadCreditCards, updateStatementBalance,
   loadCardCharges, addCardCharge, updateCardCharge, deleteCardCharge,
   loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview,
-  buildOccurrences, computeSafeToSpend, addDays,
+  buildOccurrences, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
   computeAccountForecast, computeSuggestedTransfer, computeCardRecommendation,
 } from "@/lib/cashflow";
 
@@ -467,24 +467,30 @@ function CreditCardsPanel({ cards, charges, cashAccounts, latestBalances, allBil
 
 // ---------------- Weekly Review Panel ----------------
 
-function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments, latestBalances }: {
+function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments, latestBalances, refreshAll }: {
   cashAccounts: CashAccount[]; cards: CreditCard[]; charges: CardCharge[]; allBills: RecurringBill[]; allPayments: BillPayment[];
-  latestBalances: Record<string, BalanceCheck>;
+  latestBalances: Record<string, BalanceCheck>; refreshAll: () => void;
 }) {
   const [latestReview, setLatestReview] = useState<WeeklyCashReview | null>(null);
   const [history, setHistory] = useState<WeeklyCashReview[]>([]);
-  const [mtdProduction, setMtdProduction] = useState("");
-  const [mtdIncome, setMtdIncome] = useState("");
+  const [projectedProduction, setProjectedProduction] = useState("");
+  const [currentIncome, setCurrentIncome] = useState("");
+  const [currentPatientIncome, setCurrentPatientIncome] = useState("");
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
+
+  const [balanceInputs, setBalanceInputs] = useState<Record<string, string>>({});
+  const [stmtInputs, setStmtInputs] = useState<Record<string, string>>({});
+  const [balancesSaved, setBalancesSaved] = useState(false);
 
   useEffect(() => {
     Promise.all([loadLatestWeeklyReview(), loadWeeklyReviewHistory(8)]).then(([latest, hist]) => {
       setLatestReview(latest);
       setHistory(hist);
       if (latest) {
-        setMtdProduction(latest.mtdNetProduction != null ? String(latest.mtdNetProduction) : "");
-        setMtdIncome(latest.mtdTotalIncome != null ? String(latest.mtdTotalIncome) : "");
+        setProjectedProduction(latest.projectedTotalProduction != null ? String(latest.projectedTotalProduction) : "");
+        setCurrentIncome(latest.currentIncome != null ? String(latest.currentIncome) : "");
+        setCurrentPatientIncome(latest.currentPatientIncome != null ? String(latest.currentPatientIncome) : "");
         setNotes(latest.notes);
       }
     });
@@ -501,11 +507,16 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
 
   const productionTarget = 165000;
   const collectionsTarget = 145000;
-  const productionPace = mtdProduction ? Number(mtdProduction) : null;
-  const collectionsPace = mtdIncome ? Number(mtdIncome) : null;
+  const productionNum = projectedProduction ? Number(projectedProduction) : null;
+  const incomeNum = currentIncome ? Number(currentIncome) : null;
+  const patientIncomeNum = currentPatientIncome ? Number(currentPatientIncome) : null;
+  const insuranceIncome = incomeNum != null && patientIncomeNum != null ? incomeNum - patientIncomeNum : null;
 
   async function handleSave() {
-    await saveWeeklyReview({ reviewDate: today, mtdNetProduction: mtdProduction ? Number(mtdProduction) : null, mtdTotalIncome: mtdIncome ? Number(mtdIncome) : null, notes });
+    await saveWeeklyReview({
+      reviewDate: today, projectedTotalProduction: productionNum, currentIncome: incomeNum,
+      currentPatientIncome: patientIncomeNum, notes,
+    });
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
     const [latest, hist] = await Promise.all([loadLatestWeeklyReview(), loadWeeklyReviewHistory(8)]);
@@ -513,19 +524,125 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
     setHistory(hist);
   }
 
+  async function handleSaveAllBalances() {
+    const jobs: Promise<void>[] = [];
+    for (const acct of cashAccounts) {
+      const raw = balanceInputs[acct.id];
+      if (raw && !isNaN(Number(raw))) jobs.push(addBalanceCheck(acct.name, Number(raw)));
+    }
+    for (const card of cards) {
+      const rawBal = balanceInputs[card.id];
+      if (rawBal && !isNaN(Number(rawBal))) jobs.push(addBalanceCheck(card.name, Number(rawBal)));
+      const rawStmt = stmtInputs[card.id];
+      if (rawStmt && !isNaN(Number(rawStmt))) jobs.push(updateStatementBalance(card.id, Number(rawStmt)));
+    }
+    await Promise.all(jobs);
+    setBalanceInputs({});
+    setStmtInputs({});
+    setBalancesSaved(true);
+    setTimeout(() => setBalancesSaved(false), 3000);
+    refreshAll();
+  }
+
+  const [checkAccountId, setCheckAccountId] = useState("");
+  const [checkSelection, setCheckSelection] = useState(""); // occurrence key, or "new"
+  const [checkNewName, setCheckNewName] = useState("");
+  const [checkNewAmount, setCheckNewAmount] = useState("");
+  const [checkNewDate, setCheckNewDate] = useState(todayStr());
+  const [checkOverrideAmount, setCheckOverrideAmount] = useState("");
+  const [checkResult, setCheckResult] = useState<{ safe: boolean; projectedBalance: number; suggestedDate: string | null; suggestedBalance: number | null; matchedExisting: boolean } | null>(null);
+
+  const checkAccount = cashAccounts.find((a) => a.id === checkAccountId);
+  const checkOccurrences = checkAccount
+    ? buildOccurrences(allBills.filter((b) => b.cashAccountId === checkAccount.id), allPayments, today, addDays(today, 90))
+    : [];
+  const upcomingForCheck = checkOccurrences.filter((o) => o.dueDate >= today && !o.isPaid);
+
+  function handleRunCheck() {
+    if (!checkAccount) return;
+    const balance = latestBalances[checkAccount.name]?.balance ?? 0;
+    const minComfortable = checkAccount.cushionTarget;
+
+    if (checkSelection === "new") {
+      const amount = Number(checkNewAmount);
+      if (!checkNewAmount || isNaN(amount) || !checkNewDate) return;
+      const result = checkBillPayment(balance, today, checkOccurrences, amount, checkNewDate, minComfortable);
+      setCheckResult({ ...result, matchedExisting: false });
+    } else {
+      const [billId, dueDate] = checkSelection.split("|");
+      const occ = upcomingForCheck.find((o) => o.billId === billId && o.dueDate === dueDate);
+      if (!occ) return;
+      const amount = checkOverrideAmount ? Number(checkOverrideAmount) : occ.amount;
+      const adjusted = checkOverrideAmount
+        ? checkOccurrences.map((o) => (o.billId === billId && o.dueDate === dueDate ? { ...o, amount } : o))
+        : checkOccurrences;
+      const points = projectBalance(balance, today, adjusted, 90);
+      const point = points.find((p) => p.date === dueDate) ?? points[points.length - 1];
+      const safe = point.balance >= minComfortable;
+      setCheckResult({ safe, projectedBalance: point.balance, suggestedDate: null, suggestedBalance: null, matchedExisting: true });
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl bg-white shadow p-5">
-        <h2 className="font-bold text-slate-700 mb-1">Weekly Friday Cash Review</h2>
-        <p className="text-xs text-slate-400 mb-4">Balances and card statements update on their own tabs — this is just this week's Open Dental numbers.</p>
+        <h2 className="font-bold text-slate-700 mb-1">Update All Balances</h2>
+        <p className="text-xs text-slate-400 mb-4">One place to update everything for this week — these are the same numbers shown on each account/card's own tab, so updating here updates everywhere.</p>
+        <div className="grid gap-3 sm:grid-cols-2 mb-3">
+          {cashAccounts.map((acct) => (
+            <div key={acct.id}>
+              <label className="block text-xs text-slate-400 mb-0.5">{acct.name} Balance <span className="text-slate-300">— current: ${formatMoney(latestBalances[acct.name]?.balance ?? 0)}</span></label>
+              <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[acct.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
+                placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {cards.map((card) => (
+            <div key={card.id} className="rounded-lg bg-slate-50 p-3">
+              <p className="text-xs font-semibold text-slate-600 mb-2">{card.name}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">Current Balance <span className="text-slate-300">— ${formatMoney(latestBalances[card.name]?.balance ?? 0)}</span></label>
+                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
+                    placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-0.5">Statement Balance <span className="text-slate-300">— ${formatMoney(card.statementBalance)}</span></label>
+                  <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? ""} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
+                    placeholder="From statement" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button onClick={handleSaveAllBalances} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition mt-4" style={{ backgroundColor: "#e8622a" }}>
+          Save All Balances
+        </button>
+        {balancesSaved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
+      </div>
+
+      <div className="rounded-2xl bg-white shadow p-5">
+        <h2 className="font-bold text-slate-700 mb-1">This Week's Open Dental Numbers</h2>
+        <p className="text-xs text-slate-400 mb-4">Enter your projected month-end production and current collections — insurance income is calculated for you.</p>
         <div className="grid gap-3 sm:grid-cols-2 mb-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-0.5">Open Dental — MTD Net Production</label>
-            <input type="number" onFocus={(e) => e.target.select()} value={mtdProduction} onChange={(e) => setMtdProduction(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            <label className="block text-xs text-slate-400 mb-0.5">Projected Total Production (month-end estimate)</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={projectedProduction} onChange={(e) => setProjectedProduction(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-0.5">Open Dental — MTD Total Income (incl. insurance)</label>
-            <input type="number" onFocus={(e) => e.target.select()} value={mtdIncome} onChange={(e) => setMtdIncome(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            <label className="block text-xs text-slate-400 mb-0.5">Current Income (patient + insurance, so far this month)</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={currentIncome} onChange={(e) => setCurrentIncome(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-0.5">Current Patient Income (so far this month)</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={currentPatientIncome} onChange={(e) => setCurrentPatientIncome(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-0.5">Insurance Income <span className="text-slate-300">(calculated)</span></label>
+            <div className="w-full rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 text-sm text-slate-600">
+              {insuranceIncome != null ? `$${formatMoney(insuranceIncome)}` : "—"}
+            </div>
           </div>
           <div className="sm:col-span-2">
             <label className="block text-xs text-slate-400 mb-0.5">Notes (optional)</label>
@@ -534,6 +651,70 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
         </div>
         <button onClick={handleSave} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Save This Week's Review</button>
         {saved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
+      </div>
+
+      <div className="rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #e0f2fe, #bae6fd)" }}>
+        <h2 className="font-bold text-slate-700 mb-1">Check a Bill Before Paying</h2>
+        <p className="text-xs text-slate-500 mb-4">Pick an already-scheduled transaction to see if it's still safe to pay as planned, or check a brand-new one-off payment that isn't in the system yet.</p>
+        <div className="grid gap-3 sm:grid-cols-2 mb-3">
+          <div>
+            <label className="block text-xs text-slate-500 mb-0.5">Account</label>
+            <select value={checkAccountId} onChange={(e) => { setCheckAccountId(e.target.value); setCheckSelection(""); setCheckResult(null); }}
+              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+              <option value="">Select an account…</option>
+              {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+          {checkAccount && (
+            <div>
+              <label className="block text-xs text-slate-500 mb-0.5">Which transaction?</label>
+              <select value={checkSelection} onChange={(e) => { setCheckSelection(e.target.value); setCheckResult(null); setCheckOverrideAmount(""); }}
+                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                <option value="">Select…</option>
+                <option value="new">+ New one-time payment (not yet scheduled)</option>
+                {upcomingForCheck.map((o) => (
+                  <option key={`${o.billId}|${o.dueDate}`} value={`${o.billId}|${o.dueDate}`}>
+                    {o.billName} — ${formatMoney(o.amount)} — {new Date(o.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {checkAccount && checkSelection === "new" && (
+          <div className="grid gap-3 sm:grid-cols-3 mb-3">
+            <input type="text" value={checkNewName} onChange={(e) => setCheckNewName(e.target.value)} placeholder="What is this for?" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            <input type="number" onFocus={(e) => e.target.select()} value={checkNewAmount} onChange={(e) => setCheckNewAmount(e.target.value)} placeholder="Amount" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            <input type="date" value={checkNewDate} onChange={(e) => setCheckNewDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+        )}
+        {checkAccount && checkSelection && checkSelection !== "new" && (
+          <div className="mb-3">
+            <label className="block text-xs text-slate-500 mb-0.5">Override amount (optional — leave blank to check the scheduled estimate as-is)</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={checkOverrideAmount} onChange={(e) => setCheckOverrideAmount(e.target.value)} placeholder="$" className="w-48 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+        )}
+
+        {checkAccount && checkSelection && (
+          <button onClick={handleRunCheck} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#0369a1" }}>Check</button>
+        )}
+
+        {checkResult && (
+          <div className="mt-3 rounded-lg p-3" style={{ background: checkResult.safe ? "#d1fae5" : "#fee2e2" }}>
+            {checkResult.matchedExisting ? (
+              <p className="text-sm" style={{ color: checkResult.safe ? "#065f46" : "#991b1b" }}>
+                {checkResult.safe ? "✅ Safe" : "⚠️ Tight"} — this is already on the schedule. Projected balance on that date: <strong>${formatMoney(checkResult.projectedBalance)}</strong> ({checkResult.safe ? "stays above" : "would fall below"} your ${formatMoney(checkAccount!.cushionTarget)} cushion).
+              </p>
+            ) : checkResult.safe ? (
+              <p className="text-sm text-emerald-800">✅ Safe to pay as planned. Projected balance afterward: <strong>${formatMoney(checkResult.projectedBalance)}</strong>.</p>
+            ) : checkResult.suggestedDate ? (
+              <p className="text-sm text-red-800">⚠️ Not safe on that date (would land at ${formatMoney(checkResult.projectedBalance)}). Wait until <strong>{new Date(checkResult.suggestedDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })}</strong> instead — projected balance then: ${formatMoney(checkResult.suggestedBalance ?? 0)}.</p>
+            ) : (
+              <p className="text-sm text-red-800">⚠️ Not safe on that date, and no safer date found in the next 60 days. This may need to wait for more cash flow.</p>
+            )}
+          </div>
+        )}
       </div>
 
       {ffForecast && chaseForecast && (
@@ -564,17 +745,21 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
 
       <div className="rounded-2xl bg-white shadow p-5">
         <h3 className="font-bold text-slate-700 text-sm mb-3">Production & Collections Pace</h3>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <div>
-            <p className="text-xs text-slate-400">MTD Net Production vs ~${formatMoney(productionTarget)}/month target</p>
-            <p className="text-xl font-bold" style={{ color: productionPace != null && productionPace >= productionTarget ? "#059669" : "#f59e0b" }}>{productionPace != null ? `$${formatMoney(productionPace)}` : "Not entered"}</p>
+            <p className="text-xs text-slate-400">Projected Production vs ~${formatMoney(productionTarget)}/month target</p>
+            <p className="text-xl font-bold" style={{ color: productionNum != null && productionNum >= productionTarget ? "#059669" : "#f59e0b" }}>{productionNum != null ? `$${formatMoney(productionNum)}` : "Not entered"}</p>
           </div>
           <div>
-            <p className="text-xs text-slate-400">MTD Total Income vs ~${formatMoney(collectionsTarget)}/month target</p>
-            <p className="text-xl font-bold" style={{ color: collectionsPace != null && collectionsPace >= collectionsTarget ? "#059669" : "#f59e0b" }}>{collectionsPace != null ? `$${formatMoney(collectionsPace)}` : "Not entered"}</p>
+            <p className="text-xs text-slate-400">Current Income vs ~${formatMoney(collectionsTarget)}/month target</p>
+            <p className="text-xl font-bold" style={{ color: incomeNum != null && incomeNum >= collectionsTarget ? "#059669" : "#f59e0b" }}>{incomeNum != null ? `$${formatMoney(incomeNum)}` : "Not entered"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-400">Insurance Income (calculated)</p>
+            <p className="text-xl font-bold text-slate-700">{insuranceIncome != null ? `$${formatMoney(insuranceIncome)}` : "Not entered"}</p>
           </div>
         </div>
-        {collectionsPace != null && productionPace != null && collectionsPace < productionPace * 0.8 && (
+        {incomeNum != null && productionNum != null && incomeNum < productionNum * 0.8 && (
           <p className="text-xs text-amber-600 mt-2">Collections are lagging materially behind production — consider reviewing insurance AR aging before discretionary spending.</p>
         )}
       </div>
@@ -586,7 +771,11 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
             {history.map((r) => (
               <div key={r.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
                 <span className="text-slate-600">{new Date(r.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
-                <span className="text-xs text-slate-400">{r.mtdNetProduction != null ? `Prod: $${formatMoney(r.mtdNetProduction)}` : ""}{r.mtdTotalIncome != null ? ` · Income: $${formatMoney(r.mtdTotalIncome)}` : ""}</span>
+                <span className="text-xs text-slate-400">
+                  {r.projectedTotalProduction != null ? `Prod: $${formatMoney(r.projectedTotalProduction)}` : ""}
+                  {r.currentIncome != null ? ` · Income: $${formatMoney(r.currentIncome)}` : ""}
+                  {r.currentPatientIncome != null && r.currentIncome != null ? ` · Insurance: $${formatMoney(r.currentIncome - r.currentPatientIncome)}` : ""}
+                </span>
               </div>
             ))}
           </div>
@@ -657,7 +846,7 @@ export default function CashFlowPage() {
               <CreditCardsPanel cards={creditCards} charges={cardCharges} cashAccounts={cashAccounts} latestBalances={latestBalances} allBills={bills} allPayments={payments} refreshAll={refresh} />
             )}
             {activeTab === "review" && (
-              <WeeklyReviewPanel cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} />
+              <WeeklyReviewPanel cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} refreshAll={refresh} />
             )}
           </div>
         )}
