@@ -1091,18 +1091,23 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const [backfillConfirmation, setBackfillConfirmation] = useState<string | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
   const [statementHistories, setStatementHistories] = useState<Record<string, CardStatementEntry[]>>({});
+  const [bankBalanceHistories, setBankBalanceHistories] = useState<Record<string, BalanceCheck[]>>({});
   const [reviewHistory, setReviewHistory] = useState<WeeklyCashReview[]>([]);
   const [depthView, setDepthView] = useState<string | null>(null); // 'cardStatement' | 'dental' | null
 
   async function loadAll() {
-    const [statementHists, reviews] = await Promise.all([
+    const [statementHists, reviews, bankHists] = await Promise.all([
       Promise.all(cards.map((c) => loadStatementHistoryForCard(c.id))),
       loadWeeklyReviewHistory(52),
+      Promise.all(cashAccounts.map((a) => loadBalanceHistoryForAccount(a.name, 100))),
     ]);
     const stmtMap: Record<string, CardStatementEntry[]> = {};
     cards.forEach((c, i) => { stmtMap[c.id] = statementHists[i]; });
     setStatementHistories(stmtMap);
     setReviewHistory(reviews);
+    const bankMap: Record<string, BalanceCheck[]> = {};
+    cashAccounts.forEach((a, i) => { bankMap[a.name] = bankHists[i]; });
+    setBankBalanceHistories(bankMap);
   }
 
   useEffect(() => { loadAll(); }, [cashAccounts, cards]);
@@ -1156,6 +1161,22 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     points: [...(statementHistories[c.id] ?? [])].reverse().map((e) => ({ date: e.month, value: e.balance })),
   }));
 
+  // Bank balances can be entered at any granularity (daily updates, monthly
+  // backfills, etc.) — collapse to one point per month, the latest entry
+  // within that month, so this reads as a monthly trend like the others.
+  const bankAccountSeries = cashAccounts.map((a, i) => {
+    const byMonth = new Map<string, BalanceCheck>();
+    for (const entry of bankBalanceHistories[a.name] ?? []) {
+      const month = entry.checkedAt.slice(0, 7);
+      const existing = byMonth.get(month);
+      if (!existing || entry.checkedAt > existing.checkedAt) byMonth.set(month, entry);
+    }
+    return {
+      label: a.name, color: CHART_COLORS[i % CHART_COLORS.length],
+      points: Array.from(byMonth.entries()).sort(([m1], [m2]) => m1.localeCompare(m2)).map(([month, e]) => ({ date: month, value: e.balance })),
+    };
+  });
+
   // Weekly reviews get collapsed to one point per month — the latest review
   // within that month — so the chart reads as a monthly trend, not a noisy
   // weekly zigzag.
@@ -1206,6 +1227,25 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
         </div>
         {backfillConfirmation && <span className="text-sm text-emerald-600 font-semibold mt-2 block">{backfillConfirmation}</span>}
         {backfillError && <span className="text-sm text-red-600 font-semibold mt-2 block">⚠️ {backfillError}</span>}
+      </div>
+
+      <div className="rounded-2xl bg-white shadow p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold text-slate-700">Bank Accounts</h2>
+          <button onClick={() => setDepthView(depthView === "bank" ? null : "bank")} className="text-xs text-orange-500 hover:underline">{depthView === "bank" ? "Standard view" : "In-depth view"}</button>
+        </div>
+        {depthView === "bank" ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {cashAccounts.map((a, i) => (
+              <div key={a.id}>
+                <p className="text-sm font-semibold text-slate-700 mb-2">{a.name}</p>
+                <TrendLineChart series={[bankAccountSeries[i]]} height={180} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <TrendLineChart series={bankAccountSeries} />
+        )}
       </div>
 
       <div className="rounded-2xl bg-white shadow p-5">
