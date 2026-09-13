@@ -42,6 +42,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   pvBonusEligible: false,
   netProductionBonusPercent: 30,
   hoBonusEligible: false,
+  exemptFromPolicySigning: false,
   employmentType: "full_time",
   defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
 };
@@ -103,6 +104,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       pvBonusEligible: emp.pvBonusEligible ?? false,
       netProductionBonusPercent: emp.netProductionBonusPercent ?? 30,
       hoBonusEligible: emp.hoBonusEligible ?? false,
+      exemptFromPolicySigning: emp.exemptFromPolicySigning ?? false,
       employmentType: emp.employmentType ?? "full_time",
       defaultSchedule: { ...emp.defaultSchedule }
     });
@@ -380,6 +382,10 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                     <label className="flex items-center gap-2 cursor-pointer mt-3">
                       <input type="checkbox" checked={form.hoBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, hoBonusEligible: e.target.checked }))} />
                       <span className="text-sm font-medium text-gray-700">Eligible for Dr. Ho-style Compensation (monthly, paid the following month)</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer mt-3">
+                      <input type="checkbox" checked={form.exemptFromPolicySigning ?? false} onChange={(e) => setForm((f) => ({ ...f, exemptFromPolicySigning: e.target.checked }))} />
+                      <span className="text-sm font-medium text-gray-700">Exempt from Handbook / Arbitration signing (e.g. independent contractors)</span>
                     </label>
                   </div>
                 </div>
