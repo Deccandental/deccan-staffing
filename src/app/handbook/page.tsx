@@ -224,9 +224,12 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
             <h3 className={s.isDivider ? "font-bold text-slate-800" : "font-semibold text-slate-700 text-sm"}>{s.heading}</h3>
             {s.body && <p className="text-sm text-slate-600 mt-1 whitespace-pre-line">{s.body}</p>}
             {signing && s.requiresInitial && (
-              <label className="flex items-center gap-2 mt-2 cursor-pointer">
-                <input type="checkbox" checked={checked.has(s.idx)} onChange={() => toggleCheck(s.idx)} />
-                <span className="text-xs text-slate-500">I have read and initial this section.</span>
+              <label className="flex items-center gap-3 mt-3 p-3 rounded-lg cursor-pointer transition"
+                style={checked.has(s.idx) ? { background: "#d1fae5", border: "1px solid #6ee7b7" } : { background: "#fef3c7", border: "1px solid #fbbf24" }}>
+                <input type="checkbox" checked={checked.has(s.idx)} onChange={() => toggleCheck(s.idx)} className="w-5 h-5 flex-shrink-0" />
+                <span className="text-sm font-semibold" style={{ color: checked.has(s.idx) ? "#065f46" : "#92400e" }}>
+                  {checked.has(s.idx) ? "✓ Initialed" : "⚠️ Initial required — I have read this section"}
+                </span>
               </label>
             )}
           </div>
