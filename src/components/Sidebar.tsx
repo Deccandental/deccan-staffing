@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 
 import { loadLatestBalances, loadMinComfortableBalance, PRIMARY_CASH_ACCOUNT } from "@/lib/cashflow";
+import { supabase } from "@/lib/supabase";
 
 // Kept as a raw string (not imported from AppIdentityGate) to avoid a
 // circular import, since AppIdentityGate itself renders <Sidebar />.
@@ -20,6 +21,7 @@ type PermissionLevel =
   | "canManagePayroll";
 
 interface StoredIdentity {
+  employeeId?: number;
   canAdmin?: boolean;
   canManageLeave?: boolean;
   canManageEvents?: boolean;
@@ -33,6 +35,7 @@ const navItems: { label: string; href: string; icon: string; permission: Permiss
   { label: "Staff Dashboard", href: "/staff-dashboard", icon: "🗂️", permission: "any" },
   { label: "Certifications", href: "/certifications", icon: "📄", permission: "any" },
   { label: "Wishlist", href: "/wishlist", icon: "⭐", permission: "any" },
+  { label: "Handbook", href: "/handbook", icon: "📘", permission: "any" },
   { label: "Schedule Builder", href: "/schedule-builder", icon: "✏️", permission: "canAdmin", group: "Admin" },
   { label: "Availability", href: "/availability", icon: "🏥", permission: "canAdmin", group: "Admin" },
   { label: "Staff", href: "/staff", icon: "👥", permission: "canAdmin", group: "Admin" },
@@ -79,9 +82,32 @@ function useLowBalanceWarning(identity: StoredIdentity | null): boolean {
   return warning;
 }
 
+function usePendingSignature(identity: StoredIdentity | null): boolean {
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (identity?.employeeId == null) return;
+    let cancelled = false;
+    (async () => {
+      const { data: docs } = await supabase.from("policy_documents").select("id");
+      for (const doc of docs ?? []) {
+        const { data: reqRow } = await supabase.from("policy_requirements").select("id")
+          .eq("document_id", doc.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        if (!reqRow) continue;
+        const { data: sig } = await supabase.from("policy_signatures").select("id")
+          .eq("requirement_id", reqRow.id).eq("employee_id", identity.employeeId).maybeSingle();
+        if (!sig && !cancelled) { setPending(true); return; }
+      }
+      if (!cancelled) setPending(false);
+    })();
+    return () => { cancelled = true; };
+  }, [identity?.employeeId]);
+  return pending;
+}
+
 function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   const identity = useIdentity();
   const lowBalanceWarning = useLowBalanceWarning(identity);
+  const pendingSignature = usePendingSignature(identity);
 
   return (
     <>
@@ -134,6 +160,9 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
                 <span className="flex-1">{item.label}</span>
                 {item.href === "/cashflow" && lowBalanceWarning && (
                   <span className="text-xs flex-shrink-0" title="Cash balance is low">🚨</span>
+                )}
+                {item.href === "/handbook" && pendingSignature && (
+                  <span className="text-xs flex-shrink-0" title="Signature needed">✍️</span>
                 )}
                 {!accessible && <span className="text-xs flex-shrink-0" style={{ opacity: 0.5 }}>🔒</span>}
                 {active && <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.85)" }} />}
