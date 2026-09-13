@@ -22,6 +22,7 @@ type PermissionLevel =
 
 interface StoredIdentity {
   employeeId?: number;
+  exemptFromPolicySigning?: boolean;
   canAdmin?: boolean;
   canManageLeave?: boolean;
   canManageEvents?: boolean;
@@ -85,7 +86,7 @@ function useLowBalanceWarning(identity: StoredIdentity | null): boolean {
 function usePendingSignature(identity: StoredIdentity | null): boolean {
   const [pending, setPending] = useState(false);
   useEffect(() => {
-    if (identity?.employeeId == null) return;
+    if (identity?.employeeId == null || identity.exemptFromPolicySigning) return;
     let cancelled = false;
     (async () => {
       const { data: docs } = await supabase.from("policy_documents").select("id");
