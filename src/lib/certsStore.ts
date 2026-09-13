@@ -10,7 +10,7 @@ export interface Certification {
   expirationDate: string | null; // YYYY-MM-DD, or null if this cert never expires
   fileUrl: string;
   fileName: string;
-  remindersSent: Record<string, boolean>;
+  remindersSent: Record<string, boolean | string>;
   createdAt: string;
 }
 
