@@ -27,7 +27,7 @@ import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth } from "@/lib/hoB
 import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
 import { formatMoney } from "@/lib/format";
 import {
-  PRIMARY_CASH_ACCOUNT, loadLatestBalances, loadMinComfortableBalance,
+  loadCashAccounts, loadLatestBalances,
   loadRecurringBills as loadCashflowBills, loadBillPayments as loadCashflowBillPayments,
   buildOccurrences as buildCashflowOccurrences, computeSafeToSpend, addDays as addCashflowDays,
 } from "@/lib/cashflow";
@@ -596,14 +596,16 @@ function GrowthBonusPanel() {
     setPayments(pays.filter((p) => p.date >= yearStart && p.date <= yearEnd));
 
     // How much bonus can safely be paid out right now, per the Cash Flow
-    // tool's own numbers — current cash balance minus everything else
-    // already scheduled to come out in the next 30 days.
+    // tool's own numbers — current Fifth Third balance minus everything else
+    // already scheduled to come out in the next 30 days, minus its cushion.
     const today = new Date().toISOString().split("T")[0];
-    const [balances, minComfortable, cashBills, cashPayments] = await Promise.all([
-      loadLatestBalances(), loadMinComfortableBalance(),
+    const [accounts, balances, cashBills, cashPayments] = await Promise.all([
+      loadCashAccounts(), loadLatestBalances(),
       loadCashflowBills(), loadCashflowBillPayments(today, addCashflowDays(today, 30)),
     ]);
-    const currentCashBalance = balances[PRIMARY_CASH_ACCOUNT]?.balance ?? 0;
+    const fifthThird = accounts.find((a) => a.name === "Fifth Third");
+    const currentCashBalance = fifthThird ? (balances[fifthThird.name]?.balance ?? 0) : 0;
+    const minComfortable = fifthThird?.cushionTarget ?? 10000;
     const occurrences = buildCashflowOccurrences(cashBills, cashPayments, today, addCashflowDays(today, 30));
     const safeToSpend30 = computeSafeToSpend(currentCashBalance, today, occurrences, 30);
     setSafeToPayTotal(Math.max(0, safeToSpend30 - minComfortable));
