@@ -325,15 +325,17 @@ export async function addBalanceCheck(accountName: string, balance: number): Pro
 export interface WeeklyCashReview {
   id: string;
   reviewDate: string;
-  mtdNetProduction: number | null;
-  mtdTotalIncome: number | null;
+  projectedTotalProduction: number | null;
+  currentIncome: number | null;
+  currentPatientIncome: number | null;
   notes: string;
 }
 
 function fromReviewRow(row: any): WeeklyCashReview {
   return {
     id: row.id, reviewDate: row.review_date,
-    mtdNetProduction: row.mtd_net_production, mtdTotalIncome: row.mtd_total_income, notes: row.notes ?? "",
+    projectedTotalProduction: row.projected_total_production, currentIncome: row.current_income,
+    currentPatientIncome: row.current_patient_income, notes: row.notes ?? "",
   };
 }
 
@@ -351,7 +353,8 @@ export async function loadWeeklyReviewHistory(limit: number = 12): Promise<Weekl
 
 export async function saveWeeklyReview(review: Omit<WeeklyCashReview, "id">): Promise<void> {
   const { error } = await supabase.from("weekly_cash_reviews").upsert({
-    review_date: review.reviewDate, mtd_net_production: review.mtdNetProduction, mtd_total_income: review.mtdTotalIncome, notes: review.notes,
+    review_date: review.reviewDate, projected_total_production: review.projectedTotalProduction,
+    current_income: review.currentIncome, current_patient_income: review.currentPatientIncome, notes: review.notes,
   }, { onConflict: "review_date" });
   if (error) console.error("saveWeeklyReview error:", error);
 }
