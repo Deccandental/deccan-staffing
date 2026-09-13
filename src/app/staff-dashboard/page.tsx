@@ -153,6 +153,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
   useEffect(() => {
     if (selectedId == null) return;
+    const emp = staff.find((e) => e.id === selectedId);
+    if (emp?.exemptFromPolicySigning) { setPendingPolicies([]); return; }
     let cancelled = false;
     (async () => {
       const docs = await loadPolicyDocuments();
@@ -166,7 +168,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       if (!cancelled) setPendingPolicies(pending);
     })();
     return () => { cancelled = true; };
-  }, [selectedId]);
+  }, [selectedId, staff]);
 
   const selectedEmployee = staff.find((e) => e.id === selectedId);
 
