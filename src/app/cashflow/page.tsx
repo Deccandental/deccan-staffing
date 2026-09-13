@@ -386,21 +386,39 @@ function CreditCardsPanel({ cards, charges, cashAccounts, latestBalances, allBil
     refreshAll();
   }
 
+  const cardsWithRecs = cards.map((card) => {
+    const balance = latestBalances[card.name]?.balance ?? 0;
+    const linkedAccount = cashAccounts.find((a) => a.id === card.linkedCashAccountId);
+    let accountForecast = null;
+    if (linkedAccount) {
+      const accountBills = allBills.filter((b) => b.cashAccountId === linkedAccount.id);
+      const occurrences = buildOccurrences(accountBills, allPayments, today.slice(0, 8) + "01", addDays(today, WINDOW_DAYS));
+      accountForecast = computeAccountForecast(linkedAccount, latestBalances[linkedAccount.name]?.balance ?? 0, occurrences, today, 0);
+      if (accountForecast && transfer && transfer.fromAccountName === linkedAccount.name) {
+        accountForecast = { ...accountForecast, excessOrShortfall: Math.max(0, accountForecast.excessOrShortfall - transfer.amount) };
+      }
+    }
+    const rec = computeCardRecommendation(card, balance, charges, today, accountForecast);
+    const hasAlert = rec.overLimitRisk || rec.urgentMinimumDue || rec.suggestedExtraPayment > 0;
+    return { card, balance, rec, hasAlert };
+  }).sort((a, b) => (a.hasAlert === b.hasAlert ? 0 : a.hasAlert ? -1 : 1));
+
   return (
     <div className="space-y-4">
-      {cards.map((card) => {
-        const balance = latestBalances[card.name]?.balance ?? 0;
+      <div className="rounded-2xl bg-white shadow p-4">
+        <h2 className="font-bold text-slate-700 text-sm mb-3">Current Balances</h2>
+        <div className="flex flex-wrap gap-2">
+          {cardsWithRecs.map(({ card, balance, hasAlert }) => (
+            <div key={card.id} className="rounded-lg px-3 py-2 border-2" style={hasAlert ? { backgroundColor: "#fee2e2", borderColor: "#991b1b" } : { backgroundColor: "#f8fafc", borderColor: "#cbd5e1" }}>
+              <p className="text-xs font-semibold" style={{ color: hasAlert ? "#991b1b" : "#475569" }}>{hasAlert ? "⚠️ " : ""}{card.name}</p>
+              <p className="text-base font-bold" style={{ color: hasAlert ? "#991b1b" : "#1e293b" }}>${formatMoney(balance)}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {cardsWithRecs.map(({ card, balance, rec }) => {
         const linkedAccount = cashAccounts.find((a) => a.id === card.linkedCashAccountId);
-        let accountForecast = null;
-        if (linkedAccount) {
-          const accountBills = allBills.filter((b) => b.cashAccountId === linkedAccount.id);
-          const occurrences = buildOccurrences(accountBills, allPayments, today.slice(0, 8) + "01", addDays(today, WINDOW_DAYS));
-          accountForecast = computeAccountForecast(linkedAccount, latestBalances[linkedAccount.name]?.balance ?? 0, occurrences, today, 0);
-          if (accountForecast && transfer && transfer.fromAccountName === linkedAccount.name) {
-            accountForecast = { ...accountForecast, excessOrShortfall: Math.max(0, accountForecast.excessOrShortfall - transfer.amount) };
-          }
-        }
-        const rec = computeCardRecommendation(card, balance, charges, today, accountForecast);
         const cardCharges = charges.filter((c) => c.creditCardId === card.id && c.active);
 
         return (
@@ -974,19 +992,19 @@ export default function CashFlowPage() {
 
         {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
           <div className="max-w-5xl">
-            <div className="mb-4 flex rounded-lg border border-slate-200 bg-white overflow-hidden w-fit flex-wrap">
-              <button onClick={() => setActiveTab("overview")} className="px-4 py-2 text-sm font-semibold transition"
-                style={activeTab === "overview" ? { backgroundColor: "#e8622a", color: "white" } : { backgroundColor: "#d1fae5", color: "#065f46" }}>Overview</button>
-              <button onClick={() => setActiveTab("entry")} className="px-4 py-2 text-sm font-semibold transition"
-                style={activeTab === "entry" ? { backgroundColor: "#e8622a", color: "white" } : updateNumbersNeedsAttention ? { backgroundColor: "#fee2e2", color: "#991b1b" } : { backgroundColor: "#d1fae5", color: "#065f46" }}>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button onClick={() => setActiveTab("overview")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
+                style={activeTab === "overview" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Overview</button>
+              <button onClick={() => setActiveTab("entry")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
+                style={activeTab === "entry" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : updateNumbersNeedsAttention ? { backgroundColor: "#fee2e2", color: "#991b1b", borderColor: "#991b1b" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>
                 {updateNumbersNeedsAttention && activeTab !== "entry" ? "⚠️ " : ""}Update Numbers
               </button>
               {cashAccounts.map((a) => (
-                <button key={a.id} onClick={() => setActiveTab(a.id)} className="px-4 py-2 text-sm font-semibold transition"
-                  style={activeTab === a.id ? { backgroundColor: "#e8622a", color: "white" } : { backgroundColor: "#d1fae5", color: "#065f46" }}>{a.name}</button>
+                <button key={a.id} onClick={() => setActiveTab(a.id)} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
+                  style={activeTab === a.id ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>{a.name}</button>
               ))}
-              <button onClick={() => setActiveTab("cards")} className="px-4 py-2 text-sm font-semibold transition"
-                style={activeTab === "cards" ? { backgroundColor: "#e8622a", color: "white" } : { backgroundColor: "#d1fae5", color: "#065f46" }}>Credit Cards</button>
+              <button onClick={() => setActiveTab("cards")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
+                style={activeTab === "cards" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Credit Cards</button>
             </div>
 
             {cashAccounts.map((a) => activeTab === a.id && (
