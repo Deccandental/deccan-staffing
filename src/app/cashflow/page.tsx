@@ -8,7 +8,8 @@ import {
   CashAccount, CreditCard, CardCharge, WeeklyCashReview,
   loadRecurringBills, addRecurringBill, updateRecurringBill,
   loadBillPayments, saveBillPayment, deleteBillPayment,
-  loadLatestBalances, addBalanceCheck,
+  loadLatestBalances, addBalanceCheck, loadBalanceHistoryForAccount, deleteBalanceCheck,
+  loadStatementHistoryForCard, backfillStatementMonth, deleteStatementEntry, CardStatementEntry,
   loadCashAccounts, updateCashAccountCushion,
   loadCreditCards, updateStatementBalance,
   loadCardCharges, addCardCharge, updateCardCharge, deleteCardCharge,
@@ -44,6 +45,51 @@ function safeColor(amount: number): string {
 }
 
 // ---------------- Account Panel ----------------
+
+// ---------------- Balance History (view + delete a bad entry) ----------------
+
+function BalanceHistoryList({ accountName, refreshAll }: { accountName: string; refreshAll: () => void }) {
+  const [showing, setShowing] = useState(false);
+  const [entries, setEntries] = useState<BalanceCheck[]>([]);
+
+  async function load() {
+    const hist = await loadBalanceHistoryForAccount(accountName, 15);
+    setEntries(hist);
+  }
+
+  async function toggle() {
+    if (!showing) await load();
+    setShowing((s) => !s);
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm("Delete this balance entry? This can't be undone.")) return;
+    await deleteBalanceCheck(id);
+    await load();
+    refreshAll();
+  }
+
+  return (
+    <div className="mt-2">
+      <button onClick={toggle} className="text-xs text-orange-500 hover:underline">{showing ? "Hide history" : "View history"}</button>
+      {showing && (
+        <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+          {entries.length === 0 ? (
+            <p className="text-xs text-slate-400">No entries yet.</p>
+          ) : entries.map((e) => (
+            <div key={e.id} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-3 py-1.5">
+              <span className="text-slate-600">{new Date(e.checkedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+              <span className="flex items-center gap-2">
+                <span className="font-semibold text-slate-700">${formatMoney(e.balance)}</span>
+                <button onClick={() => handleDelete(e.id)} className="text-red-400 hover:underline">Delete</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AccountPanel({ account, allBills, allPayments, latestBalances, cards, refreshAll }: {
   account: CashAccount; allBills: RecurringBill[]; allPayments: BillPayment[];
@@ -170,11 +216,12 @@ function AccountPanel({ account, allBills, allPayments, latestBalances, cards, r
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <input type="number" onFocus={(e) => e.target.select()} value={balanceInput} onChange={(e) => setBalanceInput(e.target.value)} placeholder="New balance"
+            <input type="number" onFocus={(e) => e.target.select()} value={balanceInput || String(currentBalance)} onChange={(e) => setBalanceInput(e.target.value)} placeholder="New balance"
               className="w-32 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
             <button onClick={handleUpdateBalance} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Update</button>
           </div>
         </div>
+        <BalanceHistoryList accountName={account.name} refreshAll={refreshAll} />
         <div className="pt-3 border-t border-slate-100">
           <p className="text-xs text-slate-500 mb-1">Operating cushion. Currently: <strong>${formatMoney(account.cushionTarget)}</strong></p>
           <div className="flex items-center gap-2 max-w-xs">
@@ -452,21 +499,30 @@ function CreditCardsPanel({ cards, charges, cashAccounts, latestBalances, allBil
 
             <div className="grid gap-3 sm:grid-cols-2 mb-3">
               <div>
-                <label className="block text-sm text-slate-800 font-semibold mb-1">Update Current Balance</label>
-                <div className="flex items-center gap-2">
-                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
-                    placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                  <button onClick={() => handleUpdateBalance(card)} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white whitespace-nowrap hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Update</button>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs mb-0.5">
-                  <span className={rec.statementStale ? "text-amber-600 font-semibold" : "text-slate-400"}>
-                    Statement Balance {rec.statementStale ? "⚠️ Update due" : `— $${formatMoney(card.statementBalance)}`}
+                <label className="block text-sm text-slate-800 font-semibold mb-1">
+                  Update Current Balance
+                  <span className="block text-xs font-normal text-slate-400 mt-0.5">
+                    {latestBalances[card.name] ? `Last updated ${new Date(latestBalances[card.name].checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}
                   </span>
                 </label>
                 <div className="flex items-center gap-2">
-                  <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? ""} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
+                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? String(balance)} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
+                    placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  <button onClick={() => handleUpdateBalance(card)} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white whitespace-nowrap hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Update</button>
+                </div>
+                <BalanceHistoryList accountName={card.name} refreshAll={refreshAll} />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">
+                  <span className={rec.statementStale ? "text-amber-600 font-semibold" : "text-slate-800 font-semibold"}>
+                    Statement Balance {rec.statementStale ? "⚠️ Update due" : `— $${formatMoney(card.statementBalance)}`}
+                  </span>
+                  <span className="block text-xs font-normal text-slate-400 mt-0.5">
+                    {card.statementBalanceUpdatedAt ? `Last updated ${new Date(card.statementBalanceUpdatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}
+                  </span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? String(card.statementBalance)} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
                     placeholder="From latest statement" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                   <button onClick={() => handleUpdateStatement(card)} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white whitespace-nowrap hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Update</button>
                 </div>
@@ -865,8 +921,11 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
         <div className="grid gap-3 sm:grid-cols-2 mb-3">
           {cashAccounts.map((acct) => (
             <div key={acct.id}>
-              <label className="block text-sm text-slate-800 font-semibold mb-1">{acct.name} Balance <span className="text-slate-400 font-normal">— current: ${formatMoney(latestBalances[acct.name]?.balance ?? 0)}</span></label>
-              <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[acct.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
+              <label className="block text-sm text-slate-800 font-semibold mb-1">
+                {acct.name} Balance <span className="text-slate-400 font-normal">— current: ${formatMoney(latestBalances[acct.name]?.balance ?? 0)}</span>
+                <span className="block text-xs font-normal text-slate-400 mt-0.5">{latestBalances[acct.name] ? `Last updated ${new Date(latestBalances[acct.name].checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}</span>
+              </label>
+              <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[acct.id] ?? String(latestBalances[acct.name]?.balance ?? 0)} onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
                 placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
             </div>
           ))}
@@ -877,13 +936,19 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
               <p className="text-sm font-semibold text-slate-700 mb-2">{card.name}</p>
               <div className="grid gap-2 sm:grid-cols-2">
                 <div>
-                  <label className="block text-sm text-slate-800 font-semibold mb-1">Current Balance <span className="text-slate-400 font-normal">— ${formatMoney(latestBalances[card.name]?.balance ?? 0)}</span></label>
-                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? ""} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
+                  <label className="block text-sm text-slate-800 font-semibold mb-1">
+                    Current Balance <span className="text-slate-400 font-normal">— ${formatMoney(latestBalances[card.name]?.balance ?? 0)}</span>
+                    <span className="block text-xs font-normal text-slate-400 mt-0.5">{latestBalances[card.name] ? `Last updated ${new Date(latestBalances[card.name].checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}</span>
+                  </label>
+                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? String(latestBalances[card.name]?.balance ?? 0)} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
                     placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                 </div>
                 <div>
-                  <label className="block text-sm text-slate-800 font-semibold mb-1">Statement Balance <span className="text-slate-400 font-normal">— ${formatMoney(card.statementBalance)}</span></label>
-                  <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? ""} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
+                  <label className="block text-sm text-slate-800 font-semibold mb-1">
+                    Statement Balance <span className="text-slate-400 font-normal">— ${formatMoney(card.statementBalance)}</span>
+                    <span className="block text-xs font-normal text-slate-400 mt-0.5">{card.statementBalanceUpdatedAt ? `Last updated ${new Date(card.statementBalanceUpdatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}</span>
+                  </label>
+                  <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? String(card.statementBalance)} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
                     placeholder="From statement" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                 </div>
               </div>
@@ -936,6 +1001,301 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
 }
 
 // ---------------- Main Page ----------------
+
+// ---------------- Trends Panel ----------------
+
+// ---------------- Lightweight SVG line chart (no external dependency) ----------------
+
+const CHART_COLORS = ["#e8622a", "#0369a1", "#059669", "#7c3aed", "#dc2626", "#0891b2"];
+
+function TrendLineChart({ series, height = 220 }: { series: { label: string; color: string; points: { date: string; value: number }[] }[]; height?: number }) {
+  const allDates = Array.from(new Set(series.flatMap((s) => s.points.map((p) => p.date)))).sort();
+  const allValues = series.flatMap((s) => s.points.map((p) => p.value));
+  if (allDates.length === 0 || allValues.length === 0) {
+    return <p className="text-sm text-slate-400 py-8 text-center">Not enough data yet to chart.</p>;
+  }
+  const minY = Math.min(0, ...allValues);
+  const maxY = Math.max(...allValues, 1);
+  const width = 700;
+  const padding = { top: 10, right: 10, bottom: 24, left: 64 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+
+  function xScale(date: string) {
+    const idx = allDates.indexOf(date);
+    return padding.left + (allDates.length <= 1 ? chartWidth / 2 : (idx / (allDates.length - 1)) * chartWidth);
+  }
+  function yScale(value: number) {
+    return padding.top + chartHeight - ((value - minY) / (maxY - minY || 1)) * chartHeight;
+  }
+
+  const xLabelStep = Math.max(1, Math.ceil(allDates.length / 6));
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full">
+        {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
+          const value = minY + frac * (maxY - minY);
+          const y = yScale(value);
+          return (
+            <g key={frac}>
+              <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="#e2e8f0" strokeWidth={1} />
+              <text x={padding.left - 8} y={y + 4} textAnchor="end" fontSize={10} fill="#94a3b8">${Math.round(value / 1000)}k</text>
+            </g>
+          );
+        })}
+        {series.map((s) => {
+          if (s.points.length === 0) return null;
+          const pathD = s.points.map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(p.date)} ${yScale(p.value)}`).join(" ");
+          return <path key={s.label} d={pathD} fill="none" stroke={s.color} strokeWidth={2} />;
+        })}
+        {series.map((s) => s.points.map((p, i) => (
+          <circle key={`${s.label}-${i}`} cx={xScale(p.date)} cy={yScale(p.value)} r={3} fill={s.color} />
+        )))}
+        {allDates.filter((_, i) => i % xLabelStep === 0).map((date) => (
+          <text key={date} x={xScale(date)} y={height - 5} textAnchor="middle" fontSize={9} fill="#94a3b8">
+            {new Date(date.length === 7 ? date + "-02" : date.slice(0, 10) + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: date.length === 7 ? undefined : "numeric" })}
+          </text>
+        ))}
+      </svg>
+      <div className="flex flex-wrap gap-3 mt-2 justify-center">
+        {series.map((s) => (
+          <span key={s.label} className="flex items-center gap-1.5 text-xs text-slate-600">
+            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: s.color }}></span>
+            {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------- Trends Panel ----------------
+
+function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAccount[]; cards: CreditCard[]; refreshAll: () => void }) {
+  const [backfillCardId, setBackfillCardId] = useState("");
+  const [backfillMonth, setBackfillMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [backfillAmount, setBackfillAmount] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [statementHistories, setStatementHistories] = useState<Record<string, CardStatementEntry[]>>({});
+  const [reviewHistory, setReviewHistory] = useState<WeeklyCashReview[]>([]);
+  const [backfillAccountName, setBackfillAccountName] = useState("");
+  const [backfillDate, setBackfillDate] = useState(todayStr());
+  const [backfillBalanceAmount, setBackfillBalanceAmount] = useState("");
+  const [balanceSaved, setBalanceSaved] = useState(false);
+  const [balanceHistories, setBalanceHistories] = useState<Record<string, BalanceCheck[]>>({});
+  const [depthView, setDepthView] = useState<string | null>(null); // 'bank' | 'cardBalance' | 'cardStatement' | 'dental' | null
+
+  async function loadAll() {
+    const allAccounts = [...cashAccounts, ...cards];
+    const [histories, statementHists, reviews] = await Promise.all([
+      Promise.all(allAccounts.map((a) => loadBalanceHistoryForAccount(a.name, 60))),
+      Promise.all(cards.map((c) => loadStatementHistoryForCard(c.id))),
+      loadWeeklyReviewHistory(52),
+    ]);
+    const balMap: Record<string, BalanceCheck[]> = {};
+    allAccounts.forEach((a, i) => { balMap[a.name] = histories[i]; });
+    setBalanceHistories(balMap);
+    const stmtMap: Record<string, CardStatementEntry[]> = {};
+    cards.forEach((c, i) => { stmtMap[c.id] = statementHists[i]; });
+    setStatementHistories(stmtMap);
+    setReviewHistory(reviews);
+  }
+
+  useEffect(() => { loadAll(); }, [cashAccounts, cards]);
+
+  async function handleBackfill() {
+    const amount = Number(backfillAmount);
+    if (!backfillCardId || !backfillMonth || !backfillAmount || isNaN(amount)) return;
+    await backfillStatementMonth(backfillCardId, backfillMonth, amount);
+    setBackfillAmount("");
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+    await loadAll();
+    refreshAll();
+  }
+
+  async function handleBackfillBalance() {
+    const amount = Number(backfillBalanceAmount);
+    if (!backfillAccountName || !backfillDate || !backfillBalanceAmount || isNaN(amount)) return;
+    const isoTimestamp = new Date(backfillDate + "T12:00:00").toISOString();
+    await addBalanceCheck(backfillAccountName, amount, isoTimestamp);
+    setBackfillBalanceAmount("");
+    setBalanceSaved(true);
+    setTimeout(() => setBalanceSaved(false), 3000);
+    await loadAll();
+    refreshAll();
+  }
+
+  async function handleDeleteEntry(id: string) {
+    if (!confirm("Delete this statement entry? This can't be undone.")) return;
+    await deleteStatementEntry(id);
+    await loadAll();
+  }
+
+  function seriesFor(name: string, color: string): { label: string; color: string; points: { date: string; value: number }[] } {
+    const hist = balanceHistories[name] ?? [];
+    return { label: name, color, points: [...hist].reverse().map((h) => ({ date: h.checkedAt.slice(0, 10), value: h.balance })) };
+  }
+
+  const bankSeries = cashAccounts.map((a, i) => seriesFor(a.name, CHART_COLORS[i % CHART_COLORS.length]));
+  const cardBalanceSeries = cards.map((c, i) => seriesFor(c.name, CHART_COLORS[i % CHART_COLORS.length]));
+  const cardStatementSeries = cards.map((c, i) => ({
+    label: c.name, color: CHART_COLORS[i % CHART_COLORS.length],
+    points: [...(statementHistories[c.id] ?? [])].reverse().map((e) => ({ date: e.month, value: e.balance })),
+  }));
+  const dentalSeries = [
+    { label: "Projected Production", color: CHART_COLORS[0], points: [...reviewHistory].reverse().filter((r) => r.projectedTotalProduction != null).map((r) => ({ date: r.reviewDate, value: r.projectedTotalProduction as number })) },
+    { label: "Current Income", color: CHART_COLORS[1], points: [...reviewHistory].reverse().filter((r) => r.currentIncome != null).map((r) => ({ date: r.reviewDate, value: r.currentIncome as number })) },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl bg-white shadow p-5">
+        <h2 className="font-bold text-slate-700 mb-1">Add / Backfill a Statement Balance</h2>
+        <p className="text-sm text-slate-500 mb-4">Enter a statement balance for any month — past or present — to build out the trend history below.</p>
+        <div className="grid gap-3 sm:grid-cols-4">
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Card</label>
+            <select value={backfillCardId} onChange={(e) => setBackfillCardId(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+              <option value="">Select…</option>
+              {cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Month</label>
+            <input type="month" value={backfillMonth} onChange={(e) => setBackfillMonth(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Statement Balance</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={backfillAmount} onChange={(e) => setBackfillAmount(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div className="flex items-end">
+            <button onClick={handleBackfill} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition w-full" style={{ backgroundColor: "#e8622a" }}>Save</button>
+          </div>
+        </div>
+        {saved && <span className="text-xs text-emerald-600 font-semibold mt-2 block">✓ Saved</span>}
+      </div>
+
+      <div className="rounded-2xl bg-white shadow p-5">
+        <h2 className="font-bold text-slate-700 mb-1">Add / Backfill an Account or Card Balance</h2>
+        <p className="text-sm text-slate-500 mb-4">Enter a balance for any date — past or present — for any bank account or card.</p>
+        <div className="grid gap-3 sm:grid-cols-4">
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Account / Card</label>
+            <select value={backfillAccountName} onChange={(e) => setBackfillAccountName(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+              <option value="">Select…</option>
+              {[...cashAccounts, ...cards].map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Date</label>
+            <input type="date" value={backfillDate} onChange={(e) => setBackfillDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Balance</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={backfillBalanceAmount} onChange={(e) => setBackfillBalanceAmount(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div className="flex items-end">
+            <button onClick={handleBackfillBalance} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition w-full" style={{ backgroundColor: "#e8622a" }}>Save</button>
+          </div>
+        </div>
+        {balanceSaved && <span className="text-xs text-emerald-600 font-semibold mt-2 block">✓ Saved</span>}
+      </div>
+
+      <div className="rounded-2xl bg-white shadow p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold text-slate-700">Bank Accounts</h2>
+          <button onClick={() => setDepthView(depthView === "bank" ? null : "bank")} className="text-xs text-orange-500 hover:underline">{depthView === "bank" ? "Standard view" : "In-depth view"}</button>
+        </div>
+        {depthView === "bank" ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {cashAccounts.map((a, i) => (
+              <div key={a.id}>
+                <p className="text-sm font-semibold text-slate-700 mb-2">{a.name}</p>
+                <TrendLineChart series={[seriesFor(a.name, CHART_COLORS[i % CHART_COLORS.length])]} height={180} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <TrendLineChart series={bankSeries} />
+        )}
+      </div>
+
+      <div className="rounded-2xl bg-white shadow p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold text-slate-700">Credit Cards — Current Balance</h2>
+          <button onClick={() => setDepthView(depthView === "cardBalance" ? null : "cardBalance")} className="text-xs text-orange-500 hover:underline">{depthView === "cardBalance" ? "Standard view" : "In-depth view"}</button>
+        </div>
+        {depthView === "cardBalance" ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {cards.map((c, i) => (
+              <div key={c.id}>
+                <p className="text-sm font-semibold text-slate-700 mb-2">{c.name}</p>
+                <TrendLineChart series={[seriesFor(c.name, CHART_COLORS[i % CHART_COLORS.length])]} height={180} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <TrendLineChart series={cardBalanceSeries} />
+        )}
+      </div>
+
+      <div className="rounded-2xl bg-white shadow p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold text-slate-700">Credit Cards — Statement Balance</h2>
+          <button onClick={() => setDepthView(depthView === "cardStatement" ? null : "cardStatement")} className="text-xs text-orange-500 hover:underline">{depthView === "cardStatement" ? "Standard view" : "In-depth view"}</button>
+        </div>
+        {depthView === "cardStatement" ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {cards.map((c, i) => (
+              <div key={c.id}>
+                <p className="text-sm font-semibold text-slate-700 mb-2">{c.name}</p>
+                <TrendLineChart series={[cardStatementSeries[i]]} height={180} />
+                <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                  {(statementHistories[c.id] ?? []).map((entry) => (
+                    <div key={entry.id} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-3 py-1">
+                      <span className="text-slate-600">{new Date(entry.month + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
+                      <span className="flex items-center gap-2">
+                        <span className="font-semibold text-slate-700">${formatMoney(entry.balance)}</span>
+                        <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-400 hover:underline">Delete</button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <TrendLineChart series={cardStatementSeries} />
+        )}
+      </div>
+
+      <div className="rounded-2xl bg-white shadow p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold text-slate-700">Open Dental — Production & Income</h2>
+          <button onClick={() => setDepthView(depthView === "dental" ? null : "dental")} className="text-xs text-orange-500 hover:underline">{depthView === "dental" ? "Standard view" : "In-depth view"}</button>
+        </div>
+        <TrendLineChart series={dentalSeries} />
+        {depthView === "dental" && (
+          <div className="mt-3 space-y-1 max-h-60 overflow-y-auto">
+            {reviewHistory.map((r) => (
+              <div key={r.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
+                <span className="text-slate-600">{new Date(r.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                <span className="text-xs text-slate-400">
+                  {r.projectedTotalProduction != null ? `Prod: $${formatMoney(r.projectedTotalProduction)}` : ""}
+                  {r.currentIncome != null ? ` · Income: $${formatMoney(r.currentIncome)}` : ""}
+                  {r.currentPatientIncome != null && r.currentIncome != null ? ` · Insurance: $${formatMoney(r.currentIncome - r.currentPatientIncome)}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 export default function CashFlowPage() {
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
@@ -1005,6 +1365,8 @@ export default function CashFlowPage() {
               ))}
               <button onClick={() => setActiveTab("cards")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "cards" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Credit Cards</button>
+              <button onClick={() => setActiveTab("trends")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
+                style={activeTab === "trends" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Trends</button>
             </div>
 
             {cashAccounts.map((a) => activeTab === a.id && (
@@ -1018,6 +1380,9 @@ export default function CashFlowPage() {
             )}
             {activeTab === "entry" && (
               <EntryPanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={refresh} />
+            )}
+            {activeTab === "trends" && (
+              <TrendsPanel cashAccounts={cashAccounts} cards={creditCards} refreshAll={refresh} />
             )}
           </div>
         )}
