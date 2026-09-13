@@ -345,6 +345,14 @@ function CreditCardsPanel({ cards, charges, cashAccounts, latestBalances, allBil
   const [chargeForm, setChargeForm] = useState({ vendor: "", typicalAmount: "", approxDayOfMonth: "1", notes: "" });
 
   const today = todayStr();
+  const monthStart = today.slice(0, 8) + "01";
+  const ff = cashAccounts.find((a) => a.name === "Fifth Third Checking");
+  const chase = cashAccounts.find((a) => a.name === "Chase");
+  const ffOccForTransfer = ff ? buildOccurrences(allBills.filter((b) => b.cashAccountId === ff.id), allPayments, monthStart, addDays(today, WINDOW_DAYS)) : [];
+  const chaseOccForTransfer = chase ? buildOccurrences(allBills.filter((b) => b.cashAccountId === chase.id), allPayments, monthStart, addDays(today, WINDOW_DAYS)) : [];
+  const ffForecastForTransfer = ff ? computeAccountForecast(ff, latestBalances[ff.name]?.balance ?? 0, ffOccForTransfer, today, 0) : null;
+  const chaseForecastForTransfer = chase ? computeAccountForecast(chase, latestBalances[chase.name]?.balance ?? 0, chaseOccForTransfer, today, 0) : null;
+  const transfer = ffForecastForTransfer && chaseForecastForTransfer ? computeSuggestedTransfer(ffForecastForTransfer, chaseForecastForTransfer) : null;
 
   async function handleUpdateBalance(card: CreditCard) {
     const raw = balanceInputs[card.id];
@@ -388,6 +396,9 @@ function CreditCardsPanel({ cards, charges, cashAccounts, latestBalances, allBil
           const accountBills = allBills.filter((b) => b.cashAccountId === linkedAccount.id);
           const occurrences = buildOccurrences(accountBills, allPayments, today.slice(0, 8) + "01", addDays(today, WINDOW_DAYS));
           accountForecast = computeAccountForecast(linkedAccount, latestBalances[linkedAccount.name]?.balance ?? 0, occurrences, today, 0);
+          if (accountForecast && transfer && transfer.fromAccountName === linkedAccount.name) {
+            accountForecast = { ...accountForecast, excessOrShortfall: Math.max(0, accountForecast.excessOrShortfall - transfer.amount) };
+          }
         }
         const rec = computeCardRecommendation(card, balance, charges, today, accountForecast);
         const cardCharges = charges.filter((c) => c.creditCardId === card.id && c.active);
@@ -534,6 +545,12 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
       const accountBills = allBills.filter((b) => b.cashAccountId === linkedAccount.id);
       const accountOccurrences = buildOccurrences(accountBills, allPayments, monthStart, addDays(today, WINDOW_DAYS));
       accountForecast = computeAccountForecast(linkedAccount, latestBalances[linkedAccount.name]?.balance ?? 0, accountOccurrences, today, 0);
+      // If this account's excess is already earmarked for a transfer to the
+      // other account, don't also offer it up for card paydown — that would
+      // suggest using the same dollars for two different things at once.
+      if (accountForecast && transfer && transfer.fromAccountName === linkedAccount.name) {
+        accountForecast = { ...accountForecast, excessOrShortfall: Math.max(0, accountForecast.excessOrShortfall - transfer.amount) };
+      }
     }
     return computeCardRecommendation(card, latestBalances[card.name]?.balance ?? 0, charges, today, accountForecast);
   });
