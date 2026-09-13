@@ -10,6 +10,7 @@ import {
   loadBillPayments, saveBillPayment, deleteBillPayment,
   loadLatestBalances, addBalanceCheck, loadBalanceHistoryForAccount, deleteBalanceCheck,
   loadStatementHistoryForCard, backfillStatementMonth, deleteStatementEntry, CardStatementEntry,
+  updateBankStatementBalance, loadStatementHistoryForAccount, backfillBankStatementMonth, deleteBankStatementEntry, BankStatementEntry,
   loadCashAccounts, updateCashAccountCushion,
   loadCreditCards, updateStatementBalance,
   loadCardCharges, addCardCharge, updateCardCharge, deleteCardCharge,
@@ -858,6 +859,7 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
 
   const [balanceInputs, setBalanceInputs] = useState<Record<string, string>>({});
   const [stmtInputs, setStmtInputs] = useState<Record<string, string>>({});
+  const [bankStmtInputs, setBankStmtInputs] = useState<Record<string, string>>({});
   const [balancesSaved, setBalancesSaved] = useState(false);
 
   useEffect(() => {
@@ -898,6 +900,8 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
     for (const acct of cashAccounts) {
       const raw = balanceInputs[acct.id];
       if (raw && !isNaN(Number(raw))) jobs.push(addBalanceCheck(acct.name, Number(raw)));
+      const rawStmt = bankStmtInputs[acct.id];
+      if (rawStmt && !isNaN(Number(rawStmt))) jobs.push(updateBankStatementBalance(acct.id, Number(rawStmt)));
     }
     for (const card of cards) {
       const rawBal = balanceInputs[card.id];
@@ -908,6 +912,7 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
     await Promise.all(jobs);
     setBalanceInputs({});
     setStmtInputs({});
+    setBankStmtInputs({});
     setBalancesSaved(true);
     setTimeout(() => setBalancesSaved(false), 3000);
     refreshAll();
@@ -920,13 +925,26 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
         <p className="text-sm text-slate-500 mb-4">Update everything here — the same numbers shown on each account/card's own tab, so updating here updates everywhere.</p>
         <div className="grid gap-3 sm:grid-cols-2 mb-3">
           {cashAccounts.map((acct) => (
-            <div key={acct.id}>
-              <label className="block text-sm text-slate-800 font-semibold mb-1">
-                {acct.name} Balance <span className="text-slate-400 font-normal">— current: ${formatMoney(latestBalances[acct.name]?.balance ?? 0)}</span>
-                <span className="block text-xs font-normal text-slate-400 mt-0.5">{latestBalances[acct.name] ? `Last updated ${new Date(latestBalances[acct.name].checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}</span>
-              </label>
-              <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[acct.id] ?? String(latestBalances[acct.name]?.balance ?? 0)} onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
-                placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            <div key={acct.id} className="rounded-lg bg-slate-50 p-3">
+              <p className="text-sm font-semibold text-slate-700 mb-2">{acct.name}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm text-slate-800 font-semibold mb-1">
+                    Balance <span className="text-slate-400 font-normal">— ${formatMoney(latestBalances[acct.name]?.balance ?? 0)}</span>
+                    <span className="block text-xs font-normal text-slate-400 mt-0.5">{latestBalances[acct.name] ? `Last updated ${new Date(latestBalances[acct.name].checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}</span>
+                  </label>
+                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[acct.id] ?? String(latestBalances[acct.name]?.balance ?? 0)} onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
+                    placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-800 font-semibold mb-1">
+                    Statement Balance <span className="text-slate-400 font-normal">— ${formatMoney(acct.statementBalance)}</span>
+                    <span className="block text-xs font-normal text-slate-400 mt-0.5">{acct.statementBalanceUpdatedAt ? `Last updated ${new Date(acct.statementBalanceUpdatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}</span>
+                  </label>
+                  <input type="number" onFocus={(e) => e.target.select()} value={bankStmtInputs[acct.id] ?? String(acct.statementBalance)} onChange={(e) => setBankStmtInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
+                    placeholder="From statement" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -1091,7 +1109,7 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const [backfillConfirmation, setBackfillConfirmation] = useState<string | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
   const [statementHistories, setStatementHistories] = useState<Record<string, CardStatementEntry[]>>({});
-  const [bankBalanceHistories, setBankBalanceHistories] = useState<Record<string, BalanceCheck[]>>({});
+  const [bankStatementHistories, setBankStatementHistories] = useState<Record<string, BankStatementEntry[]>>({});
   const [reviewHistory, setReviewHistory] = useState<WeeklyCashReview[]>([]);
   const [depthView, setDepthView] = useState<string | null>(null); // 'cardStatement' | 'dental' | null
 
@@ -1099,15 +1117,15 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     const [statementHists, reviews, bankHists] = await Promise.all([
       Promise.all(cards.map((c) => loadStatementHistoryForCard(c.id))),
       loadWeeklyReviewHistory(52),
-      Promise.all(cashAccounts.map((a) => loadBalanceHistoryForAccount(a.name, 100))),
+      Promise.all(cashAccounts.map((a) => loadStatementHistoryForAccount(a.id))),
     ]);
     const stmtMap: Record<string, CardStatementEntry[]> = {};
     cards.forEach((c, i) => { stmtMap[c.id] = statementHists[i]; });
     setStatementHistories(stmtMap);
     setReviewHistory(reviews);
-    const bankMap: Record<string, BalanceCheck[]> = {};
-    cashAccounts.forEach((a, i) => { bankMap[a.name] = bankHists[i]; });
-    setBankBalanceHistories(bankMap);
+    const bankMap: Record<string, BankStatementEntry[]> = {};
+    cashAccounts.forEach((a, i) => { bankMap[a.id] = bankHists[i]; });
+    setBankStatementHistories(bankMap);
   }
 
   useEffect(() => { loadAll(); }, [cashAccounts, cards]);
@@ -1129,19 +1147,15 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
       }
       setBackfillConfirmation(`✓ Saved ${card?.name ?? "card"} — ${monthLabel} — $${formatMoney(amount)}`);
     } else {
-      const accountName = rest.join(":");
-      // Bank accounts don't have a "statement" concept — record this as the
-      // balance on the last day of the selected month.
-      const [y, m] = backfillMonth.split("-").map(Number);
-      const lastDay = new Date(y, m, 0).getDate();
-      const isoTimestamp = new Date(`${backfillMonth}-${String(lastDay).padStart(2, "0")}T12:00:00`).toISOString();
-      const result = await addBalanceCheck(accountName, amount, isoTimestamp);
+      const accountId = rest.join(":");
+      const account = cashAccounts.find((a) => a.id === accountId);
+      const result = await backfillBankStatementMonth(accountId, backfillMonth, amount);
       if (!result.ok) {
-        setBackfillError(result.error ?? "Save failed.");
+        setBackfillError(result.error ?? "Save failed — the bank_statement_entries table may not exist yet. Check that the SQL migration has been run.");
         setBackfillConfirmation(null);
         return;
       }
-      setBackfillConfirmation(`✓ Saved ${accountName} — ${monthLabel} (as of the ${lastDay}${lastDay === 31 ? "st" : "th"}) — $${formatMoney(amount)}`);
+      setBackfillConfirmation(`✓ Saved ${account?.name ?? "account"} — ${monthLabel} — $${formatMoney(amount)}`);
     }
     setBackfillError(null);
     setBackfillAmount("");
@@ -1157,8 +1171,8 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   }
 
   async function handleDeleteBankEntry(id: string) {
-    if (!confirm("Delete this balance entry? This can't be undone.")) return;
-    await deleteBalanceCheck(id);
+    if (!confirm("Delete this statement entry? This can't be undone.")) return;
+    await deleteBankStatementEntry(id);
     await loadAll();
   }
 
@@ -1167,22 +1181,9 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     points: [...(statementHistories[c.id] ?? [])].reverse().map((e) => ({ date: e.month, value: e.balance })),
   }));
 
-  // Bank balances can be entered at any granularity (daily updates, monthly
-  // backfills, etc.) — collapse to one point per month, the latest entry
-  // within that month, so this reads as a monthly trend like the others.
-  const bankMonthlyEntries: Record<string, BalanceCheck[]> = {};
-  cashAccounts.forEach((a) => {
-    const byMonth = new Map<string, BalanceCheck>();
-    for (const entry of bankBalanceHistories[a.name] ?? []) {
-      const month = entry.checkedAt.slice(0, 7);
-      const existing = byMonth.get(month);
-      if (!existing || entry.checkedAt > existing.checkedAt) byMonth.set(month, entry);
-    }
-    bankMonthlyEntries[a.name] = Array.from(byMonth.values()).sort((e1, e2) => e2.checkedAt.localeCompare(e1.checkedAt));
-  });
   const bankAccountSeries = cashAccounts.map((a, i) => ({
     label: a.name, color: CHART_COLORS[i % CHART_COLORS.length],
-    points: [...(bankMonthlyEntries[a.name] ?? [])].reverse().map((e) => ({ date: e.checkedAt.slice(0, 7), value: e.balance })),
+    points: [...(bankStatementHistories[a.id] ?? [])].reverse().map((e) => ({ date: e.month, value: e.balance })),
   }));
 
   // Weekly reviews get collapsed to one point per month — the latest review
@@ -1214,7 +1215,7 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
             <select value={backfillEntityKey} onChange={(e) => setBackfillEntityKey(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
               <option value="">Select…</option>
               <optgroup label="Bank Accounts">
-                {cashAccounts.map((a) => <option key={a.id} value={`account:${a.name}`}>{a.name}</option>)}
+                {cashAccounts.map((a) => <option key={a.id} value={`account:${a.id}`}>{a.name}</option>)}
               </optgroup>
               <optgroup label="Credit Cards">
                 {cards.map((c) => <option key={c.id} value={`card:${c.id}`}>{c.name}</option>)}
@@ -1249,9 +1250,9 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
                 <p className="text-sm font-semibold text-slate-700 mb-2">{a.name}</p>
                 <TrendLineChart series={[bankAccountSeries[i]]} height={180} />
                 <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
-                  {(bankMonthlyEntries[a.name] ?? []).map((entry) => (
+                  {(bankStatementHistories[a.id] ?? []).map((entry) => (
                     <div key={entry.id} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-3 py-1">
-                      <span className="text-slate-600">{new Date(entry.checkedAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
+                      <span className="text-slate-600">{new Date(entry.month + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
                       <span className="flex items-center gap-2">
                         <span className="font-semibold text-slate-700">${formatMoney(entry.balance)}</span>
                         <button onClick={() => handleDeleteBankEntry(entry.id)} className="text-red-400 hover:underline">Delete</button>
