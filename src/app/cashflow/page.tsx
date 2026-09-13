@@ -415,7 +415,8 @@ function CreditCardsPanel({ cards, charges, cashAccounts, latestBalances, allBil
     const raw = stmtInputs[card.id];
     const amount = Number(raw);
     if (!raw || isNaN(amount)) return;
-    await updateStatementBalance(card.id, amount);
+    const result = await updateStatementBalance(card.id, amount);
+    if (!result.ok) { alert(`Failed to save statement balance for ${card.name}: ${result.error ?? "unknown error"}`); return; }
     setStmtInputs((f) => ({ ...f, [card.id]: "" }));
     refreshAll();
   }
@@ -861,6 +862,7 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
   const [stmtInputs, setStmtInputs] = useState<Record<string, string>>({});
   const [bankStmtInputs, setBankStmtInputs] = useState<Record<string, string>>({});
   const [balancesSaved, setBalancesSaved] = useState(false);
+  const [balancesError, setBalancesError] = useState<string | null>(null);
 
   useEffect(() => {
     loadLatestWeeklyReview().then((latest) => {
@@ -896,25 +898,35 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
   }
 
   async function handleSaveAllBalances() {
-    const jobs: Promise<any>[] = [];
+    const jobs: { label: string; promise: Promise<{ ok: boolean; error?: string }> }[] = [];
     for (const acct of cashAccounts) {
       const raw = balanceInputs[acct.id];
-      if (raw && !isNaN(Number(raw))) jobs.push(addBalanceCheck(acct.name, Number(raw)));
+      if (raw && !isNaN(Number(raw))) jobs.push({ label: `${acct.name} balance`, promise: addBalanceCheck(acct.name, Number(raw)) });
       const rawStmt = bankStmtInputs[acct.id];
-      if (rawStmt && !isNaN(Number(rawStmt))) jobs.push(updateBankStatementBalance(acct.id, Number(rawStmt)));
+      if (rawStmt && !isNaN(Number(rawStmt))) jobs.push({ label: `${acct.name} statement balance`, promise: updateBankStatementBalance(acct.id, Number(rawStmt)) });
     }
     for (const card of cards) {
       const rawBal = balanceInputs[card.id];
-      if (rawBal && !isNaN(Number(rawBal))) jobs.push(addBalanceCheck(card.name, Number(rawBal)));
+      if (rawBal && !isNaN(Number(rawBal))) jobs.push({ label: `${card.name} balance`, promise: addBalanceCheck(card.name, Number(rawBal)) });
       const rawStmt = stmtInputs[card.id];
-      if (rawStmt && !isNaN(Number(rawStmt))) jobs.push(updateStatementBalance(card.id, Number(rawStmt)));
+      if (rawStmt && !isNaN(Number(rawStmt))) jobs.push({ label: `${card.name} statement balance`, promise: updateStatementBalance(card.id, Number(rawStmt)) });
     }
-    await Promise.all(jobs);
+    const results = await Promise.all(jobs.map((j) => j.promise));
+    const failures = jobs
+      .map((j, i) => ({ label: j.label, error: results[i].error, ok: results[i].ok }))
+      .filter((r) => !r.ok)
+      .map((r) => `${r.label} (${r.error ?? "failed"})`);
     setBalanceInputs({});
     setStmtInputs({});
     setBankStmtInputs({});
-    setBalancesSaved(true);
-    setTimeout(() => setBalancesSaved(false), 3000);
+    if (failures.length > 0) {
+      setBalancesError(`⚠️ Some saves failed: ${failures.join("; ")}`);
+      setBalancesSaved(false);
+    } else {
+      setBalancesError(null);
+      setBalancesSaved(true);
+      setTimeout(() => setBalancesSaved(false), 3000);
+    }
     refreshAll();
   }
 
@@ -977,6 +989,7 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
           Save All Balances
         </button>
         {balancesSaved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
+        {balancesError && <span className="text-sm text-red-600 font-semibold mt-2 block">{balancesError}</span>}
       </div>
 
       <div className="rounded-2xl bg-white shadow p-5">
