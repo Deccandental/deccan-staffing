@@ -1033,14 +1033,11 @@ function TrendLineChart({ series, height = 220 }: { series: { label: string; col
   function yScale(value: number) {
     return padding.top + chartHeight - ((value - minY) / (maxY - minY || 1)) * chartHeight;
   }
-  // Bars grow from zero if zero is on the chart, otherwise from whichever
-  // edge is closest to zero (the bottom if all values are positive, the top
-  // if all values are negative).
-  const baselineY = minY <= 0 && maxY >= 0 ? yScale(0) : minY > 0 ? yScale(minY) : yScale(maxY);
+  function xScale(date: string) {
+    const idx = allDates.indexOf(date);
+    return padding.left + (allDates.length <= 1 ? chartWidth / 2 : (idx / (allDates.length - 1)) * chartWidth);
+  }
 
-  const clusterWidth = chartWidth / allDates.length;
-  const barGap = 2;
-  const barWidth = Math.max(2, (clusterWidth - barGap * (series.length + 1)) / Math.max(1, series.length));
   const xLabelStep = Math.max(1, Math.ceil(allDates.length / 6));
 
   return (
@@ -1059,19 +1056,16 @@ function TrendLineChart({ series, height = 220 }: { series: { label: string; col
             </g>
           );
         })}
-        {allDates.map((date, dateIdx) => {
-          const clusterStart = padding.left + dateIdx * clusterWidth;
-          return series.map((s, seriesIdx) => {
-            const point = s.points.find((p) => p.date === date);
-            if (!point) return null;
-            const barX = clusterStart + barGap + seriesIdx * (barWidth + barGap);
-            const barY = Math.min(yScale(point.value), baselineY);
-            const barH = Math.abs(yScale(point.value) - baselineY);
-            return <rect key={`${s.label}-${date}`} x={barX} y={barY} width={barWidth} height={Math.max(1, barH)} fill={s.color} rx={1} />;
-          });
+        {series.map((s) => {
+          if (s.points.length === 0) return null;
+          const pathD = s.points.map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(p.date)} ${yScale(p.value)}`).join(" ");
+          return <path key={s.label} d={pathD} fill="none" stroke={s.color} strokeWidth={2} />;
         })}
+        {series.map((s) => s.points.map((p, i) => (
+          <circle key={`${s.label}-${i}`} cx={xScale(p.date)} cy={yScale(p.value)} r={3} fill={s.color} />
+        )))}
         {allDates.filter((_, i) => i % xLabelStep === 0).map((date) => (
-          <text key={date} x={padding.left + (allDates.indexOf(date) + 0.5) * clusterWidth} y={height - 5} textAnchor="middle" fontSize={9} fill="#94a3b8">
+          <text key={date} x={xScale(date)} y={height - 5} textAnchor="middle" fontSize={9} fill="#94a3b8">
             {new Date(date.length === 7 ? date + "-02" : date.slice(0, 10) + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: date.length === 7 ? undefined : "numeric" })}
           </text>
         ))}
@@ -1079,7 +1073,7 @@ function TrendLineChart({ series, height = 220 }: { series: { label: string; col
       <div className="flex flex-wrap gap-3 mt-2 justify-center">
         {series.map((s) => (
           <span key={s.label} className="flex items-center gap-1.5 text-xs text-slate-600">
-            <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: s.color }}></span>
+            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: s.color }}></span>
             {s.label}
           </span>
         ))}
@@ -1101,19 +1095,13 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const [backfillDate, setBackfillDate] = useState(todayStr());
   const [backfillBalanceAmount, setBackfillBalanceAmount] = useState("");
   const [balanceSaved, setBalanceSaved] = useState(false);
-  const [balanceHistories, setBalanceHistories] = useState<Record<string, BalanceCheck[]>>({});
-  const [depthView, setDepthView] = useState<string | null>(null); // 'bank' | 'cardBalance' | 'cardStatement' | 'dental' | null
+  const [depthView, setDepthView] = useState<string | null>(null); // 'cardStatement' | 'dental' | null
 
   async function loadAll() {
-    const allAccounts = [...cashAccounts, ...cards];
-    const [histories, statementHists, reviews] = await Promise.all([
-      Promise.all(allAccounts.map((a) => loadBalanceHistoryForAccount(a.name, 60))),
+    const [statementHists, reviews] = await Promise.all([
       Promise.all(cards.map((c) => loadStatementHistoryForCard(c.id))),
       loadWeeklyReviewHistory(52),
     ]);
-    const balMap: Record<string, BalanceCheck[]> = {};
-    allAccounts.forEach((a, i) => { balMap[a.name] = histories[i]; });
-    setBalanceHistories(balMap);
     const stmtMap: Record<string, CardStatementEntry[]> = {};
     cards.forEach((c, i) => { stmtMap[c.id] = statementHists[i]; });
     setStatementHistories(stmtMap);
@@ -1141,7 +1129,6 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     setBackfillBalanceAmount("");
     setBalanceSaved(true);
     setTimeout(() => setBalanceSaved(false), 3000);
-    await loadAll();
     refreshAll();
   }
 
@@ -1151,20 +1138,27 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     await loadAll();
   }
 
-  function seriesFor(name: string, color: string): { label: string; color: string; points: { date: string; value: number }[] } {
-    const hist = balanceHistories[name] ?? [];
-    return { label: name, color, points: [...hist].reverse().map((h) => ({ date: h.checkedAt.slice(0, 10), value: h.balance })) };
-  }
-
-  const bankSeries = cashAccounts.map((a, i) => seriesFor(a.name, CHART_COLORS[i % CHART_COLORS.length]));
-  const cardBalanceSeries = cards.map((c, i) => seriesFor(c.name, CHART_COLORS[i % CHART_COLORS.length]));
   const cardStatementSeries = cards.map((c, i) => ({
     label: c.name, color: CHART_COLORS[i % CHART_COLORS.length],
     points: [...(statementHistories[c.id] ?? [])].reverse().map((e) => ({ date: e.month, value: e.balance })),
   }));
+
+  // Weekly reviews get collapsed to one point per month — the latest review
+  // within that month — so the chart reads as a monthly trend, not a noisy
+  // weekly zigzag.
+  function monthlyFromReviews(field: "projectedTotalProduction" | "currentIncome"): { date: string; value: number }[] {
+    const byMonth = new Map<string, WeeklyCashReview>();
+    for (const r of reviewHistory) {
+      if (r[field] == null) continue;
+      const month = r.reviewDate.slice(0, 7);
+      const existing = byMonth.get(month);
+      if (!existing || r.reviewDate > existing.reviewDate) byMonth.set(month, r);
+    }
+    return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([month, r]) => ({ date: month, value: r[field] as number }));
+  }
   const dentalSeries = [
-    { label: "Projected Production", color: CHART_COLORS[0], points: [...reviewHistory].reverse().filter((r) => r.projectedTotalProduction != null).map((r) => ({ date: r.reviewDate, value: r.projectedTotalProduction as number })) },
-    { label: "Current Income", color: CHART_COLORS[1], points: [...reviewHistory].reverse().filter((r) => r.currentIncome != null).map((r) => ({ date: r.reviewDate, value: r.currentIncome as number })) },
+    { label: "Projected Production", color: CHART_COLORS[0], points: monthlyFromReviews("projectedTotalProduction") },
+    { label: "Current Income", color: CHART_COLORS[1], points: monthlyFromReviews("currentIncome") },
   ];
 
   return (
@@ -1219,44 +1213,6 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
           </div>
         </div>
         {balanceSaved && <span className="text-xs text-emerald-600 font-semibold mt-2 block">✓ Saved</span>}
-      </div>
-
-      <div className="rounded-2xl bg-white shadow p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-bold text-slate-700">Bank Accounts</h2>
-          <button onClick={() => setDepthView(depthView === "bank" ? null : "bank")} className="text-xs text-orange-500 hover:underline">{depthView === "bank" ? "Standard view" : "In-depth view"}</button>
-        </div>
-        {depthView === "bank" ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {cashAccounts.map((a, i) => (
-              <div key={a.id}>
-                <p className="text-sm font-semibold text-slate-700 mb-2">{a.name}</p>
-                <TrendLineChart series={[seriesFor(a.name, CHART_COLORS[i % CHART_COLORS.length])]} height={180} />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <TrendLineChart series={bankSeries} />
-        )}
-      </div>
-
-      <div className="rounded-2xl bg-white shadow p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-bold text-slate-700">Credit Cards — Current Balance</h2>
-          <button onClick={() => setDepthView(depthView === "cardBalance" ? null : "cardBalance")} className="text-xs text-orange-500 hover:underline">{depthView === "cardBalance" ? "Standard view" : "In-depth view"}</button>
-        </div>
-        {depthView === "cardBalance" ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {cards.map((c, i) => (
-              <div key={c.id}>
-                <p className="text-sm font-semibold text-slate-700 mb-2">{c.name}</p>
-                <TrendLineChart series={[seriesFor(c.name, CHART_COLORS[i % CHART_COLORS.length])]} height={180} />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <TrendLineChart series={cardBalanceSeries} />
-        )}
       </div>
 
       <div className="rounded-2xl bg-white shadow p-5">
