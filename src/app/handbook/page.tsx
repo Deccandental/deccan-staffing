@@ -149,7 +149,7 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
 
   return (
     <div className="space-y-4">
-      {mySignature ? (
+      {myEmployeeId == null ? null : mySignature ? (
         <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 flex items-center justify-between flex-wrap gap-2">
           <p className="text-sm text-emerald-800">
             ✓ You signed <strong>{requirement.cycleLabel}</strong> on {new Date(mySignature.signedAt).toLocaleDateString()}.
@@ -236,7 +236,7 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
         ))}
       </div>
 
-      {signing && !mySignature && (
+      {myEmployeeId != null && signing && !mySignature && (
         <div className="rounded-xl bg-white shadow p-4 space-y-3 print:hidden">
           <h3 className="font-bold text-slate-700 text-sm">Sign {doc.title}</h3>
           {!allChecked && <p className="text-xs text-amber-600">Please check every section above before signing ({checked.size} of {requiredSectionIdxs.length} initialed).</p>}
