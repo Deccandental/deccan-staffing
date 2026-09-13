@@ -71,7 +71,7 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
     if (!version) return;
     const label = doc.cycleMode === "annual_september"
       ? `September ${getCurrentSeptemberCycleYear()}`
-      : `${doc.title} — Version 1`;
+      : `${doc.title} — ${new Date().getFullYear()}`;
     const created = await createRequirement(doc.id, version.id, label);
     if (created) {
       fetch("/api/policies/notify-new-cycle", {
