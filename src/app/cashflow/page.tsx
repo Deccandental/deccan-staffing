@@ -1014,25 +1014,40 @@ function TrendLineChart({ series, height = 220 }: { series: { label: string; col
   if (allDates.length === 0 || allValues.length === 0) {
     return <p className="text-sm text-slate-400 py-8 text-center">Not enough data yet to chart.</p>;
   }
-  const minY = Math.min(0, ...allValues);
-  const maxY = Math.max(...allValues, 1);
+  const rawMin = Math.min(...allValues);
+  const rawMax = Math.max(...allValues);
+  const range = rawMax - rawMin || Math.max(1, Math.abs(rawMax) * 0.1) || 1;
+  const pad = range * 0.12;
+  // Zoom into the actual data range so real differences are visible, rather
+  // than always forcing the axis down to $0 (which flattens everything when
+  // values are all large and close together). Zero is only forced onto the
+  // axis if the data genuinely straddles it.
+  const minY = rawMin >= 0 ? Math.max(0, rawMin - pad) : rawMin - pad;
+  const maxY = rawMax <= 0 ? Math.min(0, rawMax + pad) : rawMax + pad;
+  const axisIsZoomed = minY > 0 || maxY < 0;
   const width = 700;
   const padding = { top: 10, right: 10, bottom: 24, left: 64 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
-  function xScale(date: string) {
-    const idx = allDates.indexOf(date);
-    return padding.left + (allDates.length <= 1 ? chartWidth / 2 : (idx / (allDates.length - 1)) * chartWidth);
-  }
   function yScale(value: number) {
     return padding.top + chartHeight - ((value - minY) / (maxY - minY || 1)) * chartHeight;
   }
+  // Bars grow from zero if zero is on the chart, otherwise from whichever
+  // edge is closest to zero (the bottom if all values are positive, the top
+  // if all values are negative).
+  const baselineY = minY <= 0 && maxY >= 0 ? yScale(0) : minY > 0 ? yScale(minY) : yScale(maxY);
 
+  const clusterWidth = chartWidth / allDates.length;
+  const barGap = 2;
+  const barWidth = Math.max(2, (clusterWidth - barGap * (series.length + 1)) / Math.max(1, series.length));
   const xLabelStep = Math.max(1, Math.ceil(allDates.length / 6));
 
   return (
     <div>
+      {axisIsZoomed && (
+        <p className="text-[11px] text-slate-400 mb-1">Axis zoomed to ${formatMoney(minY)}–${formatMoney(maxY)} to make differences visible (doesn't start at $0).</p>
+      )}
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full">
         {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
           const value = minY + frac * (maxY - minY);
@@ -1044,16 +1059,19 @@ function TrendLineChart({ series, height = 220 }: { series: { label: string; col
             </g>
           );
         })}
-        {series.map((s) => {
-          if (s.points.length === 0) return null;
-          const pathD = s.points.map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(p.date)} ${yScale(p.value)}`).join(" ");
-          return <path key={s.label} d={pathD} fill="none" stroke={s.color} strokeWidth={2} />;
+        {allDates.map((date, dateIdx) => {
+          const clusterStart = padding.left + dateIdx * clusterWidth;
+          return series.map((s, seriesIdx) => {
+            const point = s.points.find((p) => p.date === date);
+            if (!point) return null;
+            const barX = clusterStart + barGap + seriesIdx * (barWidth + barGap);
+            const barY = Math.min(yScale(point.value), baselineY);
+            const barH = Math.abs(yScale(point.value) - baselineY);
+            return <rect key={`${s.label}-${date}`} x={barX} y={barY} width={barWidth} height={Math.max(1, barH)} fill={s.color} rx={1} />;
+          });
         })}
-        {series.map((s) => s.points.map((p, i) => (
-          <circle key={`${s.label}-${i}`} cx={xScale(p.date)} cy={yScale(p.value)} r={3} fill={s.color} />
-        )))}
         {allDates.filter((_, i) => i % xLabelStep === 0).map((date) => (
-          <text key={date} x={xScale(date)} y={height - 5} textAnchor="middle" fontSize={9} fill="#94a3b8">
+          <text key={date} x={padding.left + (allDates.indexOf(date) + 0.5) * clusterWidth} y={height - 5} textAnchor="middle" fontSize={9} fill="#94a3b8">
             {new Date(date.length === 7 ? date + "-02" : date.slice(0, 10) + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: date.length === 7 ? undefined : "numeric" })}
           </text>
         ))}
@@ -1061,7 +1079,7 @@ function TrendLineChart({ series, height = 220 }: { series: { label: string; col
       <div className="flex flex-wrap gap-3 mt-2 justify-center">
         {series.map((s) => (
           <span key={s.label} className="flex items-center gap-1.5 text-xs text-slate-600">
-            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: s.color }}></span>
+            <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: s.color }}></span>
             {s.label}
           </span>
         ))}
