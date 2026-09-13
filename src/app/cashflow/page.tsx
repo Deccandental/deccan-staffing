@@ -1156,6 +1156,12 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     await loadAll();
   }
 
+  async function handleDeleteBankEntry(id: string) {
+    if (!confirm("Delete this balance entry? This can't be undone.")) return;
+    await deleteBalanceCheck(id);
+    await loadAll();
+  }
+
   const cardStatementSeries = cards.map((c, i) => ({
     label: c.name, color: CHART_COLORS[i % CHART_COLORS.length],
     points: [...(statementHistories[c.id] ?? [])].reverse().map((e) => ({ date: e.month, value: e.balance })),
@@ -1164,18 +1170,20 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   // Bank balances can be entered at any granularity (daily updates, monthly
   // backfills, etc.) — collapse to one point per month, the latest entry
   // within that month, so this reads as a monthly trend like the others.
-  const bankAccountSeries = cashAccounts.map((a, i) => {
+  const bankMonthlyEntries: Record<string, BalanceCheck[]> = {};
+  cashAccounts.forEach((a) => {
     const byMonth = new Map<string, BalanceCheck>();
     for (const entry of bankBalanceHistories[a.name] ?? []) {
       const month = entry.checkedAt.slice(0, 7);
       const existing = byMonth.get(month);
       if (!existing || entry.checkedAt > existing.checkedAt) byMonth.set(month, entry);
     }
-    return {
-      label: a.name, color: CHART_COLORS[i % CHART_COLORS.length],
-      points: Array.from(byMonth.entries()).sort(([m1], [m2]) => m1.localeCompare(m2)).map(([month, e]) => ({ date: month, value: e.balance })),
-    };
+    bankMonthlyEntries[a.name] = Array.from(byMonth.values()).sort((e1, e2) => e2.checkedAt.localeCompare(e1.checkedAt));
   });
+  const bankAccountSeries = cashAccounts.map((a, i) => ({
+    label: a.name, color: CHART_COLORS[i % CHART_COLORS.length],
+    points: [...(bankMonthlyEntries[a.name] ?? [])].reverse().map((e) => ({ date: e.checkedAt.slice(0, 7), value: e.balance })),
+  }));
 
   // Weekly reviews get collapsed to one point per month — the latest review
   // within that month — so the chart reads as a monthly trend, not a noisy
@@ -1240,6 +1248,17 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
               <div key={a.id}>
                 <p className="text-sm font-semibold text-slate-700 mb-2">{a.name}</p>
                 <TrendLineChart series={[bankAccountSeries[i]]} height={180} />
+                <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                  {(bankMonthlyEntries[a.name] ?? []).map((entry) => (
+                    <div key={entry.id} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-3 py-1">
+                      <span className="text-slate-600">{new Date(entry.checkedAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
+                      <span className="flex items-center gap-2">
+                        <span className="font-semibold text-slate-700">${formatMoney(entry.balance)}</span>
+                        <button onClick={() => handleDeleteBankEntry(entry.id)} className="text-red-400 hover:underline">Delete</button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
