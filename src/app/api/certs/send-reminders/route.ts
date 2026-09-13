@@ -33,6 +33,8 @@ const THRESHOLDS: { days: number; key: string; type: CertEmailType }[] = [
   { days: 7, key: "day7", type: "reminder-7day" },
 ];
 
+const EXPIRED_REPEAT_DAYS = 7;
+
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (secret) {
@@ -44,8 +46,7 @@ export async function GET(req: NextRequest) {
     console.warn("CRON_SECRET is not set — /api/certs/send-reminders is unauthenticated");
   }
 
-  const todayStr = new Date().toISOString().split("T")[0];
-  const { data, error } = await supabase.from("certifications").select("*").gte("expiration_date", todayStr);
+  const { data, error } = await supabase.from("certifications").select("*").not("expiration_date", "is", null);
   if (error) {
     console.error("certs/send-reminders load error:", error);
     return NextResponse.json({ ok: false }, { status: 500 });
@@ -53,10 +54,26 @@ export async function GET(req: NextRequest) {
 
   const certs = (data ?? []).map(fromRow);
   const results: { certId: string; type: string; sent: boolean }[] = [];
+  const now = Date.now();
 
   for (const cert of certs) {
     if (!cert.expirationDate) continue; // shouldn't happen given the query filter, but keeps this type-safe
     const remaining = daysUntil(cert.expirationDate);
+
+    if (remaining < 0) {
+      const lastSent = cert.remindersSent.expiredLastSent;
+      const daysSinceLastSent = typeof lastSent === "string" ? (now - new Date(lastSent).getTime()) / 86400000 : Infinity;
+      if (daysSinceLastSent < EXPIRED_REPEAT_DAYS) continue;
+
+      const sent = await sendCertEmail(cert, "reminder-expired");
+      results.push({ certId: cert.id, type: "reminder-expired", sent });
+      if (sent) {
+        const updatedFlags = { ...cert.remindersSent, expiredLastSent: new Date().toISOString() };
+        await supabase.from("certifications").update({ reminders_sent: updatedFlags }).eq("id", cert.id);
+      }
+      continue;
+    }
+
     for (const t of THRESHOLDS) {
       if (remaining !== t.days) continue;
       if (cert.remindersSent[t.key]) continue;
