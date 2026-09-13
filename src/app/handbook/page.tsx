@@ -82,6 +82,28 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
     await refresh();
   }
 
+  const [notifying, setNotifying] = useState(false);
+  const [notifyResult, setNotifyResult] = useState<string | null>(null);
+
+  async function handleNotifyNow() {
+    if (!requirement) return;
+    setNotifying(true);
+    setNotifyResult(null);
+    try {
+      const res = await fetch("/api/policies/notify-new-cycle", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requirementId: requirement.id }),
+      });
+      const data = await res.json();
+      const sentCount = (data.sent ?? []).filter((r: { sent: boolean }) => r.sent).length;
+      setNotifyResult(sentCount > 0 ? `Sent to ${sentCount} pending signer${sentCount === 1 ? "" : "s"}.` : "Nobody pending, or email isn't configured.");
+    } catch (err) {
+      console.error("notify-now error:", err);
+      setNotifyResult("Something went wrong sending notifications.");
+    }
+    setNotifying(false);
+  }
+
   function toggleCheck(idx: number) {
     setChecked((s) => { const next = new Set(s); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; });
   }
@@ -149,7 +171,13 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
 
       {isAdmin && showAdmin && (
         <div className="rounded-xl bg-white shadow p-4">
-          <h3 className="font-bold text-slate-700 text-sm mb-2">{requirement.cycleLabel} — Compliance</h3>
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <h3 className="font-bold text-slate-700 text-sm">{requirement.cycleLabel} — Compliance</h3>
+            <button onClick={handleNotifyNow} disabled={notifying} className="text-xs font-semibold text-orange-500 hover:underline disabled:opacity-50">
+              {notifying ? "Sending…" : "Notify Everyone Pending Now"}
+            </button>
+          </div>
+          {notifyResult && <p className="text-xs text-slate-500 mb-2">{notifyResult}</p>}
           <div className="space-y-1 max-h-64 overflow-y-auto">
             {staff.filter((e) => !e.archived && !e.exemptFromPolicySigning).map((e) => {
               const sig = allSignatures.find((s) => s.employeeId === e.id);
