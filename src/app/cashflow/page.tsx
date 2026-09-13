@@ -25,6 +25,18 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Whole-calendar-day difference between a YYYY-MM-DD string and today,
+// computed from date components on both sides (not raw epoch millis) so
+// this is immune to timezone offset artifacts from mixing a date-only
+// string with a precise instant.
+function daysSinceDateStr(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const target = Date.UTC(y, m - 1, d);
+  const now = new Date();
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((today - target) / 86400000);
+}
+
 function safeColor(amount: number): string {
   if (amount < 0) return "#dc2626";
   if (amount < 3000) return "#f59e0b";
@@ -507,6 +519,10 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
 
   const productionTarget = 165000;
   const collectionsTarget = 145000;
+  const now = new Date();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const monthProgress = now.getDate() / daysInMonth;
+  const proratedCollectionsTarget = Math.round(collectionsTarget * monthProgress);
   const productionNum = projectedProduction ? Number(projectedProduction) : null;
   const incomeNum = currentIncome ? Number(currentIncome) : null;
   const patientIncomeNum = currentPatientIncome ? Number(currentPatientIncome) : null;
@@ -597,29 +613,53 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
   const anyBalanceMissing = cashAccounts.some((a) => !latestBalances[a.name]) || cards.some((c) => !latestBalances[c.name]);
   const balancesStale = balanceDaysStale >= STALE_DAYS || anyBalanceMissing;
 
-  const reviewDaysStale = latestReview ? (Date.now() - new Date(latestReview.reviewDate).getTime()) / 86400000 : Infinity;
+  const reviewDaysStale = latestReview ? daysSinceDateStr(latestReview.reviewDate) : Infinity;
   const incomeStale = reviewDaysStale >= STALE_DAYS;
 
   return (
     <div className="space-y-4">
-      {ffForecast && chaseForecast && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {[ffForecast, chaseForecast].map((f) => (
-            <div key={f.accountId} className="rounded-2xl p-5 shadow" style={{ background: `linear-gradient(135deg, ${safeColor(f.excessOrShortfall)}22, ${safeColor(f.excessOrShortfall)}44)` }}>
-              <p className="text-xs text-slate-500 uppercase tracking-wide font-semibold">{f.accountName} — Forecast Excess/(Shortfall)</p>
-              <p className="text-2xl font-bold mt-1" style={{ color: safeColor(f.excessOrShortfall) }}>${formatMoney(f.excessOrShortfall)}</p>
-              <div className="text-xs text-slate-500 mt-2 space-y-0.5">
-                <p>Balance: ${formatMoney(f.currentBalance)} + Deposits (14d): ${formatMoney(f.expectedDeposits14d)}</p>
-                <p>− Obligations (14d): ${formatMoney(f.obligations14d)} − Cushion: ${formatMoney(f.cushion)}</p>
-              </div>
-            </div>
-          ))}
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
+        {ffForecast && (
+          <div className="rounded-xl p-4 shadow" style={{ background: `linear-gradient(135deg, ${safeColor(ffForecast.excessOrShortfall)}22, ${safeColor(ffForecast.excessOrShortfall)}44)` }}>
+            <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">{ffForecast.accountName}</p>
+            <p className="text-lg font-bold mt-1" style={{ color: safeColor(ffForecast.excessOrShortfall) }}>${formatMoney(ffForecast.excessOrShortfall)}</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">excess/(shortfall)</p>
+          </div>
+        )}
+        {chaseForecast && (
+          <div className="rounded-xl p-4 shadow" style={{ background: `linear-gradient(135deg, ${safeColor(chaseForecast.excessOrShortfall)}22, ${safeColor(chaseForecast.excessOrShortfall)}44)` }}>
+            <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">{chaseForecast.accountName}</p>
+            <p className="text-lg font-bold mt-1" style={{ color: safeColor(chaseForecast.excessOrShortfall) }}>${formatMoney(chaseForecast.excessOrShortfall)}</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">excess/(shortfall)</p>
+          </div>
+        )}
+        <div className="rounded-xl p-4 shadow bg-white">
+          <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">Projected Production</p>
+          <p className="text-lg font-bold mt-1" style={{ color: productionNum != null && productionNum >= productionTarget ? "#059669" : "#f59e0b" }}>{productionNum != null ? `$${formatMoney(productionNum)}` : "—"}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">vs ${formatMoney(productionTarget)}/mo</p>
         </div>
+        <div className="rounded-xl p-4 shadow bg-white">
+          <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">Current Income</p>
+          <p className="text-lg font-bold mt-1" style={{ color: incomeNum != null && incomeNum >= proratedCollectionsTarget ? "#059669" : "#f59e0b" }}>{incomeNum != null ? `$${formatMoney(incomeNum)}` : "—"}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">vs ${formatMoney(proratedCollectionsTarget)} pace (day {now.getDate()}/{daysInMonth})</p>
+        </div>
+        <div className="rounded-xl p-4 shadow bg-white">
+          <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">Insurance Income</p>
+          <p className="text-lg font-bold mt-1 text-slate-700">{insuranceIncome != null ? `$${formatMoney(insuranceIncome)}` : "—"}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">calculated</p>
+        </div>
+      </div>
+      {incomeNum != null && productionNum != null && incomeNum < productionNum * monthProgress * 0.8 && (
+        <p className="text-xs text-amber-600">Collections are lagging materially behind production — consider reviewing insurance AR aging before discretionary spending.</p>
       )}
+      <div className="flex items-center justify-end">
+        <span className={`text-xs font-semibold ${incomeStale ? "text-amber-600" : "text-slate-400"}`}>
+          {latestReview ? `Open Dental numbers last updated ${new Date(latestReview.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}${incomeStale ? " — ⚠️ over a week ago" : ""}` : "⚠️ Open Dental numbers never entered"}
+        </span>
+      </div>
 
       {transfer && (
-        <div className="rounded-2xl p-5 shadow" style={{ background: transfer.amount > 0 ? "linear-gradient(135deg, #dbeafe, #bfdbfe)" : "#f8fafc" }}>
-          <h3 className="font-bold text-slate-700 text-sm mb-1">Transfer Recommendation</h3>
+        <div className="rounded-xl p-4 shadow" style={{ background: transfer.amount > 0 ? "linear-gradient(135deg, #dbeafe, #bfdbfe)" : "#f8fafc" }}>
           {transfer.amount > 0 ? (
             <p className="text-sm text-blue-900"><strong>Transfer ${formatMoney(transfer.amount)}</strong> from {transfer.fromAccountName} to {transfer.toAccountName}. {transfer.reason}</p>
           ) : (
@@ -628,29 +668,67 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
         </div>
       )}
 
-      <div className="rounded-2xl bg-white shadow p-5">
-        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-          <h3 className="font-bold text-slate-700 text-sm">Production & Collections Pace</h3>
-          <span className={`text-xs font-semibold ${incomeStale ? "text-amber-600" : "text-slate-400"}`}>
-            {latestReview ? `Last updated ${new Date(latestReview.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}${incomeStale ? " — ⚠️ over a week ago" : ""}` : "⚠️ Never entered"}
-          </span>
+      <div className="rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #e0f2fe, #bae6fd)" }}>
+        <h2 className="font-bold text-slate-700 mb-1">Check a Bill Before Paying</h2>
+        <p className="text-xs text-slate-500 mb-4">Pick an already-scheduled transaction to see if it's still safe to pay as planned, or check a brand-new one-off payment that isn't in the system yet.</p>
+        <div className="grid gap-3 sm:grid-cols-2 mb-3">
+          <div>
+            <label className="block text-xs text-slate-500 mb-0.5">Account</label>
+            <select value={checkAccountId} onChange={(e) => { setCheckAccountId(e.target.value); setCheckSelection(""); setCheckResult(null); }}
+              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+              <option value="">Select an account…</option>
+              {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+          {checkAccount && (
+            <div>
+              <label className="block text-xs text-slate-500 mb-0.5">Which transaction?</label>
+              <select value={checkSelection} onChange={(e) => { setCheckSelection(e.target.value); setCheckResult(null); setCheckOverrideAmount(""); }}
+                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                <option value="">Select…</option>
+                <option value="new">+ New one-time payment (not yet scheduled)</option>
+                {upcomingForCheck.map((o) => (
+                  <option key={`${o.billId}|${o.dueDate}`} value={`${o.billId}|${o.dueDate}`}>
+                    {o.billName} — ${formatMoney(o.amount)} — {new Date(o.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div>
-            <p className="text-xs text-slate-400">Projected Production vs ~${formatMoney(productionTarget)}/month target</p>
-            <p className="text-xl font-bold" style={{ color: productionNum != null && productionNum >= productionTarget ? "#059669" : "#f59e0b" }}>{productionNum != null ? `$${formatMoney(productionNum)}` : "Not entered"}</p>
+
+        {checkAccount && checkSelection === "new" && (
+          <div className="grid gap-3 sm:grid-cols-3 mb-3">
+            <input type="text" value={checkNewName} onChange={(e) => setCheckNewName(e.target.value)} placeholder="What is this for?" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            <input type="number" onFocus={(e) => e.target.select()} value={checkNewAmount} onChange={(e) => setCheckNewAmount(e.target.value)} placeholder="Amount" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            <input type="date" value={checkNewDate} onChange={(e) => setCheckNewDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
-          <div>
-            <p className="text-xs text-slate-400">Current Income vs ~${formatMoney(collectionsTarget)}/month target</p>
-            <p className="text-xl font-bold" style={{ color: incomeNum != null && incomeNum >= collectionsTarget ? "#059669" : "#f59e0b" }}>{incomeNum != null ? `$${formatMoney(incomeNum)}` : "Not entered"}</p>
+        )}
+        {checkAccount && checkSelection && checkSelection !== "new" && (
+          <div className="mb-3">
+            <label className="block text-xs text-slate-500 mb-0.5">Override amount (optional — leave blank to check the scheduled estimate as-is)</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={checkOverrideAmount} onChange={(e) => setCheckOverrideAmount(e.target.value)} placeholder="$" className="w-48 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
-          <div>
-            <p className="text-xs text-slate-400">Insurance Income (calculated)</p>
-            <p className="text-xl font-bold text-slate-700">{insuranceIncome != null ? `$${formatMoney(insuranceIncome)}` : "Not entered"}</p>
+        )}
+
+        {checkAccount && checkSelection && (
+          <button onClick={handleRunCheck} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#0369a1" }}>Check</button>
+        )}
+
+        {checkResult && (
+          <div className="mt-3 rounded-lg p-3" style={{ background: checkResult.safe ? "#d1fae5" : "#fee2e2" }}>
+            {checkResult.matchedExisting ? (
+              <p className="text-sm" style={{ color: checkResult.safe ? "#065f46" : "#991b1b" }}>
+                {checkResult.safe ? "✅ Safe" : "⚠️ Tight"} — this is already on the schedule. Projected balance on that date: <strong>${formatMoney(checkResult.projectedBalance)}</strong> ({checkResult.safe ? "stays above" : "would fall below"} your ${formatMoney(checkAccount!.cushionTarget)} cushion).
+              </p>
+            ) : checkResult.safe ? (
+              <p className="text-sm text-emerald-800">✅ Safe to pay as planned. Projected balance afterward: <strong>${formatMoney(checkResult.projectedBalance)}</strong>.</p>
+            ) : checkResult.suggestedDate ? (
+              <p className="text-sm text-red-800">⚠️ Not safe on that date (would land at ${formatMoney(checkResult.projectedBalance)}). Wait until <strong>{new Date(checkResult.suggestedDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })}</strong> instead — projected balance then: ${formatMoney(checkResult.suggestedBalance ?? 0)}.</p>
+            ) : (
+              <p className="text-sm text-red-800">⚠️ Not safe on that date, and no safer date found in the next 60 days. This may need to wait for more cash flow.</p>
+            )}
           </div>
-        </div>
-        {incomeNum != null && productionNum != null && incomeNum < productionNum * 0.8 && (
-          <p className="text-xs text-amber-600 mt-2">Collections are lagging materially behind production — consider reviewing insurance AR aging before discretionary spending.</p>
         )}
       </div>
 
@@ -739,70 +817,6 @@ function WeeklyReviewPanel({ cashAccounts, cards, charges, allBills, allPayments
         </div>
         <button onClick={handleSave} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Save This Week's Review</button>
         {saved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #e0f2fe, #bae6fd)" }}>
-        <h2 className="font-bold text-slate-700 mb-1">Check a Bill Before Paying</h2>
-        <p className="text-xs text-slate-500 mb-4">Pick an already-scheduled transaction to see if it's still safe to pay as planned, or check a brand-new one-off payment that isn't in the system yet.</p>
-        <div className="grid gap-3 sm:grid-cols-2 mb-3">
-          <div>
-            <label className="block text-xs text-slate-500 mb-0.5">Account</label>
-            <select value={checkAccountId} onChange={(e) => { setCheckAccountId(e.target.value); setCheckSelection(""); setCheckResult(null); }}
-              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
-              <option value="">Select an account…</option>
-              {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          </div>
-          {checkAccount && (
-            <div>
-              <label className="block text-xs text-slate-500 mb-0.5">Which transaction?</label>
-              <select value={checkSelection} onChange={(e) => { setCheckSelection(e.target.value); setCheckResult(null); setCheckOverrideAmount(""); }}
-                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
-                <option value="">Select…</option>
-                <option value="new">+ New one-time payment (not yet scheduled)</option>
-                {upcomingForCheck.map((o) => (
-                  <option key={`${o.billId}|${o.dueDate}`} value={`${o.billId}|${o.dueDate}`}>
-                    {o.billName} — ${formatMoney(o.amount)} — {new Date(o.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {checkAccount && checkSelection === "new" && (
-          <div className="grid gap-3 sm:grid-cols-3 mb-3">
-            <input type="text" value={checkNewName} onChange={(e) => setCheckNewName(e.target.value)} placeholder="What is this for?" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-            <input type="number" onFocus={(e) => e.target.select()} value={checkNewAmount} onChange={(e) => setCheckNewAmount(e.target.value)} placeholder="Amount" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-            <input type="date" value={checkNewDate} onChange={(e) => setCheckNewDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-        )}
-        {checkAccount && checkSelection && checkSelection !== "new" && (
-          <div className="mb-3">
-            <label className="block text-xs text-slate-500 mb-0.5">Override amount (optional — leave blank to check the scheduled estimate as-is)</label>
-            <input type="number" onFocus={(e) => e.target.select()} value={checkOverrideAmount} onChange={(e) => setCheckOverrideAmount(e.target.value)} placeholder="$" className="w-48 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-        )}
-
-        {checkAccount && checkSelection && (
-          <button onClick={handleRunCheck} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#0369a1" }}>Check</button>
-        )}
-
-        {checkResult && (
-          <div className="mt-3 rounded-lg p-3" style={{ background: checkResult.safe ? "#d1fae5" : "#fee2e2" }}>
-            {checkResult.matchedExisting ? (
-              <p className="text-sm" style={{ color: checkResult.safe ? "#065f46" : "#991b1b" }}>
-                {checkResult.safe ? "✅ Safe" : "⚠️ Tight"} — this is already on the schedule. Projected balance on that date: <strong>${formatMoney(checkResult.projectedBalance)}</strong> ({checkResult.safe ? "stays above" : "would fall below"} your ${formatMoney(checkAccount!.cushionTarget)} cushion).
-              </p>
-            ) : checkResult.safe ? (
-              <p className="text-sm text-emerald-800">✅ Safe to pay as planned. Projected balance afterward: <strong>${formatMoney(checkResult.projectedBalance)}</strong>.</p>
-            ) : checkResult.suggestedDate ? (
-              <p className="text-sm text-red-800">⚠️ Not safe on that date (would land at ${formatMoney(checkResult.projectedBalance)}). Wait until <strong>{new Date(checkResult.suggestedDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })}</strong> instead — projected balance then: ${formatMoney(checkResult.suggestedBalance ?? 0)}.</p>
-            ) : (
-              <p className="text-sm text-red-800">⚠️ Not safe on that date, and no safer date found in the next 60 days. This may need to wait for more cash flow.</p>
-            )}
           </div>
         )}
       </div>
