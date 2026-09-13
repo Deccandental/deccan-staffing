@@ -1,24 +1,16 @@
 {
   "crons": [
     {
-      "path": "/api/events/send-reminders",
-      "schedule": "0 13 * * *"
-    },
-    {
       "path": "/api/leave/payroll-summary",
       "schedule": "0 13 1,16 * *"
     },
     {
-      "path": "/api/certs/send-reminders",
-      "schedule": "0 13 * * *"
-    },
-    {
-      "path": "/api/policies/send-reminders",
-      "schedule": "0 13 * * 1"
-    },
-    {
       "path": "/api/cashflow/weekly-digest",
       "schedule": "0 13 * * 5"
+    },
+    {
+      "path": "/api/staff/weekly-digest",
+      "schedule": "0 13 * * 0"
     }
   ]
 }
