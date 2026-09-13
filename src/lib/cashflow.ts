@@ -152,16 +152,17 @@ export async function updateCreditCard(id: string, updates: Partial<{ creditLimi
   if (error) console.error("updateCreditCard error:", error);
 }
 
-export async function updateStatementBalance(id: string, balance: number, month?: string): Promise<void> {
+export async function updateStatementBalance(id: string, balance: number, month?: string): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("credit_cards").update({ statement_balance: balance, statement_balance_updated_at: new Date().toISOString() }).eq("id", id);
-  if (error) console.error("updateStatementBalance error:", error);
+  if (error) { console.error("updateStatementBalance error:", error); return { ok: false, error: error.message }; }
   // Also record this into the monthly history log, defaulting to the
   // current calendar month unless backfilling a specific past one.
   const targetMonth = month ?? new Date().toISOString().slice(0, 7);
   const { error: histError } = await supabase.from("card_statement_entries").upsert({
     credit_card_id: id, month: targetMonth, balance, entered_at: new Date().toISOString(),
   }, { onConflict: "credit_card_id,month" });
-  if (histError) console.error("updateStatementBalance (history) error:", histError);
+  if (histError) { console.error("updateStatementBalance (history) error:", histError); return { ok: false, error: histError.message }; }
+  return { ok: true };
 }
 
 export interface CardStatementEntry {
