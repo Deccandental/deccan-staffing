@@ -151,7 +151,7 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
         <div className="rounded-xl bg-white shadow p-4">
           <h3 className="font-bold text-slate-700 text-sm mb-2">{requirement.cycleLabel} — Compliance</h3>
           <div className="space-y-1 max-h-64 overflow-y-auto">
-            {staff.filter((e) => !e.archived).map((e) => {
+            {staff.filter((e) => !e.archived && !e.exemptFromPolicySigning).map((e) => {
               const sig = allSignatures.find((s) => s.employeeId === e.id);
               return (
                 <div key={e.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
