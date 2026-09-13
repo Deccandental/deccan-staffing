@@ -926,6 +926,7 @@ export default function CashFlowPage() {
   const [bills, setBills] = useState<RecurringBill[]>([]);
   const [payments, setPayments] = useState<BillPayment[]>([]);
   const [latestBalances, setLatestBalances] = useState<Record<string, BalanceCheck>>({});
+  const [latestReviewForTabs, setLatestReviewForTabs] = useState<WeeklyCashReview | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("");
 
@@ -936,8 +937,8 @@ export default function CashFlowPage() {
     const today = todayStr();
     const monthStart = today.slice(0, 8) + "01";
     const rangeEnd = addDays(today, WINDOW_DAYS);
-    const [accounts, cards, charges, b, p, bal] = await Promise.all([
-      loadCashAccounts(), loadCreditCards(), loadCardCharges(), loadRecurringBills(), loadBillPayments(monthStart, rangeEnd), loadLatestBalances(),
+    const [accounts, cards, charges, b, p, bal, review] = await Promise.all([
+      loadCashAccounts(), loadCreditCards(), loadCardCharges(), loadRecurringBills(), loadBillPayments(monthStart, rangeEnd), loadLatestBalances(), loadLatestWeeklyReview(),
     ]);
     setCashAccounts(accounts);
     setCreditCards(cards);
@@ -945,9 +946,22 @@ export default function CashFlowPage() {
     setBills(b);
     setPayments(p);
     setLatestBalances(bal);
+    setLatestReviewForTabs(review);
     if (!activeTab) setActiveTab("overview");
     setLoading(false);
   }
+
+  const STALE_DAYS_TABS = 7;
+  const balanceTimestampsForTabs = [
+    ...cashAccounts.map((a) => latestBalances[a.name]?.checkedAt),
+    ...creditCards.map((c) => latestBalances[c.name]?.checkedAt),
+    ...creditCards.map((c) => c.statementBalanceUpdatedAt ?? undefined),
+  ].filter((t): t is string => !!t);
+  const oldestBalanceTimestampForTabs = balanceTimestampsForTabs.length > 0 ? balanceTimestampsForTabs.reduce((oldest, t) => (t < oldest ? t : oldest)) : null;
+  const balancesStaleForTabs = (oldestBalanceTimestampForTabs ? (Date.now() - new Date(oldestBalanceTimestampForTabs).getTime()) / 86400000 >= STALE_DAYS_TABS : true)
+    || cashAccounts.some((a) => !latestBalances[a.name]) || creditCards.some((c) => !latestBalances[c.name]);
+  const incomeStaleForTabs = latestReviewForTabs ? daysSinceDateStr(latestReviewForTabs.reviewDate) >= STALE_DAYS_TABS : true;
+  const updateNumbersNeedsAttention = (balancesStaleForTabs || incomeStaleForTabs) && cashAccounts.length > 0;
 
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
@@ -962,15 +976,17 @@ export default function CashFlowPage() {
           <div className="max-w-5xl">
             <div className="mb-4 flex rounded-lg border border-slate-200 bg-white overflow-hidden w-fit flex-wrap">
               <button onClick={() => setActiveTab("overview")} className="px-4 py-2 text-sm font-semibold transition"
-                style={activeTab === "overview" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>Overview</button>
+                style={activeTab === "overview" ? { backgroundColor: "#e8622a", color: "white" } : { backgroundColor: "#d1fae5", color: "#065f46" }}>Overview</button>
               <button onClick={() => setActiveTab("entry")} className="px-4 py-2 text-sm font-semibold transition"
-                style={activeTab === "entry" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>Update Numbers</button>
+                style={activeTab === "entry" ? { backgroundColor: "#e8622a", color: "white" } : updateNumbersNeedsAttention ? { backgroundColor: "#fee2e2", color: "#991b1b" } : { backgroundColor: "#d1fae5", color: "#065f46" }}>
+                {updateNumbersNeedsAttention && activeTab !== "entry" ? "⚠️ " : ""}Update Numbers
+              </button>
               {cashAccounts.map((a) => (
                 <button key={a.id} onClick={() => setActiveTab(a.id)} className="px-4 py-2 text-sm font-semibold transition"
-                  style={activeTab === a.id ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>{a.name}</button>
+                  style={activeTab === a.id ? { backgroundColor: "#e8622a", color: "white" } : { backgroundColor: "#d1fae5", color: "#065f46" }}>{a.name}</button>
               ))}
               <button onClick={() => setActiveTab("cards")} className="px-4 py-2 text-sm font-semibold transition"
-                style={activeTab === "cards" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>Credit Cards</button>
+                style={activeTab === "cards" ? { backgroundColor: "#e8622a", color: "white" } : { backgroundColor: "#d1fae5", color: "#065f46" }}>Credit Cards</button>
             </div>
 
             {cashAccounts.map((a) => activeTab === a.id && (
