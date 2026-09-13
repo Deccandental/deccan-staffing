@@ -40,10 +40,15 @@ export interface CashAccount {
   name: string;
   cushionTarget: number;
   sortOrder: number;
+  statementBalance: number;
+  statementBalanceUpdatedAt: string | null;
 }
 
 function fromCashAccountRow(row: any): CashAccount {
-  return { id: row.id, name: row.name, cushionTarget: row.cushion_target, sortOrder: row.sort_order ?? 0 };
+  return {
+    id: row.id, name: row.name, cushionTarget: row.cushion_target, sortOrder: row.sort_order ?? 0,
+    statementBalance: row.statement_balance ?? 0, statementBalanceUpdatedAt: row.statement_balance_updated_at ?? null,
+  };
 }
 
 export async function loadCashAccounts(): Promise<CashAccount[]> {
@@ -55,6 +60,54 @@ export async function loadCashAccounts(): Promise<CashAccount[]> {
 export async function updateCashAccountCushion(id: string, cushionTarget: number): Promise<void> {
   const { error } = await supabase.from("cash_accounts").update({ cushion_target: cushionTarget }).eq("id", id);
   if (error) console.error("updateCashAccountCushion error:", error);
+}
+
+export interface BankStatementEntry {
+  id: string;
+  cashAccountId: string;
+  month: string; // YYYY-MM
+  balance: number;
+  enteredAt: string;
+}
+
+function fromBankStatementEntryRow(row: any): BankStatementEntry {
+  return { id: row.id, cashAccountId: row.cash_account_id, month: row.month, balance: row.balance, enteredAt: row.entered_at };
+}
+
+// Updates a bank account's "current" statement balance snapshot and also
+// records it into the monthly history log — mirroring how credit card
+// statement balances work. Defaults to the current calendar month unless
+// backfilling a specific past one.
+export async function updateBankStatementBalance(cashAccountId: string, balance: number, month?: string): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("cash_accounts").update({ statement_balance: balance, statement_balance_updated_at: new Date().toISOString() }).eq("id", cashAccountId);
+  if (error) { console.error("updateBankStatementBalance error:", error); return { ok: false, error: error.message }; }
+  const targetMonth = month ?? new Date().toISOString().slice(0, 7);
+  const { error: histError } = await supabase.from("bank_statement_entries").upsert({
+    cash_account_id: cashAccountId, month: targetMonth, balance, entered_at: new Date().toISOString(),
+  }, { onConflict: "cash_account_id,month" });
+  if (histError) { console.error("updateBankStatementBalance (history) error:", histError); return { ok: false, error: histError.message }; }
+  return { ok: true };
+}
+
+export async function loadStatementHistoryForAccount(cashAccountId: string): Promise<BankStatementEntry[]> {
+  const { data, error } = await supabase.from("bank_statement_entries").select("*").eq("cash_account_id", cashAccountId).order("month", { ascending: false });
+  if (error) { console.error("loadStatementHistoryForAccount error:", error); return []; }
+  return (data ?? []).map(fromBankStatementEntryRow);
+}
+
+// Backfills or corrects a specific past month's bank statement balance
+// without touching the account's "current" snapshot fields.
+export async function backfillBankStatementMonth(cashAccountId: string, month: string, balance: number): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("bank_statement_entries").upsert({
+    cash_account_id: cashAccountId, month, balance, entered_at: new Date().toISOString(),
+  }, { onConflict: "cash_account_id,month" });
+  if (error) { console.error("backfillBankStatementMonth error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
+export async function deleteBankStatementEntry(id: string): Promise<void> {
+  const { error } = await supabase.from("bank_statement_entries").delete().eq("id", id);
+  if (error) console.error("deleteBankStatementEntry error:", error);
 }
 
 // ---------------- Credit cards ----------------
