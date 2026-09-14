@@ -54,7 +54,19 @@ function fromCashAccountRow(row: any): CashAccount {
 export async function loadCashAccounts(): Promise<CashAccount[]> {
   const { data, error } = await supabase.from("cash_accounts").select("*").order("sort_order");
   if (error) { console.error("loadCashAccounts error:", error); return []; }
-  return (data ?? []).map(fromCashAccountRow);
+  const accounts = (data ?? []).map(fromCashAccountRow);
+  const { data: latestEntries, error: entriesError } = await supabase
+    .from("bank_statement_entries").select("*").order("month", { ascending: false });
+  if (entriesError) { console.error("loadCashAccounts (statement entries) error:", entriesError); return accounts; }
+  const latestByAccount = new Map<string, any>();
+  for (const row of latestEntries ?? []) {
+    if (!latestByAccount.has(row.cash_account_id)) latestByAccount.set(row.cash_account_id, row);
+  }
+  return accounts.map((a) => {
+    const latest = latestByAccount.get(a.id);
+    if (!latest) return a;
+    return { ...a, statementBalance: latest.balance, statementBalanceUpdatedAt: latest.entered_at };
+  });
 }
 
 export async function updateCashAccountCushion(id: string, cushionTarget: number): Promise<void> {
@@ -138,7 +150,23 @@ function fromCreditCardRow(row: any): CreditCard {
 export async function loadCreditCards(): Promise<CreditCard[]> {
   const { data, error } = await supabase.from("credit_cards").select("*").order("sort_order");
   if (error) { console.error("loadCreditCards error:", error); return []; }
-  return (data ?? []).map(fromCreditCardRow);
+  const cards = (data ?? []).map(fromCreditCardRow);
+  // Derive "current" statement balance from the most recent entry in the
+  // history table, rather than trusting a separately-maintained field —
+  // this is the only way to guarantee it can never drift out of sync with
+  // what Trends shows.
+  const { data: latestEntries, error: entriesError } = await supabase
+    .from("card_statement_entries").select("*").order("month", { ascending: false });
+  if (entriesError) { console.error("loadCreditCards (statement entries) error:", entriesError); return cards; }
+  const latestByCard = new Map<string, any>();
+  for (const row of latestEntries ?? []) {
+    if (!latestByCard.has(row.credit_card_id)) latestByCard.set(row.credit_card_id, row);
+  }
+  return cards.map((c) => {
+    const latest = latestByCard.get(c.id);
+    if (!latest) return c;
+    return { ...c, statementBalance: latest.balance, statementBalanceUpdatedAt: latest.entered_at };
+  });
 }
 
 export async function updateCreditCard(id: string, updates: Partial<{ creditLimit: number; approxClosingDay: number; dueDay: number; minimumPayment: number; autopayAmount: number }>): Promise<void> {
