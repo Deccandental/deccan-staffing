@@ -486,12 +486,18 @@ export async function loadWeeklyReviewHistory(limit: number = 12): Promise<Weekl
   return (data ?? []).map(fromReviewRow);
 }
 
-export async function saveWeeklyReview(review: Omit<WeeklyCashReview, "id">): Promise<void> {
+export async function saveWeeklyReview(review: Omit<WeeklyCashReview, "id">): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("weekly_cash_reviews").upsert({
     review_date: review.reviewDate, projected_total_production: review.projectedTotalProduction,
     current_income: review.currentIncome, current_patient_income: review.currentPatientIncome, notes: review.notes,
   }, { onConflict: "review_date" });
-  if (error) console.error("saveWeeklyReview error:", error);
+  if (error) { console.error("saveWeeklyReview error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
+export async function deleteWeeklyReview(id: string): Promise<void> {
+  const { error } = await supabase.from("weekly_cash_reviews").delete().eq("id", id);
+  if (error) console.error("deleteWeeklyReview error:", error);
 }
 
 // ---------------- Schedule computation ----------------
