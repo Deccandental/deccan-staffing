@@ -12,6 +12,7 @@ export interface PolicyDocument {
   slug: string;
   title: string;
   cycleMode: "annual_september" | "sign_once_per_version";
+  restrictedToEmployeeId: number | null;
 }
 
 export interface PolicyVersion {
@@ -45,7 +46,7 @@ export interface PolicySignature {
 }
 
 function fromDocRow(row: any): PolicyDocument {
-  return { id: row.id, slug: row.slug, title: row.title, cycleMode: row.cycle_mode };
+  return { id: row.id, slug: row.slug, title: row.title, cycleMode: row.cycle_mode, restrictedToEmployeeId: row.restricted_to_employee_id ?? null };
 }
 function fromVersionRow(row: any): PolicyVersion {
   return { id: row.id, documentId: row.document_id, versionLabel: row.version_label, content: row.content_json, active: row.active };
