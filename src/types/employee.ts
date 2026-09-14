@@ -74,6 +74,7 @@ export interface Employee {
   // the following month, tracked monthly rather than quarterly).
   hoBonusEligible?: boolean;
   exemptFromPolicySigning?: boolean;
+  exemptFromCheckin?: boolean;
   // Defaults to full-time when unset. Used for things like PTO eligibility
   // timelines that only apply to full-time staff.
   employmentType?: "full_time" | "part_time";
