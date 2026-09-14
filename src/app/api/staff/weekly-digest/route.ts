@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   }
 
   const [{ data: staffRows }, { data: certRows }, { data: docs }, { data: eventRows }, checkinSlots] = await Promise.all([
-    supabase.from("staff").select("id, name, email, archived, exempt_from_policy_signing").eq("archived", false),
+    supabase.from("staff").select("id, name, email, archived, exempt_from_policy_signing, exempt_from_checkin").eq("archived", false),
     supabase.from("certifications").select("*").not("expiration_date", "is", null),
     supabase.from("policy_documents").select("*"),
     supabase.from("events").select("*"),
@@ -67,11 +67,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const checkinStatus = computeCheckinStatus(emp.id, checkinSlots, today);
-    if (checkinStatus.upcomingSlot) {
-      items.push(`<strong>Check-in scheduled:</strong> ${new Date(checkinStatus.upcomingSlot.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })} at ${checkinStatus.upcomingSlot.time}`);
-    } else if (checkinStatus.isDue) {
-      items.push(`<strong>Check-in due:</strong> ${checkinStatus.lastCompletedDate ? "please schedule your next 6-month check-in" : "please schedule your first check-in"} — pick a slot on the Check-Ins page`);
+    if (!emp.exempt_from_checkin) {
+      const checkinStatus = computeCheckinStatus(emp.id, checkinSlots, today);
+      if (checkinStatus.upcomingSlot) {
+        items.push(`<strong>Check-in scheduled:</strong> ${new Date(checkinStatus.upcomingSlot.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })} at ${checkinStatus.upcomingSlot.time}`);
+      } else if (checkinStatus.isDue) {
+        items.push(`<strong>Check-in due:</strong> ${checkinStatus.lastCompletedDate ? "please schedule your next 6-month check-in" : "please schedule your first check-in"} — pick a slot on the Check-Ins page`);
+      }
     }
 
     const sent = await sendStaffWeeklyDigest({ employeeName: emp.name, employeeEmail: emp.email, items });
