@@ -67,7 +67,7 @@ export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee |
   return rowToEmployee(data);
 }
 
-export async function updateEmployee(emp: Employee): Promise<void> {
+export async function updateEmployee(emp: Employee): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("staff").update({
     name: emp.name, role: emp.role, specialty: emp.specialty ?? null,
     color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin || null,
@@ -77,7 +77,8 @@ export async function updateEmployee(emp: Employee): Promise<void> {
     default_schedule: emp.defaultSchedule, remote_days: emp.remoteDays ?? null,
     hire_date: emp.hireDate || null, growth_bonus_eligible: emp.growthBonusEligible ?? false, growth_bonus_multiplier: emp.growthBonusMultiplier ?? 1, pv_bonus_eligible: emp.pvBonusEligible ?? false, net_production_bonus_percent: emp.netProductionBonusPercent ?? 30, ho_bonus_eligible: emp.hoBonusEligible ?? false, exempt_from_policy_signing: emp.exemptFromPolicySigning ?? false, exempt_from_checkin: emp.exemptFromCheckin ?? false, employment_type: emp.employmentType ?? "full_time",
   }).eq("id", emp.id);
-  if (error) console.error("updateEmployee error:", error);
+  if (error) { console.error("updateEmployee error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
 }
 
 export async function setEmployeeArchived(id: number, archived: boolean): Promise<void> {
