@@ -49,14 +49,14 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
   async function refresh() {
     setLoading(true);
     const [s, sl] = await Promise.all([loadStaff(), loadAllSlots()]);
-    setStaff(s.filter((e) => !e.archived));
+    setStaff(s.filter((e) => !e.archived && !e.exemptFromCheckin));
     setSlots(sl);
     setLoading(false);
   }
 
   useEffect(() => { refresh(); }, []);
 
-  const myStatus = identity.employeeId != null ? computeCheckinStatus(identity.employeeId, slots, today) : null;
+  const myStatus = identity.employeeId != null && !identity.exemptFromCheckin ? computeCheckinStatus(identity.employeeId, slots, today) : null;
   const openSlots = slots.filter((s) => !s.claimedByEmployeeId && s.date >= today).sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
 
   async function handleCreateSlot() {
