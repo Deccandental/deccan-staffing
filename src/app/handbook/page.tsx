@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 import SignaturePad from "@/components/SignaturePad";
@@ -21,6 +21,7 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [signing, setSigning] = useState(false);
+  const signFormRef = useRef<HTMLDivElement>(null);
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [typedName, setTypedName] = useState(identity.employeeName ?? "");
   const [sigImage, setSigImage] = useState<string | null>(null);
@@ -159,7 +160,7 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
       ) : (
         <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 flex items-center justify-between flex-wrap gap-2">
           <p className="text-sm text-amber-800">Your signature is required for <strong>{requirement.cycleLabel}</strong>.</p>
-          {!signing && <button onClick={() => setSigning(true)} className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Start Signing</button>}
+          {!signing && <button onClick={() => { setSigning(true); setTimeout(() => signFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50); }} className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Start Signing</button>}
         </div>
       )}
 
@@ -237,8 +238,8 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
       </div>
 
       {myEmployeeId != null && signing && !mySignature && (
-        <div className="rounded-xl bg-white shadow p-4 space-y-3 print:hidden">
-          <h3 className="font-bold text-slate-700 text-sm">Sign {doc.title}</h3>
+        <div ref={signFormRef} className="rounded-xl shadow p-4 space-y-3 print:hidden border-2" style={{ background: "#fff7ed", borderColor: "#e8622a" }}>
+          <h3 className="font-bold text-slate-700 text-base">✍️ Sign {doc.title}</h3>
           {!allChecked && <p className="text-xs text-amber-600">Please check every section above before signing ({checked.size} of {requiredSectionIdxs.length} initialed).</p>}
           <div>
             <label className="block text-xs text-slate-400 mb-0.5">Full Name</label>
@@ -268,7 +269,10 @@ function HandbookPageBody({ identity }: { identity: AppIdentity }) {
 
   useEffect(() => {
     Promise.all([loadPolicyDocuments(), loadStaff()]).then(([docs, s]) => {
-      setDocuments(docs);
+      const visible = docs.filter((d) =>
+        d.restrictedToEmployeeId == null || d.restrictedToEmployeeId === identity.employeeId || identity.canAdmin
+      );
+      setDocuments(visible);
       setStaff(s);
       setLoading(false);
     });
