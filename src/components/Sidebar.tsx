@@ -39,6 +39,8 @@ const navItems: { label: string; href: string; icon: string; permission: Permiss
   { label: "Certifications", href: "/certifications", icon: "📄", permission: "any" },
   { label: "Wishlist", href: "/wishlist", icon: "⭐", permission: "any" },
   { label: "Handbook", href: "/handbook", icon: "📘", permission: "any" },
+  { label: "Check-Ins", href: "/checkins", icon: "🤝", permission: "any" },
+  { label: "Events Calendar", href: "/events-calendar", icon: "🗓️", permission: "any" },
   { label: "Schedule Builder", href: "/schedule-builder", icon: "✏️", permission: "canAdmin", group: "Admin" },
   { label: "Availability", href: "/availability", icon: "🏥", permission: "canAdmin", group: "Admin" },
   { label: "Staff", href: "/staff", icon: "👥", permission: "canAdmin", group: "Admin" },
