@@ -22,6 +22,7 @@ import { PvBonusQuarter, loadPvBonusYear } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusPayoutYear } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
 import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
+import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsStore";
 import { formatMoney } from "@/lib/format";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
@@ -85,6 +86,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [certs, setCerts] = useState<Certification[]>([]);
   const [pendingPolicies, setPendingPolicies] = useState<{ title: string; cycleLabel: string }[]>([]);
+  const [checkinDue, setCheckinDue] = useState(false);
+  const [checkinUpcoming, setCheckinUpcoming] = useState<CheckinSlot | null>(null);
   const [titleOptions, setTitleOptions] = useState<string[]>([]);
   const [events, setEvents] = useState<StaffEvent[]>([]);
   const [bonusYear] = useState(new Date().getFullYear());
@@ -166,6 +169,23 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
         if (!sig) pending.push({ title: doc.title, cycleLabel: req.cycleLabel });
       }
       if (!cancelled) setPendingPolicies(pending);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId, staff]);
+
+  useEffect(() => {
+    if (selectedId == null) return;
+    const emp = staff.find((e) => e.id === selectedId);
+    if (emp?.exemptFromCheckin) { setCheckinDue(false); setCheckinUpcoming(null); return; }
+    let cancelled = false;
+    (async () => {
+      const slots = await loadAllSlots();
+      const today = new Date().toISOString().slice(0, 10);
+      const status = computeCheckinStatus(selectedId, slots, today);
+      if (!cancelled) {
+        setCheckinDue(status.isDue && !status.upcomingSlot);
+        setCheckinUpcoming(status.upcomingSlot);
+      }
     })();
     return () => { cancelled = true; };
   }, [selectedId, staff]);
@@ -353,6 +373,23 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   </span>
                 </p>
                 <a href="/handbook" className="text-xs font-semibold text-amber-900 underline flex-shrink-0">Sign now →</a>
+              </div>
+            )}
+
+            {checkinDue && (
+              <div className="lg:col-span-2 rounded-xl px-4 py-3 shadow flex items-center justify-between flex-wrap gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
+                <p className="text-sm text-amber-800 flex items-center gap-2">
+                  <span className="text-lg">🤝</span>
+                  <span><strong>Check-in due:</strong> please pick a slot for your 6-month check-in.</span>
+                </p>
+                <a href="/checkins" className="text-xs font-semibold text-amber-900 underline flex-shrink-0">Book now →</a>
+              </div>
+            )}
+
+            {checkinUpcoming && (
+              <div className="lg:col-span-2 rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #dbeafe, #bfdbfe)" }}>
+                <span className="text-lg">📅</span>
+                <p className="text-sm text-blue-800"><strong>Check-in scheduled:</strong> {new Date(checkinUpcoming.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {checkinUpcoming.time}.</p>
               </div>
             )}
 
