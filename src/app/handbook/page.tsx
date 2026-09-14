@@ -270,7 +270,7 @@ function HandbookPageBody({ identity }: { identity: AppIdentity }) {
   useEffect(() => {
     Promise.all([loadPolicyDocuments(), loadStaff()]).then(([docs, s]) => {
       const visible = docs.filter((d) =>
-        d.restrictedToEmployeeId == null || d.restrictedToEmployeeId === identity.employeeId || identity.canAdmin
+        d.restrictedToEmployeeId == null || d.restrictedToEmployeeId === identity.employeeId || identity.mode === "super"
       );
       setDocuments(visible);
       setStaff(s);
@@ -318,7 +318,7 @@ function HandbookPageBody({ identity }: { identity: AppIdentity }) {
                 );
               })}
             </div>
-            {activeDoc && <DocumentPanel doc={activeDoc} identity={identity} staff={staff} />}
+            {activeDoc && <DocumentPanel key={activeDoc.slug} doc={activeDoc} identity={identity} staff={staff} />}
           </div>
         )}
       </div>
