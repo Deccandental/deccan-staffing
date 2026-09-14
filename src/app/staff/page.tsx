@@ -81,8 +81,13 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 
   async function handleSave() {
     if (!form.name.trim()) return;
-    if (editing) { await updateEmployee({ ...form, id: editing.id }); }
-    else { await addEmployee(form); }
+    if (editing) {
+      const result = await updateEmployee({ ...form, id: editing.id });
+      if (!result.ok) { alert(`Failed to save: ${result.error ?? "unknown error"}`); return; }
+    } else {
+      const created = await addEmployee(form);
+      if (!created) { alert("Failed to create employee — please try again."); return; }
+    }
     setEditing(null);
     setAdding(false);
     setForm(EMPTY_EMP);
