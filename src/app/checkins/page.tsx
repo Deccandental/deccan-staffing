@@ -19,6 +19,19 @@ function fmtDate(dateStr: string): string {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 }
 
+function generateTimeOptions(): string[] {
+  const options: string[] = [];
+  for (let minutes = 9 * 60; minutes <= 17 * 60; minutes += 10) {
+    const h24 = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+    const ampm = h24 < 12 || h24 === 24 ? "AM" : "PM";
+    options.push(`${h12}:${String(m).padStart(2, "0")} ${ampm}`);
+  }
+  return options;
+}
+const TIME_OPTIONS = generateTimeOptions();
+
 function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [slots, setSlots] = useState<CheckinSlot[]>([]);
@@ -151,7 +164,10 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
                     </div>
                     <div>
                       <label className="block text-sm text-slate-800 font-semibold mb-1">Time</label>
-                      <input type="text" value={newSlotTime} onChange={(e) => setNewSlotTime(e.target.value)} placeholder="e.g. 2:00 PM" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                      <select value={newSlotTime} onChange={(e) => setNewSlotTime(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                        <option value="">Select…</option>
+                        {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
                     </div>
                     <div className="flex items-end">
                       <button onClick={handleCreateSlot} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition w-full" style={{ backgroundColor: "#e8622a" }}>Add Slot</button>
