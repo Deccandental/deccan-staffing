@@ -21,7 +21,9 @@ type PermissionLevel =
   | "canManagePayroll";
 
 interface StoredIdentity {
+  mode?: "super" | "staff";
   employeeId?: number;
+  employeeName?: string;
   exemptFromPolicySigning?: boolean;
   canAdmin?: boolean;
   canManageLeave?: boolean;
@@ -176,13 +178,36 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
       </nav>
 
       <div className="px-5 py-4 flex-shrink-0" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>D</div>
+        {identity ? (
           <div>
-            <div className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>Deccan Dental</div>
-            <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Sleep Center</div>
+            <div className="flex items-center gap-3">
+              <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>
+                {identity.mode === "super" ? "A" : (identity.employeeName ?? "?").charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.85)" }}>
+                  {identity.mode === "super" ? "Admin (passcode)" : identity.employeeName ?? "Signed in"}
+                </div>
+                <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Deccan Dental</div>
+              </div>
+            </div>
+            <button
+              onClick={() => { try { sessionStorage.removeItem(IDENTITY_SESSION_KEY); } catch {} window.location.href = "/"; }}
+              className="mt-2 text-xs underline"
+              style={{ color: "rgba(255,255,255,0.4)" }}
+            >
+              Not you? Log off
+            </button>
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>D</div>
+            <div>
+              <div className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>Deccan Dental</div>
+              <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Sleep Center</div>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
