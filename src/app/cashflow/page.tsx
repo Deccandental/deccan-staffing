@@ -14,7 +14,7 @@ import {
   loadCashAccounts, updateCashAccountCushion,
   loadCreditCards, updateStatementBalance,
   loadCardCharges, addCardCharge, updateCardCharge, deleteCardCharge,
-  loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview,
+  loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview, deleteWeeklyReview,
   buildOccurrences, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
   computeAccountForecast, computeSuggestedTransfer, computeCardRecommendation, computeRequiredCollections,
 } from "@/lib/cashflow";
@@ -887,10 +887,11 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
     (currentPatientIncome !== (latestReview?.currentPatientIncome != null ? String(latestReview.currentPatientIncome) : ""));
 
   async function handleSave() {
-    await saveWeeklyReview({
+    const result = await saveWeeklyReview({
       reviewDate: today, projectedTotalProduction: productionNum, currentIncome: incomeNum,
       currentPatientIncome: patientIncomeNum, notes,
     });
+    if (!result.ok) { alert(`Failed to save: ${result.error ?? "unknown error"}`); return; }
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
     const latest = await loadLatestWeeklyReview();
@@ -1121,6 +1122,12 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const [backfillAmount, setBackfillAmount] = useState("");
   const [backfillConfirmation, setBackfillConfirmation] = useState<string | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
+  const [dentalBackfillDate, setDentalBackfillDate] = useState(todayStr());
+  const [dentalBackfillProduction, setDentalBackfillProduction] = useState("");
+  const [dentalBackfillIncome, setDentalBackfillIncome] = useState("");
+  const [dentalBackfillPatientIncome, setDentalBackfillPatientIncome] = useState("");
+  const [dentalBackfillConfirmation, setDentalBackfillConfirmation] = useState<string | null>(null);
+  const [dentalBackfillError, setDentalBackfillError] = useState<string | null>(null);
   const [statementHistories, setStatementHistories] = useState<Record<string, CardStatementEntry[]>>({});
   const [bankStatementHistories, setBankStatementHistories] = useState<Record<string, BankStatementEntry[]>>({});
   const [reviewHistory, setReviewHistory] = useState<WeeklyCashReview[]>([]);
@@ -1186,6 +1193,33 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   async function handleDeleteBankEntry(id: string) {
     if (!confirm("Delete this statement entry? This can't be undone.")) return;
     await deleteBankStatementEntry(id);
+    await loadAll();
+  }
+
+  async function handleDentalBackfill() {
+    const production = dentalBackfillProduction ? Number(dentalBackfillProduction) : null;
+    const income = dentalBackfillIncome ? Number(dentalBackfillIncome) : null;
+    const patientIncome = dentalBackfillPatientIncome ? Number(dentalBackfillPatientIncome) : null;
+    if (!dentalBackfillDate || (production == null && income == null && patientIncome == null)) return;
+    const result = await saveWeeklyReview({ reviewDate: dentalBackfillDate, projectedTotalProduction: production, currentIncome: income, currentPatientIncome: patientIncome, notes: "" });
+    if (!result.ok) {
+      setDentalBackfillError(result.error ?? "Save failed.");
+      setDentalBackfillConfirmation(null);
+      return;
+    }
+    setDentalBackfillError(null);
+    const dateLabel = new Date(dentalBackfillDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+    setDentalBackfillConfirmation(`✓ Saved Open Dental numbers for ${dateLabel}`);
+    setDentalBackfillProduction("");
+    setDentalBackfillIncome("");
+    setDentalBackfillPatientIncome("");
+    setTimeout(() => setDentalBackfillConfirmation(null), 5000);
+    await loadAll();
+  }
+
+  async function handleDeleteDentalEntry(id: string) {
+    if (!confirm("Delete this Open Dental entry? This can't be undone.")) return;
+    await deleteWeeklyReview(id);
     await loadAll();
   }
 
@@ -1312,6 +1346,32 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
       </div>
 
       <div className="rounded-2xl bg-white shadow p-5">
+        <h2 className="font-bold text-slate-700 mb-1">Add / Backfill Open Dental Numbers</h2>
+        <p className="text-sm text-slate-500 mb-4">Enter production and income figures for any date, past or present — this is the same record used by the Update Numbers tab, so entries there and here reconcile automatically.</p>
+        <div className="grid gap-3 sm:grid-cols-4 mb-3">
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Date</label>
+            <input type="date" value={dentalBackfillDate} onChange={(e) => setDentalBackfillDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Projected Total Production</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={dentalBackfillProduction} onChange={(e) => setDentalBackfillProduction(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Current Income</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={dentalBackfillIncome} onChange={(e) => setDentalBackfillIncome(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Current Patient Income</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={dentalBackfillPatientIncome} onChange={(e) => setDentalBackfillPatientIncome(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+        </div>
+        <button onClick={handleDentalBackfill} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Save</button>
+        {dentalBackfillConfirmation && <span className="text-sm text-emerald-600 font-semibold mt-2 block">{dentalBackfillConfirmation}</span>}
+        {dentalBackfillError && <span className="text-sm text-red-600 font-semibold mt-2 block">⚠️ {dentalBackfillError}</span>}
+      </div>
+
+      <div className="rounded-2xl bg-white shadow p-5">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-bold text-slate-700">Open Dental — Production & Income</h2>
           <button onClick={() => setDepthView(depthView === "dental" ? null : "dental")} className="text-xs text-orange-500 hover:underline">{depthView === "dental" ? "Standard view" : "In-depth view"}</button>
@@ -1322,10 +1382,13 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
             {reviewHistory.map((r) => (
               <div key={r.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
                 <span className="text-slate-600">{new Date(r.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
-                <span className="text-xs text-slate-400">
-                  {r.projectedTotalProduction != null ? `Prod: $${formatMoney(r.projectedTotalProduction)}` : ""}
-                  {r.currentIncome != null ? ` · Income: $${formatMoney(r.currentIncome)}` : ""}
-                  {r.currentPatientIncome != null && r.currentIncome != null ? ` · Insurance: $${formatMoney(r.currentIncome - r.currentPatientIncome)}` : ""}
+                <span className="flex items-center gap-2 text-xs text-slate-400">
+                  <span>
+                    {r.projectedTotalProduction != null ? `Prod: $${formatMoney(r.projectedTotalProduction)}` : ""}
+                    {r.currentIncome != null ? ` · Income: $${formatMoney(r.currentIncome)}` : ""}
+                    {r.currentPatientIncome != null && r.currentIncome != null ? ` · Insurance: $${formatMoney(r.currentIncome - r.currentPatientIncome)}` : ""}
+                  </span>
+                  <button onClick={() => handleDeleteDentalEntry(r.id)} className="text-red-400 hover:underline">Delete</button>
                 </span>
               </div>
             ))}
