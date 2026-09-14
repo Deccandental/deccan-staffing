@@ -12,6 +12,7 @@ export interface AppIdentity {
   employeeName?: string;
   employeeEmail?: string;
   exemptFromPolicySigning?: boolean;
+  exemptFromCheckin?: boolean;
   canAdmin: boolean;
   canManageLeave: boolean;
   canManageEvents: boolean;
@@ -54,7 +55,7 @@ export default function AppIdentityGate({ children }: Props) {
     if (!match) return;
     const fresh: AppIdentity = {
       mode: "staff",
-      employeeId: match.id, employeeName: match.name, employeeEmail: match.email ?? "", exemptFromPolicySigning: !!match.exemptFromPolicySigning,
+      employeeId: match.id, employeeName: match.name, employeeEmail: match.email ?? "", exemptFromPolicySigning: !!match.exemptFromPolicySigning, exemptFromCheckin: !!match.exemptFromCheckin,
       canAdmin: !!match.canAdmin, canManageLeave: !!match.canManageLeave, canManageEvents: !!match.canManageEvents,
       canManageCerts: !!match.canManageCerts, canManagePayroll: !!match.canManagePayroll,
     };
@@ -79,7 +80,7 @@ export default function AppIdentityGate({ children }: Props) {
     if (match) {
       persist({
         mode: "staff",
-        employeeId: match.id, employeeName: match.name, employeeEmail: match.email ?? "", exemptFromPolicySigning: !!match.exemptFromPolicySigning,
+        employeeId: match.id, employeeName: match.name, employeeEmail: match.email ?? "", exemptFromPolicySigning: !!match.exemptFromPolicySigning, exemptFromCheckin: !!match.exemptFromCheckin,
         canAdmin: !!match.canAdmin, canManageLeave: !!match.canManageLeave, canManageEvents: !!match.canManageEvents,
         canManageCerts: !!match.canManageCerts, canManagePayroll: !!match.canManagePayroll,
       });
