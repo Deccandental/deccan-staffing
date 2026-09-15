@@ -351,14 +351,11 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   }
 
   return (
-    <main className="min-h-screen" style={{ background: "#FAF5EC" }}>
+    <main className="min-h-screen" style={{ background: "linear-gradient(160deg, #FDF2E9 0%, #F5EFFA 50%, #EAF3F8 100%)" }}>
       <Sidebar />
       <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
-        <header className="mb-6 flex items-start justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-3xl font-bold">Staff Dashboard</h1>
-            <p className="mt-1 text-slate-500">Upcoming shifts, leave requests, and certifications in one place.</p>
-          </div>
+        <header className="mb-6 flex items-center justify-between flex-wrap gap-3">
+          <h1 className="text-2xl font-bold" style={{ color: "#4A4238" }}>Staff Dashboard</h1>
           <div className="flex items-center gap-2 rounded-full px-4 py-2 shadow-sm text-sm" style={{ background: "#FCE8D5" }}>
             <span style={{ color: "#B8501E" }}>
               {isManager ? "👔 Manager view" : `👤 ${identity.employeeName ?? ""}`}
@@ -389,22 +386,24 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             <p className="text-slate-400">Loading…</p>
           </div>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-2 max-w-5xl">
+          <div className="max-w-6xl mx-auto">
             {selectedEmployee && (
-              <div className="lg:col-span-2 rounded-2xl bg-white p-4 shadow flex items-center gap-3">
-                <div className="h-12 w-12 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
+              <div className="text-center mb-8">
+                <div className="h-20 w-20 mx-auto rounded-full flex items-center justify-center text-white font-bold text-3xl shadow-lg mb-3"
                   style={{ backgroundColor: selectedEmployee.color }}>
                   {selectedEmployee.name.charAt(0)}
                 </div>
-                <div>
-                  <div className="font-bold text-lg text-slate-700">{selectedEmployee.name}</div>
-                  <div className="text-sm text-slate-400">{selectedEmployee.specialty ?? selectedEmployee.role}{selectedEmployee.email ? ` · ${selectedEmployee.email}` : ""}</div>
-                </div>
+                <h2 className="text-3xl font-bold" style={{ color: "#4A4238" }}>{selectedEmployee.name}</h2>
+                <p className="text-sm mt-1" style={{ color: "rgba(74,66,56,0.55)" }}>
+                  {selectedEmployee.specialty ?? selectedEmployee.role}{selectedEmployee.email ? ` · ${selectedEmployee.email}` : ""}
+                </p>
               </div>
             )}
 
+            <div className="grid gap-5 lg:grid-cols-3">
+
             {certs.some((c) => c.expirationDate && certBadge(c).label === "Expired") && (
-              <div className="lg:col-span-2 rounded-xl px-4 py-3 shadow flex items-center gap-3" style={{ background: "linear-gradient(135deg, #fee2e2, #fecaca)" }}>
+              <div className="lg:col-span-3 rounded-xl px-4 py-3 shadow flex items-center gap-3" style={{ background: "linear-gradient(135deg, #fee2e2, #fecaca)" }}>
                 <span className="text-lg flex-shrink-0">📄</span>
                 <p className="text-sm text-red-800">
                   <strong>Certification expired:</strong>{" "}
@@ -414,7 +413,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {pendingPolicies.length > 0 && (
-              <div className="lg:col-span-2 rounded-xl px-4 py-3 shadow flex items-center justify-between flex-wrap gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
+              <div className="lg:col-span-3 rounded-xl px-4 py-3 shadow flex items-center justify-between flex-wrap gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
                 <p className="text-sm text-amber-800 flex items-center gap-2">
                   <span className="text-lg">✍️</span>
                   <span>
@@ -426,7 +425,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {checkinDue && (
-              <div className="lg:col-span-2 rounded-xl px-4 py-3 shadow flex items-center justify-between flex-wrap gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
+              <div className="lg:col-span-3 rounded-xl px-4 py-3 shadow flex items-center justify-between flex-wrap gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
                 <p className="text-sm text-amber-800 flex items-center gap-2">
                   <span className="text-lg">🤝</span>
                   <span><strong>Check-in due:</strong> please pick a slot for your 6-month check-in.</span>
@@ -436,7 +435,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {checkinUpcoming && (
-              <div className="lg:col-span-2 rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #dbeafe, #bfdbfe)" }}>
+              <div className="lg:col-span-3 rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #dbeafe, #bfdbfe)" }}>
                 <span className="text-lg">📅</span>
                 <p className="text-sm text-blue-800"><strong>Check-in scheduled:</strong> {new Date(checkinUpcoming.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {checkinUpcoming.time}.</p>
               </div>
@@ -463,17 +462,15 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {selectedEmployee?.growthBonusEligible && !showBonusCountdown && (
-              <div className="lg:col-span-2 rounded-2xl p-4 shadow" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)" }}>
-                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                  <h2 className="font-bold text-slate-700">
-                    {bonusUnlocked ? "🎉 " : "🚀 "}{QUARTER_LABELS[currentQuarter]} {bonusYear} Bonus Progress{bonusUnlocked ? " — unlocked!" : ""}
-                  </h2>
-                  <span className="text-sm text-slate-600">Received this year: <strong>${formatMoney(bonusReceivedThisYear)}</strong></span>
-                </div>
+              <div className="lg:col-span-3 rounded-2xl p-5" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)", boxShadow: bonusUnlocked ? "0 8px 24px rgba(16,185,129,0.2)" : "0 8px 24px rgba(245,158,11,0.2)" }}>
+                <h2 className="font-bold text-center" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>
+                  {bonusUnlocked ? "🎉 " : "🚀 "}{QUARTER_LABELS[currentQuarter]} {bonusYear} Bonus Progress{bonusUnlocked ? " — unlocked!" : ""}
+                </h2>
+                <p className="text-sm text-center mb-2" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>Received this year: <strong>${formatMoney(bonusReceivedThisYear)}</strong></p>
                 <div className="w-full h-3 rounded-full bg-white overflow-hidden">
                   <div className="h-full rounded-full transition-all" style={{ width: `${bonusProgressPct}%`, backgroundColor: bonusUnlocked ? "#10b981" : "#f59e0b" }} />
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-center mt-1" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
                   ${formatMoney(currentQuarterData?.netProductionCurrent ?? 0)} of ${formatMoney(requiredProduction)} goal ({bonusProgressPct}%){bonusUnlocked ? " — already there!" : ""}
                 </p>
 
@@ -507,7 +504,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {selectedEmployee?.pvBonusEligible && (
-              <div className="lg:col-span-2 rounded-2xl bg-white p-4 shadow">
+              <div className="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
                 <h2 className="font-bold text-slate-700 mb-2">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
                 <div className="space-y-1.5">
                   {pvQuarters.map((q) => {
@@ -535,7 +532,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {isHygienist && (
-              <div className="lg:col-span-2 rounded-2xl bg-white p-4 shadow">
+              <div className="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
                 <h2 className="font-bold text-slate-700 mb-2">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
                 <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
                   <span className="text-slate-500">Earned ${formatMoney(hygieneEarned)} · Paid ${formatMoney(hygienePaid)}</span>
@@ -550,42 +547,42 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
-            <div className="rounded-2xl bg-white p-4 shadow">
-              <h2 className="font-bold text-slate-700 mb-2">📅 Upcoming Shifts (next 3 weeks)</h2>
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(55,138,221,0.12)", borderTop: "4px solid #378ADD" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#185FA5" }}>📅 Upcoming Shifts</h2>
               {shifts.length === 0 ? (
-                <p className="text-sm text-slate-400">No upcoming shifts scheduled.</p>
+                <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No upcoming shifts scheduled.</p>
               ) : (
                 <div className="space-y-1.5 max-h-80 overflow-y-auto">
                   {shifts.map((s, i) => (
-                    <div key={i} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm">
+                    <div key={i} className="flex items-center justify-between rounded-xl px-3 py-2 text-sm" style={{ background: "#E6F1FB" }}>
                       <div>
-                        <span className="font-medium text-slate-700">
+                        <span className="font-medium" style={{ color: "#0C447C" }}>
                           {new Date(s.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                         </span>
-                        {s.detail && <span className="text-slate-400 ml-2 text-xs">{s.detail}</span>}
+                        {s.detail && <span className="ml-2 text-xs" style={{ color: "#185FA5" }}>{s.detail}</span>}
                       </div>
-                      <span className="text-xs font-semibold text-slate-500">{ROLE_ICONS[s.role]} {s.role}</span>
+                      <span className="text-xs font-semibold" style={{ color: "#185FA5" }}>{ROLE_ICONS[s.role]} {s.role}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            <div className="rounded-2xl bg-white p-4 shadow">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-bold text-slate-700">📝 Leave Requests</h2>
-                <a href="/leave" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(127,119,221,0.14)", borderTop: "4px solid #7F77DD" }}>
+              <h2 className="font-bold text-center mb-1" style={{ color: "#3C3489" }}>📝 Leave Requests</h2>
+              <div className="text-center mb-3">
+                <a href="/leave" className="inline-block rounded-full px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#534AB7" }}>
                   + Submit Leave Request
                 </a>
               </div>
               {leaveRequests.length === 0 ? (
-                <p className="text-sm text-slate-400">No leave requests on file.</p>
+                <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No leave requests on file.</p>
               ) : (
                 <div className="space-y-1.5 max-h-80 overflow-y-auto">
                   {[...leaveRequests].sort((a, b) => a.startDate.localeCompare(b.startDate)).map((req) => (
-                    <div key={req.id} className="rounded-xl bg-slate-50 px-3 py-2">
+                    <div key={req.id} className="rounded-xl px-3 py-2" style={{ background: "#EEEDFE" }}>
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-slate-700">
+                        <span className="text-sm font-medium" style={{ color: "#3C3489" }}>
                           {new Date(req.startDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                           {req.startDate !== req.endDate && ` – ${new Date(req.endDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
                         </span>
@@ -593,26 +590,26 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                           {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
                         </span>
                       </div>
-                      <div className="text-xs text-slate-400 mt-0.5">{REASON_LABELS[req.reason] ?? req.reason} · {req.totalDays} day{req.totalDays !== 1 ? "s" : ""}</div>
+                      <div className="text-xs mt-0.5" style={{ color: "#534AB7" }}>{REASON_LABELS[req.reason] ?? req.reason} · {req.totalDays} day{req.totalDays !== 1 ? "s" : ""}</div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            <div className="rounded-2xl bg-white p-4 shadow">
-              <h2 className="font-bold text-slate-700 mb-2">📌 Events</h2>
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(216,90,48,0.14)", borderTop: "4px solid #D85A30" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#993C1D" }}>📌 Events</h2>
               {events.length === 0 ? (
-                <p className="text-sm text-slate-400">No upcoming events.</p>
+                <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No upcoming events.</p>
               ) : (
                 <div className="space-y-1.5 max-h-80 overflow-y-auto">
                   {events.map((ev) => (
-                    <div key={ev.id} className="rounded-xl px-3 py-2" style={{ background: ev.mandatory ? "#fef2f2" : "#faf5ff" }}>
+                    <div key={ev.id} className="rounded-xl px-3 py-2" style={{ background: ev.mandatory ? "#FCEBEB" : "#FAECE7" }}>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium" style={{ color: ev.mandatory ? "#dc2626" : "#7c3aed" }}>{ev.title}</span>
-                        {ev.mandatory && <span className="rounded-full bg-red-100 text-red-600 text-xs font-semibold px-2 py-0.5 flex-shrink-0">Mandatory</span>}
+                        <span className="text-sm font-medium" style={{ color: ev.mandatory ? "#A32D2D" : "#993C1D" }}>{ev.title}</span>
+                        {ev.mandatory && <span className="rounded-full text-xs font-semibold px-2 py-0.5 flex-shrink-0" style={{ background: "#F7C1C1", color: "#791F1F" }}>Mandatory</span>}
                       </div>
-                      <div className="text-xs text-slate-500 mt-0.5">
+                      <div className="text-xs mt-0.5" style={{ color: "rgba(74,66,56,0.5)" }}>
                         {new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                         {ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : " · All Day"}
                       </div>
@@ -622,11 +619,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
-            <div className="rounded-2xl bg-white p-4 shadow">
-              <div className="flex items-center gap-2 mb-3">
-                <span style={{ fontSize: 18 }}>📋</span>
-                <h2 className="font-bold" style={{ color: "#4A4238" }}>Certifications & CE</h2>
-              </div>
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(29,158,117,0.14)", borderTop: "4px solid #1D9E75" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#0F6E56" }}>📋 Certifications & CE</h2>
 
               {selectedEmployee && (
                 <RequiredCertsSection
@@ -641,7 +635,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               <div className="flex items-center justify-between mt-4 mb-3">
                 <h3 className="text-sm font-semibold" style={{ color: "rgba(74,66,56,0.6)" }}>All documents on file</h3>
                 {!showCertForm && (
-                  <button onClick={openNewCert} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                  <button onClick={openNewCert} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#0F6E56" }}>
                     + Add Certification
                   </button>
                 )}
@@ -744,7 +738,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             </div>
 
             {selectedEmployee?.hoBonusEligible && (
-              <div className="lg:col-span-2 rounded-2xl bg-white shadow overflow-hidden">
+              <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
                 <div className="p-4 pb-2">
                   <h2 className="font-bold text-slate-700">💰 {bonusYear} Compensation — 40% of Production, paid the following month</h2>
                 </div>
@@ -778,6 +772,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 </div>
               </div>
             )}
+          </div>
           </div>
         )}
       </div>
