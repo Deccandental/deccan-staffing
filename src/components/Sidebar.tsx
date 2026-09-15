@@ -118,16 +118,16 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
 
   return (
     <>
-      <div className="px-5 py-5 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-        <div className="rounded-xl px-3 py-2.5 flex items-center justify-center" style={{ background: "white" }}>
+      <div className="px-5 py-5 flex-shrink-0" style={{ borderBottom: "1px solid rgba(74,66,56,0.08)" }}>
+        <div className="rounded-2xl px-3 py-2.5 flex items-center justify-center" style={{ background: "white" }}>
           <Image src="/logo.svg" alt="Deccan Dental Sleep Center" width={160} height={55} className="object-contain" priority />
         </div>
-        <div className="mt-3 text-xs font-semibold tracking-widest uppercase text-center" style={{ color: "rgba(255,255,255,0.3)" }}>
+        <div className="mt-3 text-xs font-bold tracking-widest uppercase text-center" style={{ color: "rgba(74,66,56,0.35)" }}>
           Staff Scheduler
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-0.5">
+      <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
         {navItems.map((item, i) => {
           const active = pathname === item.href;
           const accessible = hasAccess(item.permission, identity);
@@ -135,31 +135,31 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
           return (
             <div key={item.href}>
               {showGroupLabel && (
-                <div className="px-3 pt-4 pb-1 text-xs font-semibold tracking-widest uppercase" style={{ color: "rgba(255,255,255,0.25)" }}>
+                <div className="px-4 pt-4 pb-1 text-xs font-bold tracking-widest uppercase" style={{ color: "rgba(74,66,56,0.3)" }}>
                   {item.group}
                 </div>
               )}
               <Link
                 href={item.href}
                 onClick={onNavigate}
-                className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150"
+                className="flex items-center gap-3 rounded-full px-4 py-2.5 text-sm font-semibold transition-all duration-150"
                 style={
                   active
-                    ? { background: "#e8622a", color: "white", boxShadow: "0 4px 14px rgba(232, 98, 42, 0.35)" }
+                    ? { background: "#e8622a", color: "white", boxShadow: "0 4px 14px rgba(232, 98, 42, 0.3)" }
                     : accessible
-                    ? { color: "rgba(255,255,255,0.6)" }
-                    : { color: "rgba(255,255,255,0.25)" }
+                    ? { color: "rgba(74,66,56,0.65)" }
+                    : { color: "rgba(74,66,56,0.28)" }
                 }
                 onMouseEnter={(e) => {
                   if (!active) {
-                    (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
-                    (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.4)";
+                    (e.currentTarget as HTMLElement).style.background = "#FCE8D5";
+                    (e.currentTarget as HTMLElement).style.color = accessible ? "#B8501E" : "rgba(74,66,56,0.4)";
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!active) {
                     (e.currentTarget as HTMLElement).style.background = "transparent";
-                    (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)";
+                    (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(74,66,56,0.65)" : "rgba(74,66,56,0.28)";
                   }
                 }}
               >
@@ -179,34 +179,34 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
         })}
       </nav>
 
-      <div className="px-5 py-4 flex-shrink-0" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+      <div className="px-5 py-4 flex-shrink-0" style={{ borderTop: "1px solid rgba(74,66,56,0.08)" }}>
         {identity ? (
           <div>
             <div className="flex items-center gap-3">
-              <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>
+              <div className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>
                 {identity.mode === "super" ? "A" : (identity.employeeName ?? "?").charAt(0).toUpperCase()}
               </div>
               <div>
-                <div className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.85)" }}>
+                <div className="text-xs font-bold" style={{ color: "#4A4238" }}>
                   {identity.mode === "super" ? "Admin (passcode)" : identity.employeeName ?? "Signed in"}
                 </div>
-                <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Deccan Dental</div>
+                <div className="text-xs" style={{ color: "rgba(74,66,56,0.4)" }}>Deccan Dental</div>
               </div>
             </div>
             <button
               onClick={() => { try { sessionStorage.removeItem(IDENTITY_SESSION_KEY); } catch {} window.location.href = "/"; }}
-              className="mt-2 text-xs underline"
-              style={{ color: "rgba(255,255,255,0.4)" }}
+              className="mt-2 text-xs underline font-medium"
+              style={{ color: "rgba(74,66,56,0.45)" }}
             >
               Not you? Log off
             </button>
           </div>
         ) : (
           <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>D</div>
+            <div className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>D</div>
             <div>
-              <div className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>Deccan Dental</div>
-              <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Sleep Center</div>
+              <div className="text-xs font-bold" style={{ color: "#4A4238" }}>Deccan Dental</div>
+              <div className="text-xs" style={{ color: "rgba(74,66,56,0.4)" }}>Sleep Center</div>
             </div>
           </div>
         )}
@@ -224,20 +224,20 @@ export function Sidebar() {
       {/* ── Desktop sidebar (lg+) ── */}
       <aside
         className="hidden lg:flex fixed left-0 top-0 z-50 h-screen w-64 flex-col"
-        style={{ background: "linear-gradient(180deg, #2d3148 0%, #353a56 100%)", borderRight: "1px solid rgba(255,255,255,0.08)" }}
+        style={{ background: "#FAF5EC", borderRight: "1px solid rgba(74,66,56,0.08)" }}
       >
         <NavContent pathname={pathname} />
       </aside>
 
       {/* ── Mobile top bar (< lg) ── */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-3 bg-white shadow-sm">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-3" style={{ background: "#FAF5EC", boxShadow: "0 1px 3px rgba(74,66,56,0.08)" }}>
         <div>
-          <div style={{ fontWeight: 700, color: "#5a5a5a", fontSize: 16 }}>
+          <div style={{ fontWeight: 800, color: "#4A4238", fontSize: 16 }}>
             deccan<span style={{ color: "#e8622a" }}>|</span>dental
           </div>
-          <div style={{ fontSize: 10, color: "#9a9a9a", letterSpacing: "0.1em" }}>STAFF SCHEDULER</div>
+          <div style={{ fontSize: 10, color: "rgba(74,66,56,0.4)", letterSpacing: "0.1em" }}>STAFF SCHEDULER</div>
         </div>
-        <button onClick={() => setOpen(true)} style={{ fontSize: 24, color: "#5a5a5a", lineHeight: 1 }} aria-label="Open menu">☰</button>
+        <button onClick={() => setOpen(true)} style={{ fontSize: 24, color: "#4A4238", lineHeight: 1 }} aria-label="Open menu">☰</button>
       </div>
 
       {/* ── Mobile drawer overlay ── */}
@@ -246,11 +246,12 @@ export function Sidebar() {
           <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setOpen(false)} />
           <aside
             className="relative flex flex-col w-72 h-full"
-            style={{ background: "linear-gradient(180deg, #2d3148 0%, #353a56 100%)" }}
+            style={{ background: "#FAF5EC" }}
           >
             <button
               onClick={() => setOpen(false)}
-              className="absolute top-4 right-4 text-white text-xl opacity-60 hover:opacity-100 transition"
+              className="absolute top-4 right-4 text-xl opacity-50 hover:opacity-100 transition"
+              style={{ color: "#4A4238" }}
               aria-label="Close menu"
             >✕</button>
             <NavContent pathname={pathname} onNavigate={() => setOpen(false)} />
