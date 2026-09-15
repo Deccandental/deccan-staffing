@@ -15,6 +15,8 @@ import {
   loadCreditCards, updateStatementBalance,
   loadCardCharges, addCardCharge, updateCardCharge, deleteCardCharge,
   loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview, deleteWeeklyReview,
+  loadDentalMonthlyHistory, backfillDentalMonth, deleteDentalMonthlyEntry, DentalMonthlyEntry,
+  loadDentalMonthlySummaries, saveDentalMonthlySummary, deleteDentalMonthlySummary, DentalMonthlySummary,
   buildOccurrences, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
   computeAccountForecast, computeSuggestedTransfer, computeCardRecommendation, computeRequiredCollections,
 } from "@/lib/cashflow";
@@ -1122,7 +1124,7 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const [backfillAmount, setBackfillAmount] = useState("");
   const [backfillConfirmation, setBackfillConfirmation] = useState<string | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
-  const [dentalBackfillDate, setDentalBackfillDate] = useState(todayStr());
+  const [dentalBackfillMonth, setDentalBackfillMonth] = useState(new Date().toISOString().slice(0, 7));
   const [dentalBackfillProduction, setDentalBackfillProduction] = useState("");
   const [dentalBackfillIncome, setDentalBackfillIncome] = useState("");
   const [dentalBackfillPatientIncome, setDentalBackfillPatientIncome] = useState("");
@@ -1130,19 +1132,19 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const [dentalBackfillError, setDentalBackfillError] = useState<string | null>(null);
   const [statementHistories, setStatementHistories] = useState<Record<string, CardStatementEntry[]>>({});
   const [bankStatementHistories, setBankStatementHistories] = useState<Record<string, BankStatementEntry[]>>({});
-  const [reviewHistory, setReviewHistory] = useState<WeeklyCashReview[]>([]);
+  const [dentalMonthlyHistory, setDentalMonthlyHistory] = useState<DentalMonthlyEntry[]>([]);
   const [depthView, setDepthView] = useState<string | null>(null); // 'cardStatement' | 'dental' | null
 
   async function loadAll() {
-    const [statementHists, reviews, bankHists] = await Promise.all([
+    const [statementHists, dentalHistory, bankHists] = await Promise.all([
       Promise.all(cards.map((c) => loadStatementHistoryForCard(c.id))),
-      loadWeeklyReviewHistory(52),
+      loadDentalMonthlyHistory(),
       Promise.all(cashAccounts.map((a) => loadStatementHistoryForAccount(a.id))),
     ]);
     const stmtMap: Record<string, CardStatementEntry[]> = {};
     cards.forEach((c, i) => { stmtMap[c.id] = statementHists[i]; });
     setStatementHistories(stmtMap);
-    setReviewHistory(reviews);
+    setDentalMonthlyHistory(dentalHistory);
     const bankMap: Record<string, BankStatementEntry[]> = {};
     cashAccounts.forEach((a, i) => { bankMap[a.id] = bankHists[i]; });
     setBankStatementHistories(bankMap);
@@ -1200,16 +1202,16 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     const production = dentalBackfillProduction ? Number(dentalBackfillProduction) : null;
     const income = dentalBackfillIncome ? Number(dentalBackfillIncome) : null;
     const patientIncome = dentalBackfillPatientIncome ? Number(dentalBackfillPatientIncome) : null;
-    if (!dentalBackfillDate || (production == null && income == null && patientIncome == null)) return;
-    const result = await saveWeeklyReview({ reviewDate: dentalBackfillDate, projectedTotalProduction: production, currentIncome: income, currentPatientIncome: patientIncome, notes: "" });
+    if (!dentalBackfillMonth || (production == null && income == null && patientIncome == null)) return;
+    const result = await backfillDentalMonth(dentalBackfillMonth, production, income, patientIncome);
     if (!result.ok) {
       setDentalBackfillError(result.error ?? "Save failed.");
       setDentalBackfillConfirmation(null);
       return;
     }
     setDentalBackfillError(null);
-    const dateLabel = new Date(dentalBackfillDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-    setDentalBackfillConfirmation(`✓ Saved Open Dental numbers for ${dateLabel}`);
+    const monthLabel = new Date(dentalBackfillMonth + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    setDentalBackfillConfirmation(`✓ Saved Open Dental numbers for ${monthLabel}`);
     setDentalBackfillProduction("");
     setDentalBackfillIncome("");
     setDentalBackfillPatientIncome("");
@@ -1219,7 +1221,7 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
 
   async function handleDeleteDentalEntry(id: string) {
     if (!confirm("Delete this Open Dental entry? This can't be undone.")) return;
-    await deleteWeeklyReview(id);
+    await deleteDentalMonthlyEntry(id);
     await loadAll();
   }
 
@@ -1233,22 +1235,10 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     points: [...(bankStatementHistories[a.id] ?? [])].reverse().map((e) => ({ date: e.month, value: e.balance })),
   }));
 
-  // Weekly reviews get collapsed to one point per month — the latest review
-  // within that month — so the chart reads as a monthly trend, not a noisy
-  // weekly zigzag.
-  function monthlyFromReviews(field: "projectedTotalProduction" | "currentIncome"): { date: string; value: number }[] {
-    const byMonth = new Map<string, WeeklyCashReview>();
-    for (const r of reviewHistory) {
-      if (r[field] == null) continue;
-      const month = r.reviewDate.slice(0, 7);
-      const existing = byMonth.get(month);
-      if (!existing || r.reviewDate > existing.reviewDate) byMonth.set(month, r);
-    }
-    return Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([month, r]) => ({ date: month, value: r[field] as number }));
-  }
+  const sortedDentalHistory = [...dentalMonthlyHistory].sort((a, b) => a.month.localeCompare(b.month));
   const dentalSeries = [
-    { label: "Projected Production", color: CHART_COLORS[0], points: monthlyFromReviews("projectedTotalProduction") },
-    { label: "Current Income", color: CHART_COLORS[1], points: monthlyFromReviews("currentIncome") },
+    { label: "Projected Production", color: CHART_COLORS[0], points: sortedDentalHistory.filter((e) => e.projectedTotalProduction != null).map((e) => ({ date: e.month, value: e.projectedTotalProduction as number })) },
+    { label: "Current Income", color: CHART_COLORS[1], points: sortedDentalHistory.filter((e) => e.currentIncome != null).map((e) => ({ date: e.month, value: e.currentIncome as number })) },
   ];
 
   return (
@@ -1347,11 +1337,11 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
 
       <div className="rounded-2xl bg-white shadow p-5">
         <h2 className="font-bold text-slate-700 mb-1">Add / Backfill Open Dental Numbers</h2>
-        <p className="text-sm text-slate-500 mb-4">Enter production and income figures for any date, past or present — this is the same record used by the Update Numbers tab, so entries there and here reconcile automatically.</p>
+        <p className="text-sm text-slate-500 mb-4">Enter the official figures for any month, past or present. This is a separate historical record from the day-to-day running numbers on Update Numbers — one won't overwrite the other.</p>
         <div className="grid gap-3 sm:grid-cols-4 mb-3">
           <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Date</label>
-            <input type="date" value={dentalBackfillDate} onChange={(e) => setDentalBackfillDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Month</label>
+            <input type="month" value={dentalBackfillMonth} onChange={(e) => setDentalBackfillMonth(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
           <div>
             <label className="block text-sm text-slate-800 font-semibold mb-1">Projected Total Production</label>
@@ -1379,16 +1369,16 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
         <TrendLineChart series={dentalSeries} />
         {depthView === "dental" && (
           <div className="mt-3 space-y-1 max-h-60 overflow-y-auto">
-            {reviewHistory.map((r) => (
-              <div key={r.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
-                <span className="text-slate-600">{new Date(r.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+            {[...dentalMonthlyHistory].sort((a, b) => b.month.localeCompare(a.month)).map((e) => (
+              <div key={e.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
+                <span className="text-slate-600">{new Date(e.month + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
                 <span className="flex items-center gap-2 text-xs text-slate-400">
                   <span>
-                    {r.projectedTotalProduction != null ? `Prod: $${formatMoney(r.projectedTotalProduction)}` : ""}
-                    {r.currentIncome != null ? ` · Income: $${formatMoney(r.currentIncome)}` : ""}
-                    {r.currentPatientIncome != null && r.currentIncome != null ? ` · Insurance: $${formatMoney(r.currentIncome - r.currentPatientIncome)}` : ""}
+                    {e.projectedTotalProduction != null ? `Prod: $${formatMoney(e.projectedTotalProduction)}` : ""}
+                    {e.currentIncome != null ? ` · Income: $${formatMoney(e.currentIncome)}` : ""}
+                    {e.currentPatientIncome != null && e.currentIncome != null ? ` · Insurance: $${formatMoney(e.currentIncome - e.currentPatientIncome)}` : ""}
                   </span>
-                  <button onClick={() => handleDeleteDentalEntry(r.id)} className="text-red-400 hover:underline">Delete</button>
+                  <button onClick={() => handleDeleteDentalEntry(e.id)} className="text-red-400 hover:underline">Delete</button>
                 </span>
               </div>
             ))}
