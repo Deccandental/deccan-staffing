@@ -1,175 +1,192 @@
 import { supabase } from "./supabase";
 
-export type CertOwnerType = "personnel" | "business";
+export type RequiredCertRole = "Dentist" | "RDA" | "Hygienist" | "Specialist" | "Assistant";
+export type RequiredCertKind = "license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours";
+export type RequiredCertDateMode = "expiration" | "completion" | "none";
 
-export interface Certification {
+export interface RequiredCertType {
   id: string;
-  ownerType: CertOwnerType;
-  employeeId: number | null;
   title: string;
-  expirationDate: string | null; // YYYY-MM-DD, or null if this cert never expires
-  ceHours: number | null; // optional — CE credit this document carries, if any
-  fileUrl: string;
-  fileName: string;
-  remindersSent: Record<string, boolean | string>;
-  createdAt: string;
+  appliesToRole: RequiredCertRole;
+  kind: RequiredCertKind;
+  frequencyMonths: number;
+  sortOrder: number;
+  dateMode: RequiredCertDateMode;
+  targetHours: number | null;
 }
 
-export interface NewCertInput {
-  ownerType: CertOwnerType;
-  employeeId: number | null;
-  title: string;
-  expirationDate: string | null;
-  ceHours?: number | null;
-  fileUrl: string;
-  fileName: string;
-}
-
-function fromRow(row: any): Certification {
+function fromTypeRow(row: any): RequiredCertType {
   return {
-    id: row.id,
-    ownerType: row.owner_type,
-    employeeId: row.employee_id ?? null,
-    title: row.title,
-    expirationDate: row.expiration_date ?? null,
-    ceHours: row.ce_hours ?? null,
-    fileUrl: row.file_url,
-    fileName: row.file_name ?? "",
-    remindersSent: row.reminders_sent ?? {},
-    createdAt: row.created_at,
+    id: row.id, title: row.title, appliesToRole: row.applies_to_role,
+    kind: row.kind, frequencyMonths: row.frequency_months, sortOrder: row.sort_order ?? 0,
+    targetHours: row.target_hours ?? null,
+    dateMode: row.date_mode ?? "expiration",
   };
 }
 
-// Distinct document names already on file, so the form can offer them as a
-// dropdown instead of free text — keeps "CPR Certification" from also
-// showing up as "CPR Cert" or "cpr certification" elsewhere.
-export async function loadDistinctTitles(): Promise<string[]> {
-  const { data, error } = await supabase.from("certifications").select("title");
-  if (error) { console.error("loadDistinctTitles error:", error); return []; }
-  const set = new Set<string>((data ?? []).map((r: any) => r.title).filter(Boolean));
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
+export async function loadRequiredCertTypes(): Promise<RequiredCertType[]> {
+  const { data, error } = await supabase.from("required_cert_types").select("*").order("applies_to_role").order("sort_order");
+  if (error) { console.error("loadRequiredCertTypes error:", error); return []; }
+  return (data ?? []).map(fromTypeRow);
 }
 
-const MAX_FILE_SIZE_MB = 10;
-const MAX_IMAGE_DIMENSION = 1600;
-const IMAGE_JPEG_QUALITY = 0.8;
-
-// Resizes an image down to MAX_IMAGE_DIMENSION on its longest edge and
-// re-encodes it as a JPEG at IMAGE_JPEG_QUALITY. This is what keeps a
-// full-resolution phone photo of a cert from eating up storage. If the
-// browser can't decode the image (e.g. some HEIC cases), the caller falls
-// back to uploading the original file untouched.
-async function compressImage(file: File): Promise<File> {
-  const bitmap = await createImageBitmap(file);
-  let { width, height } = bitmap;
-  if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
-    if (width > height) {
-      height = Math.round(height * (MAX_IMAGE_DIMENSION / width));
-      width = MAX_IMAGE_DIMENSION;
-    } else {
-      width = Math.round(width * (MAX_IMAGE_DIMENSION / height));
-      height = MAX_IMAGE_DIMENSION;
-    }
-  }
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas not supported");
-  ctx.drawImage(bitmap, 0, 0, width, height);
-  const blob: Blob = await new Promise((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Image encoding failed"))), "image/jpeg", IMAGE_JPEG_QUALITY);
+export async function createRequiredCertType(input: Omit<RequiredCertType, "id">): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("required_cert_types").insert({
+    title: input.title, applies_to_role: input.appliesToRole, kind: input.kind,
+    frequency_months: input.frequencyMonths, sort_order: input.sortOrder, date_mode: input.dateMode, target_hours: input.targetHours,
   });
-  const newName = file.name.replace(/\.[^/.]+$/, "") + ".jpg";
-  return new File([blob], newName, { type: "image/jpeg" });
+  if (error) { console.error("createRequiredCertType error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
 }
 
-// Uploads the file to the public "certificates" Storage bucket under a
-// unique name, and returns its public URL plus the original filename for
-// display. Image files are compressed first to keep storage usage down;
-// other files (PDFs, etc.) are capped at MAX_FILE_SIZE_MB instead, since
-// real client-side PDF compression isn't practical here.
-export async function uploadCertFile(file: File): Promise<{ url: string; name: string } | { error: string }> {
-  let toUpload = file;
-  const originalName = file.name;
-
-  if (file.type.startsWith("image/")) {
-    try {
-      toUpload = await compressImage(file);
-    } catch (err) {
-      console.error("compressImage error, falling back to original file:", err);
-      toUpload = file;
-    }
-  }
-
-  if (toUpload.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-    return { error: `That file is too large (max ${MAX_FILE_SIZE_MB}MB). Please use a smaller file.` };
-  }
-
-  const ext = toUpload.name.includes(".") ? toUpload.name.split(".").pop() : "";
-  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext ? `.${ext}` : ""}`;
-  const { error } = await supabase.storage.from("Certificates").upload(path, toUpload);
-  if (error) { console.error("uploadCertFile error:", error); return { error: "Upload failed. Please try again." }; }
-  const { data } = supabase.storage.from("Certificates").getPublicUrl(path);
-  return { url: data.publicUrl, name: originalName };
+// Renaming here does NOT rename existing certifications/CE entries that
+// reference the old title — see renameRequiredCertType for the version that
+// also updates matching certification records.
+export async function updateRequiredCertType(id: string, updates: Partial<Omit<RequiredCertType, "id">>): Promise<{ ok: boolean; error?: string }> {
+  const payload: any = {};
+  if (updates.title !== undefined) payload.title = updates.title;
+  if (updates.appliesToRole !== undefined) payload.applies_to_role = updates.appliesToRole;
+  if (updates.kind !== undefined) payload.kind = updates.kind;
+  if (updates.frequencyMonths !== undefined) payload.frequency_months = updates.frequencyMonths;
+  if (updates.sortOrder !== undefined) payload.sort_order = updates.sortOrder;
+  if (updates.dateMode !== undefined) payload.date_mode = updates.dateMode;
+  if (updates.targetHours !== undefined) payload.target_hours = updates.targetHours;
+  const { error } = await supabase.from("required_cert_types").update(payload).eq("id", id);
+  if (error) { console.error("updateRequiredCertType error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
 }
 
-export async function loadAllCertifications(): Promise<Certification[]> {
-  const { data, error } = await supabase.from("certifications").select("*").order("expiration_date");
-  if (error) { console.error("loadAllCertifications error:", error); return []; }
-  return (data ?? []).map(fromRow);
+// Renames a required type AND updates every certification record that used
+// the old title, so existing per-employee entries don't get orphaned —
+// this is what lets you fix a misnamed title without re-adding everyone's data.
+export async function renameRequiredCertType(id: string, oldTitle: string, newTitle: string): Promise<{ ok: boolean; error?: string }> {
+  const { error: e1 } = await supabase.from("required_cert_types").update({ title: newTitle }).eq("id", id);
+  if (e1) { console.error("renameRequiredCertType error:", e1); return { ok: false, error: e1.message }; }
+  const { error: e2 } = await supabase.from("certifications").update({ title: newTitle }).eq("title", oldTitle);
+  if (e2) { console.error("renameRequiredCertType (certifications) error:", e2); return { ok: false, error: e2.message }; }
+  return { ok: true };
 }
 
-export async function loadCertificationsForEmployee(employeeId: number): Promise<Certification[]> {
-  const { data, error } = await supabase
-    .from("certifications")
-    .select("*")
-    .eq("owner_type", "personnel")
-    .eq("employee_id", employeeId)
-    .order("expiration_date");
-  if (error) { console.error("loadCertificationsForEmployee error:", error); return []; }
-  return (data ?? []).map(fromRow);
+export async function deleteRequiredCertType(id: string): Promise<void> {
+  const { error } = await supabase.from("required_cert_types").delete().eq("id", id);
+  if (error) console.error("deleteRequiredCertType error:", error);
 }
 
-export async function createCertification(input: NewCertInput): Promise<Certification | null> {
-  const { data, error } = await supabase
-    .from("certifications")
-    .insert({
-      owner_type: input.ownerType,
-      employee_id: input.employeeId,
-      title: input.title,
-      expiration_date: input.expirationDate,
-      ce_hours: input.ceHours ?? null,
-      file_url: input.fileUrl,
-      file_name: input.fileName,
-    })
-    .select()
-    .single();
-  if (error) { console.error("createCertification error:", error); return null; }
-  return fromRow(data);
+// ---------------- CE course entries (logged, not certificate files) ----------------
+
+export interface CeCourseEntry {
+  id: string;
+  employeeId: number;
+  requiredCertTypeId: string;
+  courseName: string;
+  hours: number;
+  dateCompleted: string;
 }
 
-export async function updateCertification(id: string, input: NewCertInput): Promise<Certification | null> {
-  const { data: existing } = await supabase.from("certifications").select("expiration_date").eq("id", id).single();
-  const dateChanged = existing && existing.expiration_date !== input.expirationDate;
-
-  const update: Record<string, any> = {
-    owner_type: input.ownerType,
-    employee_id: input.employeeId,
-    title: input.title,
-    expiration_date: input.expirationDate,
-    ce_hours: input.ceHours ?? null,
-    file_url: input.fileUrl,
-    file_name: input.fileName,
+function fromCeRow(row: any): CeCourseEntry {
+  return {
+    id: row.id, employeeId: row.employee_id, requiredCertTypeId: row.required_cert_type_id,
+    courseName: row.course_name, hours: row.hours, dateCompleted: row.date_completed,
   };
-  if (dateChanged) update.reminders_sent = {};
-
-  const { data, error } = await supabase.from("certifications").update(update).eq("id", id).select().single();
-  if (error) { console.error("updateCertification error:", error); return null; }
-  return fromRow(data);
 }
 
-export async function deleteCertification(id: string): Promise<void> {
-  const { error } = await supabase.from("certifications").delete().eq("id", id);
-  if (error) console.error("deleteCertification error:", error);
+export async function loadCeCourseEntriesForEmployee(employeeId: number): Promise<CeCourseEntry[]> {
+  const { data, error } = await supabase.from("ce_course_entries").select("*").eq("employee_id", employeeId).order("date_completed", { ascending: false });
+  if (error) { console.error("loadCeCourseEntriesForEmployee error:", error); return []; }
+  return (data ?? []).map(fromCeRow);
+}
+
+export async function loadAllCeCourseEntries(): Promise<CeCourseEntry[]> {
+  const { data, error } = await supabase.from("ce_course_entries").select("*").order("date_completed", { ascending: false });
+  if (error) { console.error("loadAllCeCourseEntries error:", error); return []; }
+  return (data ?? []).map(fromCeRow);
+}
+
+export async function addCeCourseEntry(input: Omit<CeCourseEntry, "id">): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("ce_course_entries").insert({
+    employee_id: input.employeeId, required_cert_type_id: input.requiredCertTypeId,
+    course_name: input.courseName, hours: input.hours, date_completed: input.dateCompleted,
+  });
+  if (error) { console.error("addCeCourseEntry error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
+export async function deleteCeCourseEntry(id: string): Promise<void> {
+  const { error } = await supabase.from("ce_course_entries").delete().eq("id", id);
+  if (error) console.error("deleteCeCourseEntry error:", error);
+}
+
+// ---------------- Status computation ----------------
+
+export interface RequiredCertStatus {
+  type: RequiredCertType;
+  // For license/standalone kinds:
+  expirationDate: string | null;
+  // For ce_hours kind:
+  totalHoursInWindow: number;
+  windowStart: string | null;
+  windowEnd: string | null; // the linked license's expiration date
+  satisfied: boolean; // true for license/standalone if not expired; true for ce_hours if any entry falls in the window; true for total_ce_hours/one_time_ce if target reached
+  missingLicense: boolean; // ce_hours/total_ce_hours only: true if the role's license has no expiration date on file yet, so the window can't be computed
+  targetHours: number | null;
+}
+
+export function addMonths(dateStr: string, months: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(y, m - 1 + months, d);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+export function computeRequiredCertStatuses(
+  role: RequiredCertRole[],
+  types: RequiredCertType[],
+  allCerts: { title: string; expirationDate: string | null; ceHours: number | null; createdAt: string }[],
+  ceEntries: CeCourseEntry[],
+  today: string
+): RequiredCertStatus[] {
+  const relevant = types.filter((t) => role.includes(t.appliesToRole));
+  const certsByTitle = new Map(allCerts.map((c) => [c.title, c]));
+  // For ce_hours/total_ce_hours items, find this role's license expiration to anchor the window.
+  const licenseType = types.find((t) => t.kind === "license" && role.includes(t.appliesToRole));
+  const licenseExpiration = licenseType ? certsByTitle.get(licenseType.title)?.expirationDate ?? null : null;
+
+  return relevant.map((type) => {
+    if (type.kind === "ce_hours") {
+      if (!licenseExpiration) {
+        return { type, expirationDate: null, totalHoursInWindow: 0, windowStart: null, windowEnd: null, satisfied: false, missingLicense: true, targetHours: type.targetHours };
+      }
+      const windowStart = addMonths(licenseExpiration, -type.frequencyMonths);
+      const entries = ceEntries.filter((e) => e.requiredCertTypeId === type.id && e.dateCompleted >= windowStart && e.dateCompleted <= licenseExpiration);
+      const totalHours = entries.reduce((sum, e) => sum + e.hours, 0);
+      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration, satisfied: entries.length > 0, missingLicense: false, targetHours: type.targetHours };
+    }
+    if (type.kind === "total_ce_hours") {
+      if (!licenseExpiration) {
+        return { type, expirationDate: null, totalHoursInWindow: 0, windowStart: null, windowEnd: null, satisfied: false, missingLicense: true, targetHours: type.targetHours };
+      }
+      const windowStart = addMonths(licenseExpiration, -type.frequencyMonths);
+      // Sum every logged CE course for any ce_hours-kind requirement on this
+      // role, plus the optional ce_hours value on any certification record
+      // (matched by when it was entered, as a proxy for completion date).
+      const ceHourTypeIds = new Set(types.filter((t) => t.kind === "ce_hours" && role.includes(t.appliesToRole)).map((t) => t.id));
+      const loggedHours = ceEntries.filter((e) => ceHourTypeIds.has(e.requiredCertTypeId) && e.dateCompleted >= windowStart && e.dateCompleted <= licenseExpiration).reduce((sum, e) => sum + e.hours, 0);
+      const certHours = allCerts.filter((c) => c.ceHours != null && c.createdAt.slice(0, 10) >= windowStart && c.createdAt.slice(0, 10) <= licenseExpiration).reduce((sum, c) => sum + (c.ceHours ?? 0), 0);
+      const totalHours = loggedHours + certHours;
+      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration, satisfied: type.targetHours != null && totalHours >= type.targetHours, missingLicense: false, targetHours: type.targetHours };
+    }
+    if (type.kind === "one_time_ce") {
+      // Never expires, never resets — just checks whether enough hours have
+      // ever been logged against this specific requirement, all-time.
+      const entries = ceEntries.filter((e) => e.requiredCertTypeId === type.id);
+      const totalHours = entries.reduce((sum, e) => sum + e.hours, 0);
+      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart: null, windowEnd: null, satisfied: type.targetHours != null && totalHours >= type.targetHours, missingLicense: false, targetHours: type.targetHours };
+    }
+    // license or standalone: driven by a matching certification record.
+    const cert = certsByTitle.get(type.title);
+    const expirationDate = cert?.expirationDate ?? null;
+    // A cert marked "never expires" (dateMode 'none') is satisfied as long as
+    // it's on file at all — no expiration date is expected or computed for it.
+    const satisfied = type.dateMode === "none" ? !!cert : !!expirationDate && expirationDate >= today;
+    return { type, expirationDate, totalHoursInWindow: 0, windowStart: null, windowEnd: null, satisfied, missingLicense: false, targetHours: type.targetHours };
+  });
 }
