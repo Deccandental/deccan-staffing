@@ -6,14 +6,14 @@ import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
 import {
   Certification, NewCertInput, CertOwnerType,
-  loadAllCertifications, loadCertificationsForEmployee, loadDistinctTitles,
+  loadAllCertifications, loadCertificationsForEmployee,
   createCertification, updateCertification, deleteCertification, uploadCertFile,
 } from "@/lib/certsStore";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 import {
   RequiredCertType, RequiredCertRole, RequiredCertStatus, CeCourseEntry,
   loadRequiredCertTypes, createRequiredCertType, renameRequiredCertType, updateRequiredCertType, deleteRequiredCertType,
-  loadAllCeCourseEntries, loadCeCourseEntriesForEmployee, addCeCourseEntry, deleteCeCourseEntry, computeRequiredCertStatuses,
+  loadAllCeCourseEntries, loadCeCourseEntriesForEmployee, addCeCourseEntry, deleteCeCourseEntry, computeRequiredCertStatuses, addMonths,
 } from "@/lib/requiredCertsStore";
 
 interface FormState {
@@ -186,6 +186,10 @@ function RequiredCertsSection({
   const [ceDate, setCeDate] = useState(new Date().toISOString().slice(0, 10));
   const [ceError, setCeError] = useState<string | null>(null);
   const [expandedTypeId, setExpandedTypeId] = useState<string | null>(null);
+  const [completingTypeId, setCompletingTypeId] = useState<string | null>(null);
+  const [completionDate, setCompletionDate] = useState(new Date().toISOString().slice(0, 10));
+  const [completionError, setCompletionError] = useState<string | null>(null);
+  const [completionSaving, setCompletionSaving] = useState(false);
 
   const roles = getApplicableRoles(employee);
   if (roles.length === 0) return null;
@@ -210,6 +214,19 @@ function RequiredCertsSection({
   async function handleDeleteCe(id: string) {
     if (!confirm("Delete this CE course entry?")) return;
     await deleteCeCourseEntry(id);
+    await refreshAll();
+  }
+
+  async function handleSaveCompletion(type: RequiredCertType, existing?: Certification) {
+    if (!completionDate) { setCompletionError("Please enter a completion date."); return; }
+    setCompletionSaving(true);
+    const expirationDate = addMonths(completionDate, type.frequencyMonths);
+    const input: NewCertInput = { ownerType: "personnel", employeeId: employee.id, title: type.title, expirationDate, fileUrl: existing?.fileUrl ?? "", fileName: existing?.fileName ?? "" };
+    const saved = existing ? await updateCertification(existing.id, input) : await createCertification(input);
+    setCompletionSaving(false);
+    if (!saved) { setCompletionError("Failed to save — please try again."); return; }
+    setCompletionError(null);
+    setCompletingTypeId(null);
     await refreshAll();
   }
 
@@ -272,6 +289,38 @@ function RequiredCertsSection({
           // license or standalone
           const expired = existingCert?.expirationDate ? existingCert.expirationDate < today : null;
           const expiringSoon = existingCert?.expirationDate ? daysUntil(existingCert.expirationDate) <= 30 && !expired : false;
+          if (type.dateMode === "completion") {
+            return (
+              <div key={type.id} className="rounded-lg bg-slate-50 p-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="font-semibold text-sm text-slate-700">{type.title}</span>
+                    {existingCert?.expirationDate ? (
+                      <span className={`ml-2 text-xs font-semibold ${expired ? "text-red-600" : expiringSoon ? "text-amber-600" : "text-emerald-600"}`}>
+                        {expired ? "⚠️ Expired" : expiringSoon ? "⚠️ Expiring soon" : "✓"} — expires {new Date(existingCert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-xs font-semibold text-red-600">⚠️ Not on file</span>
+                    )}
+                  </div>
+                  <button onClick={() => { setCompletingTypeId(completingTypeId === type.id ? null : type.id); setCompletionError(null); }} className="text-xs font-semibold text-orange-500 hover:underline">
+                    {completingTypeId === type.id ? "Cancel" : existingCert ? "Update" : "+ Add"}
+                  </button>
+                </div>
+                {completingTypeId === type.id && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <label className="text-xs text-slate-500">Date completed:</label>
+                    <input type="date" value={completionDate} onChange={(e) => setCompletionDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                    <span className="text-xs text-slate-400">→ expires {new Date(addMonths(completionDate, type.frequencyMonths) + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                    <button onClick={() => handleSaveCompletion(type, existingCert)} disabled={completionSaving} className="rounded-lg px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                      {completionSaving ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                )}
+                {completionError && <p className="text-xs text-red-600 mt-1">{completionError}</p>}
+              </div>
+            );
+          }
           return (
             <div key={type.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
               <div>
@@ -300,6 +349,7 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
   const [newTitle, setNewTitle] = useState("");
   const [newRole, setNewRole] = useState<RequiredCertRole>("Dentist");
   const [newKind, setNewKind] = useState<"license" | "ce_hours" | "standalone">("standalone");
+  const [newDateMode, setNewDateMode] = useState<"expiration" | "completion">("completion");
   const [newFrequency, setNewFrequency] = useState("24");
   const [error, setError] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -310,6 +360,7 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
     const result = await createRequiredCertType({
       title: newTitle.trim(), appliesToRole: newRole, kind: newKind,
       frequencyMonths: Number(newFrequency) || 24, sortOrder: requiredTypes.filter((t) => t.appliesToRole === newRole).length + 1,
+      dateMode: newDateMode,
     });
     if (!result.ok) { setError(result.error ?? "Failed to add."); return; }
     setError(null);
@@ -326,6 +377,12 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
     await refreshAll();
   }
 
+  async function handleToggleDateMode(type: RequiredCertType) {
+    const newMode = type.dateMode === "expiration" ? "completion" : "expiration";
+    await updateRequiredCertType(type.id, { dateMode: newMode });
+    await refreshAll();
+  }
+
   async function handleDelete(id: string) {
     if (!confirm("Delete this required type? This won't delete any existing certifications or CE entries, but staff will stop being tracked against it.")) return;
     await deleteRequiredCertType(id);
@@ -337,16 +394,22 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
   return (
     <div className="rounded-2xl bg-white p-5 shadow">
       <h3 className="font-bold text-slate-700 mb-3">Manage Required Certificate Types</h3>
-      <div className="grid gap-2 sm:grid-cols-5 mb-3">
+      <div className="grid gap-2 sm:grid-cols-6 mb-3">
         <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Title" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
         <select value={newRole} onChange={(e) => setNewRole(e.target.value as RequiredCertRole)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
           {roles.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
         <select value={newKind} onChange={(e) => setNewKind(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
           <option value="license">License (expiration date)</option>
-          <option value="standalone">Standalone cert (expiration date)</option>
+          <option value="standalone">Standalone cert</option>
           <option value="ce_hours">CE hours (logged courses)</option>
         </select>
+        {newKind !== "ce_hours" && (
+          <select value={newDateMode} onChange={(e) => setNewDateMode(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+            <option value="expiration">Enter expiration date</option>
+            <option value="completion">Enter completion date (auto-computes expiration)</option>
+          </select>
+        )}
         <input type="number" value={newFrequency} onChange={(e) => setNewFrequency(e.target.value)} placeholder="Months" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
       </div>
       <button onClick={handleAdd} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition mb-4" style={{ backgroundColor: "#e8622a" }}>+ Add Required Type</button>
@@ -365,9 +428,17 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
               <>
                 <span className="text-slate-700">
                   <strong>{type.title}</strong>
-                  <span className="text-xs text-slate-400 ml-2">{type.appliesToRole} · {type.kind === "ce_hours" ? "CE hours" : type.kind === "license" ? "License" : "Standalone"} · every {type.frequencyMonths}mo</span>
+                  <span className="text-xs text-slate-400 ml-2">
+                    {type.appliesToRole} · {type.kind === "ce_hours" ? "CE hours" : type.kind === "license" ? "License" : "Standalone"} · every {type.frequencyMonths}mo
+                    {type.kind !== "ce_hours" && ` · ${type.dateMode === "completion" ? "completion date (auto-expires)" : "expiration date"}`}
+                  </span>
                 </span>
                 <span className="flex items-center gap-3">
+                  {type.kind !== "ce_hours" && (
+                    <button onClick={() => handleToggleDateMode(type)} className="text-xs text-blue-500 hover:underline">
+                      Use {type.dateMode === "completion" ? "expiration" : "completion"} date
+                    </button>
+                  )}
                   <button onClick={() => { setRenamingId(type.id); setRenameValue(type.title); }} className="text-xs text-orange-500 hover:underline">Rename</button>
                   <button onClick={() => handleDelete(type.id)} className="text-xs text-red-400 hover:underline">Delete</button>
                 </span>
@@ -405,8 +476,6 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
   async function refresh() {
     const s = await loadStaff();
     setStaff(s);
-    const titles = await loadDistinctTitles();
-    setTitleOptions(titles);
     if (identity.mode === "staff" && identity.employeeId != null) {
       const mine = await loadCertificationsForEmployee(identity.employeeId);
       setMyCerts(mine);
@@ -417,6 +486,11 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
     }
     const types = await loadRequiredCertTypes();
     setRequiredTypes(types);
+    // The dropdown offers the standardized required titles only, rather than
+    // every distinct title ever typed — this is what makes it easy to rename
+    // a mismatched existing entry to the correct standard name.
+    const standardTitles = Array.from(new Set(types.map((t) => t.title))).sort((a, b) => a.localeCompare(b));
+    setTitleOptions(standardTitles);
     const ce = await loadAllCeCourseEntries();
     setAllCeEntries(ce);
   }
