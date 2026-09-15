@@ -22,6 +22,7 @@ interface FormState {
   employeeId: string;
   title: string;
   expirationDate: string; // empty string = no expiration
+  ceHours: string; // empty string = no CE credit entered
 }
 
 const EMPTY_FORM: FormState = {
@@ -29,6 +30,7 @@ const EMPTY_FORM: FormState = {
   employeeId: "",
   title: "",
   expirationDate: "",
+  ceHours: "",
 };
 
 // Which required-cert roles apply to this employee — a specialty dentist
@@ -153,6 +155,12 @@ function CertForm({
         )}
       </div>
 
+      <div className="mb-4">
+        <label className="block text-xs font-semibold text-slate-500 mb-1">CE Credits Earned (optional — counts toward the overall CE hours total)</label>
+        <input type="number" onFocus={(e) => e.target.select()} value={form.ceHours} onChange={(e) => setForm((f) => ({ ...f, ceHours: e.target.value }))}
+          placeholder="e.g. 4" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+      </div>
+
       <div className="mb-5">
         <label className="block text-xs font-semibold text-slate-500 mb-1">
           Certificate File {editingId ? "(optional — leave blank to keep existing file)" : ""}
@@ -178,9 +186,10 @@ function CertForm({
 function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes: RequiredCertType[]; refreshAll: () => void }) {
   const [newTitle, setNewTitle] = useState("");
   const [newRole, setNewRole] = useState<RequiredCertRole>("Dentist");
-  const [newKind, setNewKind] = useState<"license" | "ce_hours" | "standalone">("standalone");
+  const [newKind, setNewKind] = useState<"license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours">("standalone");
   const [newDateMode, setNewDateMode] = useState<"expiration" | "completion">("completion");
   const [newFrequency, setNewFrequency] = useState("24");
+  const [newTargetHours, setNewTargetHours] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -190,11 +199,12 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
     const result = await createRequiredCertType({
       title: newTitle.trim(), appliesToRole: newRole, kind: newKind,
       frequencyMonths: Number(newFrequency) || 24, sortOrder: requiredTypes.filter((t) => t.appliesToRole === newRole).length + 1,
-      dateMode: newDateMode,
+      dateMode: newDateMode, targetHours: newTargetHours ? Number(newTargetHours) : null,
     });
     if (!result.ok) { setError(result.error ?? "Failed to add."); return; }
     setError(null);
     setNewTitle("");
+    setNewTargetHours("");
     await refreshAll();
   }
 
@@ -219,12 +229,12 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
     await refreshAll();
   }
 
-  const roles: RequiredCertRole[] = ["Dentist", "RDA", "Hygienist", "Specialist"];
+  const roles: RequiredCertRole[] = ["Dentist", "RDA", "Hygienist", "Specialist", "Assistant"];
 
   return (
     <div className="rounded-2xl bg-white p-5 shadow">
       <h3 className="font-bold text-slate-700 mb-3">Manage Required Certificate Types</h3>
-      <div className="grid gap-2 sm:grid-cols-6 mb-3">
+      <div className="grid gap-2 sm:grid-cols-7 mb-3">
         <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Title" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
         <select value={newRole} onChange={(e) => setNewRole(e.target.value as RequiredCertRole)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
           {roles.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -233,12 +243,17 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
           <option value="license">License (expiration date)</option>
           <option value="standalone">Standalone cert</option>
           <option value="ce_hours">CE hours (logged courses)</option>
+          <option value="one_time_ce">One-time CE (never expires)</option>
+          <option value="total_ce_hours">Total CE hours (running tally)</option>
         </select>
-        {newKind !== "ce_hours" && (
+        {(newKind === "license" || newKind === "standalone") && (
           <select value={newDateMode} onChange={(e) => setNewDateMode(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
             <option value="expiration">Enter expiration date</option>
             <option value="completion">Enter completion date (auto-computes expiration)</option>
           </select>
+        )}
+        {(newKind === "one_time_ce" || newKind === "total_ce_hours") && (
+          <input type="number" value={newTargetHours} onChange={(e) => setNewTargetHours(e.target.value)} placeholder="Target hrs" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
         )}
         <input type="number" value={newFrequency} onChange={(e) => setNewFrequency(e.target.value)} placeholder="Months" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
       </div>
@@ -259,12 +274,18 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
                 <span className="text-slate-700">
                   <strong>{type.title}</strong>
                   <span className="text-xs text-slate-400 ml-2">
-                    {type.appliesToRole} · {type.kind === "ce_hours" ? "CE hours" : type.kind === "license" ? "License" : "Standalone"} · every {type.frequencyMonths}mo
-                    {type.kind !== "ce_hours" && ` · ${type.dateMode === "completion" ? "completion date (auto-expires)" : "expiration date"}`}
+                    {type.appliesToRole} · {
+                      type.kind === "ce_hours" ? "CE hours" :
+                      type.kind === "license" ? "License" :
+                      type.kind === "one_time_ce" ? `One-time CE (${type.targetHours ?? "?"} hrs)` :
+                      type.kind === "total_ce_hours" ? `Total CE hours (target ${type.targetHours ?? "?"})` :
+                      "Standalone"
+                    } · every {type.frequencyMonths}mo
+                    {(type.kind === "license" || type.kind === "standalone") && ` · ${type.dateMode === "completion" ? "completion date (auto-expires)" : "expiration date"}`}
                   </span>
                 </span>
                 <span className="flex items-center gap-3">
-                  {type.kind !== "ce_hours" && (
+                  {(type.kind === "license" || type.kind === "standalone") && (
                     <button onClick={() => handleToggleDateMode(type)} className="text-xs text-blue-500 hover:underline">
                       Use {type.dateMode === "completion" ? "expiration" : "completion"} date
                     </button>
@@ -345,7 +366,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
 
   function openForRequiredItem(title: string, employeeId: number, existing?: Certification) {
     if (existing) { startEdit(existing); return; }
-    setForm({ ownerType: "personnel", employeeId: String(employeeId), title, expirationDate: "" });
+    setForm({ ownerType: "personnel", employeeId: String(employeeId), title, expirationDate: "", ceHours: "" });
     setEditingId(null);
     setFile(null);
     setError("");
@@ -359,6 +380,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
       employeeId: cert.employeeId != null ? String(cert.employeeId) : "",
       title: cert.title,
       expirationDate: cert.expirationDate ?? "",
+      ceHours: cert.ceHours != null ? String(cert.ceHours) : "",
     });
     setEditingId(cert.id);
     setFile(null);
@@ -407,6 +429,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
       employeeId: form.ownerType === "personnel" ? Number(form.employeeId) : null,
       title: form.title.trim(),
       expirationDate: resolvedExpiration,
+      ceHours: form.ceHours ? Number(form.ceHours) : null,
       fileUrl, fileName,
     };
 
