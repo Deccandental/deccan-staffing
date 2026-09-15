@@ -10,6 +10,7 @@ function fromRow(row: any): Certification {
     employeeId: row.employee_id ?? null,
     title: row.title,
     expirationDate: row.expiration_date ?? null,
+    ceHours: row.ce_hours ?? null,
     fileUrl: row.file_url,
     fileName: row.file_name ?? "",
     remindersSent: row.reminders_sent ?? {},
