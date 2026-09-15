@@ -249,7 +249,9 @@ export function RequiredCertsSection({
             <div key={type.id} className="flex items-center justify-between flex-wrap gap-2 rounded-xl p-3" style={{ background: "#FBF7F1" }}>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-semibold text-sm" style={{ color: "#4A4238" }}>{type.title}</span>
-                {existingCert?.expirationDate ? (
+                {type.dateMode === "none" && existingCert ? (
+                  <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ background: "#EAF3DE", color: "#3B6D11" }}>✓ On file</span>
+                ) : existingCert?.expirationDate ? (
                   <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold" style={statusPillStyle}>
                     {expired ? "Expired" : expiringSoon ? "Expiring soon" : "✓ Current"} — {new Date(existingCert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                   </span>
