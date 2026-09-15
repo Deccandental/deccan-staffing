@@ -2,6 +2,7 @@ import { supabase } from "./supabase";
 
 export type RequiredCertRole = "Dentist" | "RDA" | "Hygienist" | "Specialist";
 export type RequiredCertKind = "license" | "ce_hours" | "standalone";
+export type RequiredCertDateMode = "expiration" | "completion";
 
 export interface RequiredCertType {
   id: string;
@@ -10,12 +11,14 @@ export interface RequiredCertType {
   kind: RequiredCertKind;
   frequencyMonths: number;
   sortOrder: number;
+  dateMode: RequiredCertDateMode;
 }
 
 function fromTypeRow(row: any): RequiredCertType {
   return {
     id: row.id, title: row.title, appliesToRole: row.applies_to_role,
     kind: row.kind, frequencyMonths: row.frequency_months, sortOrder: row.sort_order ?? 0,
+    dateMode: row.date_mode ?? "expiration",
   };
 }
 
@@ -28,7 +31,7 @@ export async function loadRequiredCertTypes(): Promise<RequiredCertType[]> {
 export async function createRequiredCertType(input: Omit<RequiredCertType, "id">): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("required_cert_types").insert({
     title: input.title, applies_to_role: input.appliesToRole, kind: input.kind,
-    frequency_months: input.frequencyMonths, sort_order: input.sortOrder,
+    frequency_months: input.frequencyMonths, sort_order: input.sortOrder, date_mode: input.dateMode,
   });
   if (error) { console.error("createRequiredCertType error:", error); return { ok: false, error: error.message }; }
   return { ok: true };
@@ -44,6 +47,7 @@ export async function updateRequiredCertType(id: string, updates: Partial<Omit<R
   if (updates.kind !== undefined) payload.kind = updates.kind;
   if (updates.frequencyMonths !== undefined) payload.frequency_months = updates.frequencyMonths;
   if (updates.sortOrder !== undefined) payload.sort_order = updates.sortOrder;
+  if (updates.dateMode !== undefined) payload.date_mode = updates.dateMode;
   const { error } = await supabase.from("required_cert_types").update(payload).eq("id", id);
   if (error) { console.error("updateRequiredCertType error:", error); return { ok: false, error: error.message }; }
   return { ok: true };
@@ -123,7 +127,7 @@ export interface RequiredCertStatus {
   missingLicense: boolean; // ce_hours only: true if the role's license has no expiration date on file yet, so the window can't be computed
 }
 
-function addMonths(dateStr: string, months: number): string {
+export function addMonths(dateStr: string, months: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(y, m - 1 + months, d);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
