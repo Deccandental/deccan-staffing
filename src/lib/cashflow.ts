@@ -505,18 +505,12 @@ export async function deleteWeeklyReview(id: string): Promise<void> {
 export interface DentalMonthlyEntry {
   id: string;
   month: string; // YYYY-MM
-  projectedTotalProduction: number | null;
-  currentIncome: number | null;
-  currentPatientIncome: number | null;
+  netProduction: number | null;
   enteredAt: string;
 }
 
 function fromDentalMonthlyRow(row: any): DentalMonthlyEntry {
-  return {
-    id: row.id, month: row.month,
-    projectedTotalProduction: row.projected_total_production, currentIncome: row.current_income,
-    currentPatientIncome: row.current_patient_income, enteredAt: row.entered_at,
-  };
+  return { id: row.id, month: row.month, netProduction: row.net_production, enteredAt: row.entered_at };
 }
 
 export async function loadDentalMonthlyHistory(): Promise<DentalMonthlyEntry[]> {
@@ -525,14 +519,11 @@ export async function loadDentalMonthlyHistory(): Promise<DentalMonthlyEntry[]> 
   return (data ?? []).map(fromDentalMonthlyRow);
 }
 
-// Backfills or corrects a specific month's official Open Dental figures.
+// Backfills or corrects a specific month's official Net Production figure.
 // Entirely separate from the daily running numbers on Update Numbers.
-export async function backfillDentalMonth(
-  month: string, projectedTotalProduction: number | null, currentIncome: number | null, currentPatientIncome: number | null
-): Promise<{ ok: boolean; error?: string }> {
+export async function backfillDentalMonth(month: string, netProduction: number | null): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("dental_monthly_entries").upsert({
-    month, projected_total_production: projectedTotalProduction, current_income: currentIncome,
-    current_patient_income: currentPatientIncome, entered_at: new Date().toISOString(),
+    month, net_production: netProduction, entered_at: new Date().toISOString(),
   }, { onConflict: "month" });
   if (error) { console.error("backfillDentalMonth error:", error); return { ok: false, error: error.message }; }
   return { ok: true };
