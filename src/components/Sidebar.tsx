@@ -115,6 +115,15 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
   const identity = useIdentity();
   const lowBalanceWarning = useLowBalanceWarning(identity);
   const pendingSignature = usePendingSignature(identity);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set(["Admin", "Finances"]));
+
+  function toggleGroup(group: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group); else next.add(group);
+      return next;
+    });
+  }
 
   return (
     <>
@@ -122,7 +131,7 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
         <div className="rounded-2xl px-3 py-2.5 flex items-center justify-center" style={{ background: "white" }}>
           <Image src="/logo.svg" alt="Deccan Dental Sleep Center" width={160} height={55} className="object-contain" priority />
         </div>
-        <div className="mt-3 text-xs font-bold tracking-widest uppercase text-center" style={{ color: "rgba(74,66,56,0.35)" }}>
+        <div className="mt-3 text-xs font-bold tracking-widest uppercase text-center" style={{ color: "rgba(74,66,56,0.5)" }}>
           Staff Scheduler
         </div>
       </div>
@@ -132,13 +141,23 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
           const active = pathname === item.href;
           const accessible = hasAccess(item.permission, identity);
           const showGroupLabel = item.group && item.group !== navItems[i - 1]?.group;
+          // A group stays open if the current page lives inside it, even if collapsed.
+          const groupHasActiveItem = item.group ? navItems.some((n) => n.group === item.group && n.href === pathname) : false;
+          const groupCollapsed = !!item.group && collapsedGroups.has(item.group) && !groupHasActiveItem;
+          if (item.group && groupCollapsed && !showGroupLabel) return null;
           return (
             <div key={item.href}>
               {showGroupLabel && (
-                <div className="px-4 pt-4 pb-1 text-xs font-bold tracking-widest uppercase" style={{ color: "rgba(74,66,56,0.3)" }}>
-                  {item.group}
-                </div>
+                <button
+                  onClick={() => toggleGroup(item.group!)}
+                  className="w-full flex items-center justify-between px-4 pt-4 pb-1 text-xs font-bold tracking-widest uppercase"
+                  style={{ color: "rgba(74,66,56,0.6)" }}
+                >
+                  <span>{item.group}</span>
+                  <span className="text-[10px] normal-case tracking-normal font-semibold" style={{ transform: groupCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>▾</span>
+                </button>
               )}
+              {!groupCollapsed && (
               <Link
                 href={item.href}
                 onClick={onNavigate}
@@ -147,19 +166,19 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
                   active
                     ? { background: "#e8622a", color: "white", boxShadow: "0 4px 14px rgba(232, 98, 42, 0.3)" }
                     : accessible
-                    ? { color: "rgba(74,66,56,0.65)" }
+                    ? { color: "rgba(74,66,56,0.85)" }
                     : { color: "rgba(74,66,56,0.28)" }
                 }
                 onMouseEnter={(e) => {
                   if (!active) {
                     (e.currentTarget as HTMLElement).style.background = "#FCE8D5";
-                    (e.currentTarget as HTMLElement).style.color = accessible ? "#B8501E" : "rgba(74,66,56,0.4)";
+                    (e.currentTarget as HTMLElement).style.color = accessible ? "#B8501E" : "rgba(74,66,56,0.55)";
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!active) {
                     (e.currentTarget as HTMLElement).style.background = "transparent";
-                    (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(74,66,56,0.65)" : "rgba(74,66,56,0.28)";
+                    (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(74,66,56,0.85)" : "rgba(74,66,56,0.28)";
                   }
                 }}
               >
@@ -174,6 +193,7 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
                 {!accessible && <span className="text-xs flex-shrink-0" style={{ opacity: 0.5 }}>🔒</span>}
                 {active && <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.85)" }} />}
               </Link>
+              )}
             </div>
           );
         })}
@@ -190,13 +210,13 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
                 <div className="text-xs font-bold" style={{ color: "#4A4238" }}>
                   {identity.mode === "super" ? "Admin (passcode)" : identity.employeeName ?? "Signed in"}
                 </div>
-                <div className="text-xs" style={{ color: "rgba(74,66,56,0.4)" }}>Deccan Dental</div>
+                <div className="text-xs" style={{ color: "rgba(74,66,56,0.55)" }}>Deccan Dental</div>
               </div>
             </div>
             <button
               onClick={() => { try { sessionStorage.removeItem(IDENTITY_SESSION_KEY); } catch {} window.location.href = "/"; }}
               className="mt-2 text-xs underline font-medium"
-              style={{ color: "rgba(74,66,56,0.45)" }}
+              style={{ color: "rgba(74,66,56,0.6)" }}
             >
               Not you? Log off
             </button>
@@ -206,7 +226,7 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
             <div className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>D</div>
             <div>
               <div className="text-xs font-bold" style={{ color: "#4A4238" }}>Deccan Dental</div>
-              <div className="text-xs" style={{ color: "rgba(74,66,56,0.4)" }}>Sleep Center</div>
+              <div className="text-xs" style={{ color: "rgba(74,66,56,0.55)" }}>Sleep Center</div>
             </div>
           </div>
         )}
@@ -235,7 +255,7 @@ export function Sidebar() {
           <div style={{ fontWeight: 800, color: "#4A4238", fontSize: 16 }}>
             deccan<span style={{ color: "#e8622a" }}>|</span>dental
           </div>
-          <div style={{ fontSize: 10, color: "rgba(74,66,56,0.4)", letterSpacing: "0.1em" }}>STAFF SCHEDULER</div>
+          <div style={{ fontSize: 10, color: "rgba(74,66,56,0.55)", letterSpacing: "0.1em" }}>STAFF SCHEDULER</div>
         </div>
         <button onClick={() => setOpen(true)} style={{ fontSize: 24, color: "#4A4238", lineHeight: 1 }} aria-label="Open menu">☰</button>
       </div>
