@@ -10,6 +10,11 @@ import {
   createCertification, updateCertification, deleteCertification, uploadCertFile,
 } from "@/lib/certsStore";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
+import {
+  RequiredCertType, RequiredCertRole, RequiredCertStatus, CeCourseEntry,
+  loadRequiredCertTypes, createRequiredCertType, renameRequiredCertType, updateRequiredCertType, deleteRequiredCertType,
+  loadAllCeCourseEntries, loadCeCourseEntriesForEmployee, addCeCourseEntry, deleteCeCourseEntry, computeRequiredCertStatuses,
+} from "@/lib/requiredCertsStore";
 
 interface FormState {
   ownerType: CertOwnerType;
@@ -24,6 +29,19 @@ const EMPTY_FORM: FormState = {
   title: "",
   expirationDate: "",
 };
+
+// Which required-cert roles apply to this employee — a specialty dentist
+// gets both "Dentist" and "Specialist" (for the extra board certificate).
+function getApplicableRoles(emp: Employee): RequiredCertRole[] {
+  const roles: RequiredCertRole[] = [];
+  if (emp.role === "Dentist") {
+    roles.push("Dentist");
+    if (emp.specialty && emp.specialty !== "General Dentist") roles.push("Specialist");
+  }
+  if (emp.role === "RDA") roles.push("RDA");
+  if (emp.role === "Hygienist") roles.push("Hygienist");
+  return roles;
+}
 
 function daysUntil(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -156,6 +174,212 @@ function CertForm({
   );
 }
 
+function RequiredCertsSection({
+  employee, certs, requiredTypes, ceEntries, onAddCertForTitle, refreshAll,
+}: {
+  employee: Employee; certs: Certification[]; requiredTypes: RequiredCertType[]; ceEntries: CeCourseEntry[];
+  onAddCertForTitle: (title: string, existing?: Certification) => void; refreshAll: () => void;
+}) {
+  const [loggingTypeId, setLoggingTypeId] = useState<string | null>(null);
+  const [ceCourseName, setCeCourseName] = useState("");
+  const [ceHours, setCeHours] = useState("");
+  const [ceDate, setCeDate] = useState(new Date().toISOString().slice(0, 10));
+  const [ceError, setCeError] = useState<string | null>(null);
+  const [expandedTypeId, setExpandedTypeId] = useState<string | null>(null);
+
+  const roles = getApplicableRoles(employee);
+  if (roles.length === 0) return null;
+
+  const certsByTitle = new Map(certs.map((c) => [c.title, { expirationDate: c.expirationDate }]));
+  const today = new Date().toISOString().slice(0, 10);
+  const statuses = computeRequiredCertStatuses(roles, requiredTypes, certsByTitle, ceEntries, today);
+  if (statuses.length === 0) return null;
+
+  async function handleLogCe(typeId: string) {
+    const hours = Number(ceHours);
+    if (!ceCourseName.trim() || !ceDate || isNaN(hours) || hours <= 0) { setCeError("Please enter a course name, hours, and date."); return; }
+    const result = await addCeCourseEntry({ employeeId: employee.id, requiredCertTypeId: typeId, courseName: ceCourseName.trim(), hours, dateCompleted: ceDate });
+    if (!result.ok) { setCeError(result.error ?? "Failed to save."); return; }
+    setCeError(null);
+    setCeCourseName("");
+    setCeHours("");
+    setLoggingTypeId(null);
+    await refreshAll();
+  }
+
+  async function handleDeleteCe(id: string) {
+    if (!confirm("Delete this CE course entry?")) return;
+    await deleteCeCourseEntry(id);
+    await refreshAll();
+  }
+
+  return (
+    <div className="rounded-2xl bg-white p-5 shadow mb-4">
+      <h3 className="font-bold text-slate-700 mb-3">Required Certificates & CE — {employee.name}</h3>
+      <div className="space-y-2">
+        {statuses.map((status) => {
+          const type = status.type;
+          const existingCert = certs.find((c) => c.title === type.title);
+          if (type.kind === "ce_hours") {
+            const myEntries = ceEntries.filter((e) => e.requiredCertTypeId === type.id);
+            return (
+              <div key={type.id} className="rounded-lg bg-slate-50 p-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="font-semibold text-sm text-slate-700">{type.title}</span>
+                    {status.missingLicense ? (
+                      <span className="ml-2 text-xs text-amber-600 font-semibold">⚠️ Add the license expiration date first to track this</span>
+                    ) : (
+                      <span className={`ml-2 text-xs font-semibold ${status.satisfied ? "text-emerald-600" : "text-red-600"}`}>
+                        {status.satisfied ? `✓ ${status.totalHoursInWindow} hrs logged this period` : "⚠️ Needed for renewal"}
+                        {status.windowEnd ? ` (by ${new Date(status.windowEnd + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})` : ""}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {myEntries.length > 0 && (
+                      <button onClick={() => setExpandedTypeId(expandedTypeId === type.id ? null : type.id)} className="text-xs text-slate-400 hover:underline">
+                        {expandedTypeId === type.id ? "Hide" : "History"} ({myEntries.length})
+                      </button>
+                    )}
+                    <button onClick={() => { setLoggingTypeId(loggingTypeId === type.id ? null : type.id); setCeError(null); }} className="text-xs font-semibold text-orange-500 hover:underline">
+                      {loggingTypeId === type.id ? "Cancel" : "+ Log a course"}
+                    </button>
+                  </div>
+                </div>
+                {loggingTypeId === type.id && (
+                  <div className="mt-2 grid gap-2 sm:grid-cols-4">
+                    <input type="text" value={ceCourseName} onChange={(e) => setCeCourseName(e.target.value)} placeholder="Course name" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
+                    <input type="number" onFocus={(e) => e.target.select()} value={ceHours} onChange={(e) => setCeHours(e.target.value)} placeholder="Hours" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                    <input type="date" value={ceDate} onChange={(e) => setCeDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                    <button onClick={() => handleLogCe(type.id)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white sm:col-span-4 justify-self-start" style={{ backgroundColor: "#e8622a" }}>Save Course</button>
+                    {ceError && <p className="text-xs text-red-600 sm:col-span-4">{ceError}</p>}
+                  </div>
+                )}
+                {expandedTypeId === type.id && (
+                  <div className="mt-2 space-y-1">
+                    {myEntries.map((e) => (
+                      <div key={e.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-3 py-1.5">
+                        <span className="text-slate-600">{e.courseName} — {e.hours} hrs — {new Date(e.dateCompleted + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                        <button onClick={() => handleDeleteCe(e.id)} className="text-red-400 hover:underline">Delete</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }
+          // license or standalone
+          const expired = existingCert?.expirationDate ? existingCert.expirationDate < today : null;
+          const expiringSoon = existingCert?.expirationDate ? daysUntil(existingCert.expirationDate) <= 30 && !expired : false;
+          return (
+            <div key={type.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
+              <div>
+                <span className="font-semibold text-sm text-slate-700">{type.title}</span>
+                {existingCert?.expirationDate ? (
+                  <span className={`ml-2 text-xs font-semibold ${expired ? "text-red-600" : expiringSoon ? "text-amber-600" : "text-emerald-600"}`}>
+                    {expired ? "⚠️ Expired" : expiringSoon ? "⚠️ Expiring soon" : "✓"} — {new Date(existingCert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </span>
+                ) : (
+                  <span className="ml-2 text-xs font-semibold text-red-600">⚠️ Not on file</span>
+                )}
+              </div>
+              <button onClick={() => onAddCertForTitle(type.title, existingCert)} className="text-xs font-semibold text-orange-500 hover:underline">
+                {existingCert ? "Update" : "+ Add"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes: RequiredCertType[]; refreshAll: () => void }) {
+  const [newTitle, setNewTitle] = useState("");
+  const [newRole, setNewRole] = useState<RequiredCertRole>("Dentist");
+  const [newKind, setNewKind] = useState<"license" | "ce_hours" | "standalone">("standalone");
+  const [newFrequency, setNewFrequency] = useState("24");
+  const [error, setError] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  async function handleAdd() {
+    if (!newTitle.trim()) return;
+    const result = await createRequiredCertType({
+      title: newTitle.trim(), appliesToRole: newRole, kind: newKind,
+      frequencyMonths: Number(newFrequency) || 24, sortOrder: requiredTypes.filter((t) => t.appliesToRole === newRole).length + 1,
+    });
+    if (!result.ok) { setError(result.error ?? "Failed to add."); return; }
+    setError(null);
+    setNewTitle("");
+    await refreshAll();
+  }
+
+  async function handleRename(type: RequiredCertType) {
+    if (!renameValue.trim() || renameValue.trim() === type.title) { setRenamingId(null); return; }
+    const result = await renameRequiredCertType(type.id, type.title, renameValue.trim());
+    if (!result.ok) { setError(result.error ?? "Failed to rename."); return; }
+    setError(null);
+    setRenamingId(null);
+    await refreshAll();
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm("Delete this required type? This won't delete any existing certifications or CE entries, but staff will stop being tracked against it.")) return;
+    await deleteRequiredCertType(id);
+    await refreshAll();
+  }
+
+  const roles: RequiredCertRole[] = ["Dentist", "RDA", "Hygienist", "Specialist"];
+
+  return (
+    <div className="rounded-2xl bg-white p-5 shadow">
+      <h3 className="font-bold text-slate-700 mb-3">Manage Required Certificate Types</h3>
+      <div className="grid gap-2 sm:grid-cols-5 mb-3">
+        <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Title" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
+        <select value={newRole} onChange={(e) => setNewRole(e.target.value as RequiredCertRole)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          {roles.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <select value={newKind} onChange={(e) => setNewKind(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+          <option value="license">License (expiration date)</option>
+          <option value="standalone">Standalone cert (expiration date)</option>
+          <option value="ce_hours">CE hours (logged courses)</option>
+        </select>
+        <input type="number" value={newFrequency} onChange={(e) => setNewFrequency(e.target.value)} placeholder="Months" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+      </div>
+      <button onClick={handleAdd} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition mb-4" style={{ backgroundColor: "#e8622a" }}>+ Add Required Type</button>
+      {error && <p className="text-sm text-red-600 mb-3">⚠️ {error}</p>}
+
+      <div className="space-y-1">
+        {requiredTypes.map((type) => (
+          <div key={type.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
+            {renamingId === type.id ? (
+              <div className="flex items-center gap-2 flex-1">
+                <input type="text" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none flex-1" autoFocus />
+                <button onClick={() => handleRename(type)} className="text-xs font-semibold text-emerald-600 hover:underline">Save</button>
+                <button onClick={() => setRenamingId(null)} className="text-xs text-slate-400 hover:underline">Cancel</button>
+              </div>
+            ) : (
+              <>
+                <span className="text-slate-700">
+                  <strong>{type.title}</strong>
+                  <span className="text-xs text-slate-400 ml-2">{type.appliesToRole} · {type.kind === "ce_hours" ? "CE hours" : type.kind === "license" ? "License" : "Standalone"} · every {type.frequencyMonths}mo</span>
+                </span>
+                <span className="flex items-center gap-3">
+                  <button onClick={() => { setRenamingId(type.id); setRenameValue(type.title); }} className="text-xs text-orange-500 hover:underline">Rename</button>
+                  <button onClick={() => handleDelete(type.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                </span>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
   const isManager = identity.canManageCerts;
   const [staff, setStaff] = useState<Employee[]>([]);
@@ -171,6 +395,10 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [notifyMsg, setNotifyMsg] = useState<Record<string, string>>({});
+  const [requiredTypes, setRequiredTypes] = useState<RequiredCertType[]>([]);
+  const [allCeEntries, setAllCeEntries] = useState<CeCourseEntry[]>([]);
+  const [showRequiredOverview, setShowRequiredOverview] = useState(false);
+  const [showManageTypes, setShowManageTypes] = useState(false);
 
   useEffect(() => { refresh(); }, []);
 
@@ -187,6 +415,10 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
       const all = await loadAllCertifications();
       setAllCerts(all);
     }
+    const types = await loadRequiredCertTypes();
+    setRequiredTypes(types);
+    const ce = await loadAllCeCourseEntries();
+    setAllCeEntries(ce);
   }
 
   function openNewForStaffSelf() {
@@ -204,6 +436,16 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
     setFile(null);
     setError("");
     setUseCustomTitle(titleOptions.length === 0);
+    setShowForm(true);
+  }
+
+  function openForRequiredItem(title: string, employeeId: number, existing?: Certification) {
+    if (existing) { startEdit(existing); return; }
+    setForm({ ownerType: "personnel", employeeId: String(employeeId), title, expirationDate: "" });
+    setEditingId(null);
+    setFile(null);
+    setError("");
+    setUseCustomTitle(false);
     setShowForm(true);
   }
 
@@ -325,6 +567,17 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
 
         {(identity.mode === "staff" || view === "mine") && (
           <div className="max-w-2xl space-y-4">
+            {identity.mode === "staff" && identity.employeeId != null && (() => {
+              const me = staff.find((e) => e.id === identity.employeeId);
+              return me ? (
+                <RequiredCertsSection
+                  employee={me} certs={myCerts} requiredTypes={requiredTypes}
+                  ceEntries={allCeEntries.filter((e) => e.employeeId === me.id)}
+                  onAddCertForTitle={(title, existing) => openForRequiredItem(title, me.id, existing)}
+                  refreshAll={refresh}
+                />
+              ) : null;
+            })()}
             {identity.mode === "staff" && !showForm && (
               <button onClick={openNewForStaffSelf}
                 className="rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow hover:opacity-90 transition"
@@ -369,6 +622,28 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
 
         {isManager && view === "all" && (
           <div className="max-w-3xl space-y-4">
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => setShowRequiredOverview((s) => !s)} className="text-xs font-semibold text-orange-500 hover:underline">
+                {showRequiredOverview ? "Hide" : "Show"} Required Certificates & CE Overview
+              </button>
+              <button onClick={() => setShowManageTypes((s) => !s)} className="text-xs font-semibold text-orange-500 hover:underline">
+                {showManageTypes ? "Hide" : "Manage"} Required Certificate Types
+              </button>
+            </div>
+
+            {showManageTypes && (
+              <ManageRequiredTypesPanel requiredTypes={requiredTypes} refreshAll={refresh} />
+            )}
+
+            {showRequiredOverview && staff.filter((e) => !e.archived && getApplicableRoles(e).length > 0).map((emp) => (
+              <RequiredCertsSection
+                key={emp.id} employee={emp} certs={allCerts.filter((c) => c.employeeId === emp.id)}
+                requiredTypes={requiredTypes} ceEntries={allCeEntries.filter((e) => e.employeeId === emp.id)}
+                onAddCertForTitle={(title, existing) => openForRequiredItem(title, emp.id, existing)}
+                refreshAll={refresh}
+              />
+            ))}
+
             {!showForm && (
               <div className="flex gap-2">
                 <button onClick={() => openNewManager("personnel")}
