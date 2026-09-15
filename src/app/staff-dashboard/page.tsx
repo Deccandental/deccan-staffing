@@ -7,7 +7,7 @@ import { loadStaff } from "@/lib/staffStore";
 import { LeaveRequest } from "@/types/leave";
 import { loadLeaveRequests } from "@/lib/leaveStore";
 import {
-  Certification, NewCertInput, loadCertificationsForEmployee, loadDistinctTitles,
+  Certification, NewCertInput, loadCertificationsForEmployee,
   createCertification, updateCertification, uploadCertFile,
 } from "@/lib/certsStore";
 import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
@@ -23,6 +23,8 @@ import { HoBonusMonth, loadHoBonusPayoutYear } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
 import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
 import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsStore";
+import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry } from "@/lib/requiredCertsStore";
+import { RequiredCertsSection } from "@/components/RequiredCertsSection";
 import { formatMoney } from "@/lib/format";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
@@ -89,6 +91,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [checkinDue, setCheckinDue] = useState(false);
   const [checkinUpcoming, setCheckinUpcoming] = useState<CheckinSlot | null>(null);
   const [titleOptions, setTitleOptions] = useState<string[]>([]);
+  const [requiredTypesForCerts, setRequiredTypesForCerts] = useState<RequiredCertType[]>([]);
+  const [ceEntriesForCerts, setCeEntriesForCerts] = useState<CeCourseEntry[]>([]);
   const [events, setEvents] = useState<StaffEvent[]>([]);
   const [bonusYear] = useState(new Date().getFullYear());
   const [yearQuartersData, setYearQuartersData] = useState<Record<number, GrowthBonusQuarter>>({});
@@ -122,7 +126,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       loadLeaveRequests(),
       loadCertificationsForEmployee(selectedId),
       loadUpcomingEvents(todayStr),
-      loadDistinctTitles(),
+      loadRequiredCertTypes(),
+      loadCeCourseEntriesForEmployee(selectedId),
       loadGrowthBonusQuarter(bonusYear, 1), loadGrowthBonusQuarter(bonusYear, 2),
       loadGrowthBonusQuarter(bonusYear, 3), loadGrowthBonusQuarter(bonusYear, 4),
       loadGrowthBonusHoursOverrides(bonusYear, 1), loadGrowthBonusHoursOverrides(bonusYear, 2),
@@ -133,7 +138,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       loadHygieneBonusEntries(selectedId, yearStart, yearEnd),
       loadHoBonusPayoutYear(selectedId, bonusYear),
     ]).then(([
-      shiftData, leaveData, certData, eventData, titles,
+      shiftData, leaveData, certData, eventData, requiredTypes, ceEntries,
       q1, q2, q3, q4, d1, d2, d3, d4, entries, payments, pvYear, hygieneYear, hoYear,
     ]) => {
       if (cancelled) return;
@@ -141,7 +146,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       setLeaveRequests(leaveData.filter((r) => r.employeeId === selectedId));
       setCerts(certData);
       setEvents(eventData.filter((ev) => ev.inviteAll || ev.invitedStaffIds.includes(selectedId)));
-      setTitleOptions(titles);
+      setRequiredTypesForCerts(requiredTypes);
+      setCeEntriesForCerts(ceEntries);
+      setTitleOptions(Array.from(new Set(requiredTypes.map((t: any) => t.title))).sort((a: any, b: any) => a.localeCompare(b)) as string[]);
       setYearQuartersData({ 1: q1, 2: q2, 3: q3, 4: q4 });
       setYearDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
       setYearPayrollEntries(entries);
@@ -255,12 +262,33 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     setShowCertForm(true);
   }
 
+  function openForRequiredTitle(title: string, existing?: Certification) {
+    if (existing) { startEditCert(existing); return; }
+    setCertForm({ title, expirationDate: "" });
+    setEditingCertId(null);
+    setCertFile(null);
+    setCertError("");
+    setUseCustomTitle(false);
+    setShowCertForm(true);
+  }
+
   function closeCertForm() {
     setShowCertForm(false);
     setEditingCertId(null);
     setCertForm(EMPTY_CERT_FORM);
     setCertFile(null);
     setCertError("");
+  }
+
+  async function refreshCertsData() {
+    if (selectedId == null) return;
+    const [freshCerts, freshTypes, freshCe] = await Promise.all([
+      loadCertificationsForEmployee(selectedId), loadRequiredCertTypes(), loadCeCourseEntriesForEmployee(selectedId),
+    ]);
+    setCerts(freshCerts);
+    setRequiredTypesForCerts(freshTypes);
+    setCeEntriesForCerts(freshCe);
+    setTitleOptions(Array.from(new Set(freshTypes.map((t) => t.title))).sort((a, b) => a.localeCompare(b)));
   }
 
   async function handleSaveCert() {
@@ -283,11 +311,17 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       fileName = existing?.fileName ?? "";
     }
 
+    const matchingType = requiredTypesForCerts.find((t) => t.title === certForm.title.trim());
+    const isCompletionMode = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "completion";
+    const resolvedExpiration = isCompletionMode && certForm.expirationDate
+      ? addMonthsToDate(certForm.expirationDate, matchingType!.frequencyMonths)
+      : certForm.expirationDate || null;
+
     const input: NewCertInput = {
       ownerType: "personnel",
       employeeId: selectedId,
       title: certForm.title.trim(),
-      expirationDate: certForm.expirationDate || null,
+      expirationDate: resolvedExpiration,
       fileUrl, fileName,
     };
 
@@ -296,9 +330,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     if (!saved) { setCertError("Something went wrong — not saved. Try again."); return; }
 
     closeCertForm();
-    const [freshCerts, freshTitles] = await Promise.all([loadCertificationsForEmployee(selectedId), loadDistinctTitles()]);
-    setCerts(freshCerts);
-    setTitleOptions(freshTitles);
+    await refreshCertsData();
   }
 
   return (
@@ -573,6 +605,15 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
+            {selectedEmployee && (
+              <RequiredCertsSection
+                employee={selectedEmployee} certs={certs} requiredTypes={requiredTypesForCerts}
+                ceEntries={ceEntriesForCerts}
+                onAddCertForTitle={openForRequiredTitle}
+                refreshAll={refreshCertsData}
+              />
+            )}
+
             <div className="rounded-2xl bg-white p-4 shadow">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-bold text-slate-700">📄 Certifications</h2>
@@ -610,9 +651,25 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       )}
                     </div>
                   )}
-                  <input type="date" value={certForm.expirationDate} onChange={(e) => setCertForm((f) => ({ ...f, expirationDate: e.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                  <p className="text-xs text-slate-400 -mt-1">Leave date blank if this never expires.</p>
+                  {(() => {
+                    const matchingType = requiredTypesForCerts.find((t) => t.title === certForm.title.trim());
+                    const isCompletionMode = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "completion";
+                    return (
+                      <>
+                        <input type="date" value={certForm.expirationDate} onChange={(e) => setCertForm((f) => ({ ...f, expirationDate: e.target.value }))}
+                          className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                        {isCompletionMode ? (
+                          certForm.expirationDate ? (
+                            <p className="text-xs text-slate-400 -mt-1">Completion date → expires {new Date(addMonthsToDate(certForm.expirationDate, matchingType!.frequencyMonths) + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>
+                          ) : (
+                            <p className="text-xs text-slate-400 -mt-1">Enter the completion date — expiration will be calculated automatically.</p>
+                          )
+                        ) : (
+                          <p className="text-xs text-slate-400 -mt-1">Leave date blank if this never expires.</p>
+                        )}
+                      </>
+                    );
+                  })()}
                   <input type="file" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
                     className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" />
                   {editingCertId && <p className="text-xs text-slate-400">Leave file blank to keep the existing one.</p>}
