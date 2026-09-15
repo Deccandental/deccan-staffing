@@ -1,7 +1,7 @@
 import { supabase } from "./supabase";
 
-export type RequiredCertRole = "Dentist" | "RDA" | "Hygienist" | "Specialist";
-export type RequiredCertKind = "license" | "ce_hours" | "standalone";
+export type RequiredCertRole = "Dentist" | "RDA" | "Hygienist" | "Specialist" | "Assistant";
+export type RequiredCertKind = "license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours";
 export type RequiredCertDateMode = "expiration" | "completion";
 
 export interface RequiredCertType {
@@ -12,12 +12,14 @@ export interface RequiredCertType {
   frequencyMonths: number;
   sortOrder: number;
   dateMode: RequiredCertDateMode;
+  targetHours: number | null;
 }
 
 function fromTypeRow(row: any): RequiredCertType {
   return {
     id: row.id, title: row.title, appliesToRole: row.applies_to_role,
     kind: row.kind, frequencyMonths: row.frequency_months, sortOrder: row.sort_order ?? 0,
+    targetHours: row.target_hours ?? null,
     dateMode: row.date_mode ?? "expiration",
   };
 }
@@ -31,7 +33,7 @@ export async function loadRequiredCertTypes(): Promise<RequiredCertType[]> {
 export async function createRequiredCertType(input: Omit<RequiredCertType, "id">): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("required_cert_types").insert({
     title: input.title, applies_to_role: input.appliesToRole, kind: input.kind,
-    frequency_months: input.frequencyMonths, sort_order: input.sortOrder, date_mode: input.dateMode,
+    frequency_months: input.frequencyMonths, sort_order: input.sortOrder, date_mode: input.dateMode, target_hours: input.targetHours,
   });
   if (error) { console.error("createRequiredCertType error:", error); return { ok: false, error: error.message }; }
   return { ok: true };
@@ -48,6 +50,7 @@ export async function updateRequiredCertType(id: string, updates: Partial<Omit<R
   if (updates.frequencyMonths !== undefined) payload.frequency_months = updates.frequencyMonths;
   if (updates.sortOrder !== undefined) payload.sort_order = updates.sortOrder;
   if (updates.dateMode !== undefined) payload.date_mode = updates.dateMode;
+  if (updates.targetHours !== undefined) payload.target_hours = updates.targetHours;
   const { error } = await supabase.from("required_cert_types").update(payload).eq("id", id);
   if (error) { console.error("updateRequiredCertType error:", error); return { ok: false, error: error.message }; }
   return { ok: true };
@@ -123,8 +126,9 @@ export interface RequiredCertStatus {
   totalHoursInWindow: number;
   windowStart: string | null;
   windowEnd: string | null; // the linked license's expiration date
-  satisfied: boolean; // true for license/standalone if not expired; true for ce_hours if any entry falls in the window
-  missingLicense: boolean; // ce_hours only: true if the role's license has no expiration date on file yet, so the window can't be computed
+  satisfied: boolean; // true for license/standalone if not expired; true for ce_hours if any entry falls in the window; true for total_ce_hours/one_time_ce if target reached
+  missingLicense: boolean; // ce_hours/total_ce_hours only: true if the role's license has no expiration date on file yet, so the window can't be computed
+  targetHours: number | null;
 }
 
 export function addMonths(dateStr: string, months: number): string {
@@ -136,29 +140,51 @@ export function addMonths(dateStr: string, months: number): string {
 export function computeRequiredCertStatuses(
   role: RequiredCertRole[],
   types: RequiredCertType[],
-  certsByTitle: Map<string, { expirationDate: string | null }>,
+  allCerts: { title: string; expirationDate: string | null; ceHours: number | null; createdAt: string }[],
   ceEntries: CeCourseEntry[],
   today: string
 ): RequiredCertStatus[] {
   const relevant = types.filter((t) => role.includes(t.appliesToRole));
-  // For ce_hours items, find this role's license expiration to anchor the window.
+  const certsByTitle = new Map(allCerts.map((c) => [c.title, c]));
+  // For ce_hours/total_ce_hours items, find this role's license expiration to anchor the window.
   const licenseType = types.find((t) => t.kind === "license" && role.includes(t.appliesToRole));
   const licenseExpiration = licenseType ? certsByTitle.get(licenseType.title)?.expirationDate ?? null : null;
 
   return relevant.map((type) => {
     if (type.kind === "ce_hours") {
       if (!licenseExpiration) {
-        return { type, expirationDate: null, totalHoursInWindow: 0, windowStart: null, windowEnd: null, satisfied: false, missingLicense: true };
+        return { type, expirationDate: null, totalHoursInWindow: 0, windowStart: null, windowEnd: null, satisfied: false, missingLicense: true, targetHours: type.targetHours };
       }
       const windowStart = addMonths(licenseExpiration, -type.frequencyMonths);
       const entries = ceEntries.filter((e) => e.requiredCertTypeId === type.id && e.dateCompleted >= windowStart && e.dateCompleted <= licenseExpiration);
       const totalHours = entries.reduce((sum, e) => sum + e.hours, 0);
-      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration, satisfied: entries.length > 0, missingLicense: false };
+      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration, satisfied: entries.length > 0, missingLicense: false, targetHours: type.targetHours };
+    }
+    if (type.kind === "total_ce_hours") {
+      if (!licenseExpiration) {
+        return { type, expirationDate: null, totalHoursInWindow: 0, windowStart: null, windowEnd: null, satisfied: false, missingLicense: true, targetHours: type.targetHours };
+      }
+      const windowStart = addMonths(licenseExpiration, -type.frequencyMonths);
+      // Sum every logged CE course for any ce_hours-kind requirement on this
+      // role, plus the optional ce_hours value on any certification record
+      // (matched by when it was entered, as a proxy for completion date).
+      const ceHourTypeIds = new Set(types.filter((t) => t.kind === "ce_hours" && role.includes(t.appliesToRole)).map((t) => t.id));
+      const loggedHours = ceEntries.filter((e) => ceHourTypeIds.has(e.requiredCertTypeId) && e.dateCompleted >= windowStart && e.dateCompleted <= licenseExpiration).reduce((sum, e) => sum + e.hours, 0);
+      const certHours = allCerts.filter((c) => c.ceHours != null && c.createdAt.slice(0, 10) >= windowStart && c.createdAt.slice(0, 10) <= licenseExpiration).reduce((sum, c) => sum + (c.ceHours ?? 0), 0);
+      const totalHours = loggedHours + certHours;
+      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration, satisfied: type.targetHours != null && totalHours >= type.targetHours, missingLicense: false, targetHours: type.targetHours };
+    }
+    if (type.kind === "one_time_ce") {
+      // Never expires, never resets — just checks whether enough hours have
+      // ever been logged against this specific requirement, all-time.
+      const entries = ceEntries.filter((e) => e.requiredCertTypeId === type.id);
+      const totalHours = entries.reduce((sum, e) => sum + e.hours, 0);
+      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart: null, windowEnd: null, satisfied: type.targetHours != null && totalHours >= type.targetHours, missingLicense: false, targetHours: type.targetHours };
     }
     // license or standalone: driven by a matching certification record.
     const cert = certsByTitle.get(type.title);
     const expirationDate = cert?.expirationDate ?? null;
     const satisfied = !!expirationDate && expirationDate >= today;
-    return { type, expirationDate, totalHoursInWindow: 0, windowStart: null, windowEnd: null, satisfied, missingLicense: false };
+    return { type, expirationDate, totalHoursInWindow: 0, windowStart: null, windowEnd: null, satisfied, missingLicense: false, targetHours: type.targetHours };
   });
 }
