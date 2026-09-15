@@ -75,6 +75,7 @@ function CertForm({
 }) {
   const matchingType = requiredTypes.find((t) => t.title === form.title);
   const isCompletionMode = matchingType?.kind !== "ce_hours" && matchingType?.dateMode === "completion";
+  const isNeverExpires = matchingType?.kind !== "ce_hours" && matchingType?.dateMode === "none";
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow max-w-2xl">
@@ -142,18 +143,22 @@ function CertForm({
         )}
       </div>
 
-      <div className="mb-4">
-        <label className="block text-xs font-semibold text-slate-500 mb-1">
-          {isCompletionMode
-            ? "Completion Date (expiration will be calculated automatically)"
-            : "Expiration Date (optional — leave blank if this never expires)"}
-        </label>
-        <input type="date" value={form.expirationDate} onChange={(e) => setForm((f) => ({ ...f, expirationDate: e.target.value }))}
-          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-        {isCompletionMode && form.expirationDate && matchingType && (
-          <p className="text-xs text-slate-400 mt-1">→ Expires {new Date(addMonths(form.expirationDate, matchingType.frequencyMonths) + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>
-        )}
-      </div>
+      {isNeverExpires ? (
+        <p className="text-xs mb-4" style={{ color: "rgba(74,66,56,0.5)" }}>This certificate never expires — no date needed, just the file.</p>
+      ) : (
+        <div className="mb-4">
+          <label className="block text-xs font-semibold text-slate-500 mb-1">
+            {isCompletionMode
+              ? "Completion Date (expiration will be calculated automatically)"
+              : "Expiration Date (optional — leave blank if this never expires)"}
+          </label>
+          <input type="date" value={form.expirationDate} onChange={(e) => setForm((f) => ({ ...f, expirationDate: e.target.value }))}
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+          {isCompletionMode && form.expirationDate && matchingType && (
+            <p className="text-xs text-slate-400 mt-1">→ Expires {new Date(addMonths(form.expirationDate, matchingType.frequencyMonths) + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>
+          )}
+        </div>
+      )}
 
       <div className="mb-4">
         <label className="block text-xs font-semibold text-slate-500 mb-1">CE Credits Earned (optional — counts toward the overall CE hours total)</label>
@@ -187,7 +192,7 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
   const [newTitle, setNewTitle] = useState("");
   const [newRole, setNewRole] = useState<RequiredCertRole>("Dentist");
   const [newKind, setNewKind] = useState<"license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours">("standalone");
-  const [newDateMode, setNewDateMode] = useState<"expiration" | "completion">("completion");
+  const [newDateMode, setNewDateMode] = useState<"expiration" | "completion" | "none">("completion");
   const [newFrequency, setNewFrequency] = useState("24");
   const [newTargetHours, setNewTargetHours] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -218,7 +223,8 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
   }
 
   async function handleToggleDateMode(type: RequiredCertType) {
-    const newMode = type.dateMode === "expiration" ? "completion" : "expiration";
+    const cycle: Record<string, "expiration" | "completion" | "none"> = { expiration: "completion", completion: "none", none: "expiration" };
+    const newMode = cycle[type.dateMode] ?? "expiration";
     await updateRequiredCertType(type.id, { dateMode: newMode });
     await refreshAll();
   }
@@ -250,6 +256,7 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
           <select value={newDateMode} onChange={(e) => setNewDateMode(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
             <option value="expiration">Enter expiration date</option>
             <option value="completion">Enter completion date (auto-computes expiration)</option>
+            <option value="none">Never expires — no date needed</option>
           </select>
         )}
         {(newKind === "one_time_ce" || newKind === "total_ce_hours") && (
@@ -281,13 +288,13 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
                       type.kind === "total_ce_hours" ? `Total CE hours (target ${type.targetHours ?? "?"})` :
                       "Standalone"
                     } · every {type.frequencyMonths}mo
-                    {(type.kind === "license" || type.kind === "standalone") && ` · ${type.dateMode === "completion" ? "completion date (auto-expires)" : "expiration date"}`}
+                    {(type.kind === "license" || type.kind === "standalone") && ` · ${type.dateMode === "completion" ? "completion date (auto-expires)" : type.dateMode === "none" ? "never expires" : "expiration date"}`}
                   </span>
                 </span>
                 <span className="flex items-center gap-3">
                   {(type.kind === "license" || type.kind === "standalone") && (
                     <button onClick={() => handleToggleDateMode(type)} className="text-xs text-blue-500 hover:underline">
-                      Use {type.dateMode === "completion" ? "expiration" : "completion"} date
+                      Switch to {type.dateMode === "expiration" ? "completion date" : type.dateMode === "completion" ? "never expires" : "expiration date"}
                     </button>
                   )}
                   <button onClick={() => { setRenamingId(type.id); setRenameValue(type.title); }} className="text-xs text-orange-500 hover:underline">Rename</button>
@@ -420,9 +427,12 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
 
     const matchingType = requiredTypes.find((t) => t.title === form.title.trim());
     const isCompletionMode = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "completion";
-    const resolvedExpiration = isCompletionMode && form.expirationDate
-      ? addMonths(form.expirationDate, matchingType!.frequencyMonths)
-      : form.expirationDate || null;
+    const isNeverExpires = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "none";
+    const resolvedExpiration = isNeverExpires
+      ? null
+      : isCompletionMode && form.expirationDate
+        ? addMonths(form.expirationDate, matchingType!.frequencyMonths)
+        : form.expirationDate || null;
 
     const input: NewCertInput = {
       ownerType: form.ownerType,
