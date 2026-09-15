@@ -302,7 +302,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   }
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="min-h-screen" style={{ background: "#FAF5EC" }}>
       <Sidebar />
       <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
         <header className="mb-6 flex items-start justify-between flex-wrap gap-3">
@@ -310,11 +310,11 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             <h1 className="text-3xl font-bold">Staff Dashboard</h1>
             <p className="mt-1 text-slate-500">Upcoming shifts, leave requests, and certifications in one place.</p>
           </div>
-          <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm text-sm">
-            <span className="text-gray-400">
+          <div className="flex items-center gap-2 rounded-full px-4 py-2 shadow-sm text-sm" style={{ background: "#FCE8D5" }}>
+            <span style={{ color: "#B8501E" }}>
               {isManager ? "👔 Manager view" : `👤 ${identity.employeeName ?? ""}`}
             </span>
-            <button onClick={logout} className="text-xs font-semibold text-gray-400 hover:text-red-500 underline">
+            <button onClick={logout} className="text-xs font-semibold underline" style={{ color: "#B8501E" }}>
               Not you?
             </button>
           </div>
