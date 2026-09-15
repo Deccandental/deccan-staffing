@@ -8,7 +8,7 @@ import { LeaveRequest } from "@/types/leave";
 import { loadLeaveRequests } from "@/lib/leaveStore";
 import {
   Certification, NewCertInput, loadCertificationsForEmployee,
-  createCertification, updateCertification, uploadCertFile,
+  createCertification, updateCertification, deleteCertification, uploadCertFile,
 } from "@/lib/certsStore";
 import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
 import { UpcomingShift, loadUpcomingShiftsForEmployee } from "@/lib/staffSchedule";
@@ -342,6 +342,12 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       setCertError(err instanceof Error ? `Save failed: ${err.message}` : "Something went wrong — not saved. Try again.");
       setCertSaving(false);
     }
+  }
+
+  async function handleDeleteCert(id: string) {
+    if (!confirm("Delete this certification/document? This can't be undone.")) return;
+    await deleteCertification(id);
+    await refreshCertsData();
   }
 
   return (
@@ -724,6 +730,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                               : "No expiration"}
                           </div>
                           <button onClick={() => startEditCert(cert)} className="text-xs text-cyan-600 hover:underline mt-0.5">Edit</button>
+                          <button onClick={() => handleDeleteCert(cert.id)} className="text-xs text-red-400 hover:underline mt-0.5 ml-2">Delete</button>
                           {cert.fileUrl && (
                             <a href={cert.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-600 hover:underline mt-0.5 ml-2 inline-block">View file →</a>
                           )}
