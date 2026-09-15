@@ -314,9 +314,12 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
     const matchingType = requiredTypesForCerts.find((t) => t.title === certForm.title.trim());
     const isCompletionMode = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "completion";
-    const resolvedExpiration = isCompletionMode && certForm.expirationDate
-      ? addMonthsToDate(certForm.expirationDate, matchingType!.frequencyMonths)
-      : certForm.expirationDate || null;
+    const isNeverExpires = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "none";
+    const resolvedExpiration = isNeverExpires
+      ? null
+      : isCompletionMode && certForm.expirationDate
+        ? addMonthsToDate(certForm.expirationDate, matchingType!.frequencyMonths)
+        : certForm.expirationDate || null;
 
     const input: NewCertInput = {
       ownerType: "personnel",
@@ -662,6 +665,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   {(() => {
                     const matchingType = requiredTypesForCerts.find((t) => t.title === certForm.title.trim());
                     const isCompletionMode = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "completion";
+                    const isNeverExpires = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "none";
+                    if (isNeverExpires) {
+                      return <p className="text-xs -mt-1" style={{ color: "rgba(74,66,56,0.5)" }}>This certificate never expires — no date needed, just the file.</p>;
+                    }
                     return (
                       <>
                         <input type="date" value={certForm.expirationDate} onChange={(e) => setCertForm((f) => ({ ...f, expirationDate: e.target.value }))}
