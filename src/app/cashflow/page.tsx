@@ -1126,8 +1126,6 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const [backfillError, setBackfillError] = useState<string | null>(null);
   const [dentalBackfillMonth, setDentalBackfillMonth] = useState(new Date().toISOString().slice(0, 7));
   const [dentalBackfillProduction, setDentalBackfillProduction] = useState("");
-  const [dentalBackfillIncome, setDentalBackfillIncome] = useState("");
-  const [dentalBackfillPatientIncome, setDentalBackfillPatientIncome] = useState("");
   const [dentalBackfillConfirmation, setDentalBackfillConfirmation] = useState<string | null>(null);
   const [dentalBackfillError, setDentalBackfillError] = useState<string | null>(null);
   const [statementHistories, setStatementHistories] = useState<Record<string, CardStatementEntry[]>>({});
@@ -1200,10 +1198,8 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
 
   async function handleDentalBackfill() {
     const production = dentalBackfillProduction ? Number(dentalBackfillProduction) : null;
-    const income = dentalBackfillIncome ? Number(dentalBackfillIncome) : null;
-    const patientIncome = dentalBackfillPatientIncome ? Number(dentalBackfillPatientIncome) : null;
-    if (!dentalBackfillMonth || (production == null && income == null && patientIncome == null)) return;
-    const result = await backfillDentalMonth(dentalBackfillMonth, production, income, patientIncome);
+    if (!dentalBackfillMonth || production == null) return;
+    const result = await backfillDentalMonth(dentalBackfillMonth, production);
     if (!result.ok) {
       setDentalBackfillError(result.error ?? "Save failed.");
       setDentalBackfillConfirmation(null);
@@ -1211,10 +1207,8 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     }
     setDentalBackfillError(null);
     const monthLabel = new Date(dentalBackfillMonth + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" });
-    setDentalBackfillConfirmation(`✓ Saved Open Dental numbers for ${monthLabel}`);
+    setDentalBackfillConfirmation(`✓ Saved Net Production for ${monthLabel}`);
     setDentalBackfillProduction("");
-    setDentalBackfillIncome("");
-    setDentalBackfillPatientIncome("");
     setTimeout(() => setDentalBackfillConfirmation(null), 5000);
     await loadAll();
   }
@@ -1237,8 +1231,7 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
 
   const sortedDentalHistory = [...dentalMonthlyHistory].sort((a, b) => a.month.localeCompare(b.month));
   const dentalSeries = [
-    { label: "Projected Production", color: CHART_COLORS[0], points: sortedDentalHistory.filter((e) => e.projectedTotalProduction != null).map((e) => ({ date: e.month, value: e.projectedTotalProduction as number })) },
-    { label: "Current Income", color: CHART_COLORS[1], points: sortedDentalHistory.filter((e) => e.currentIncome != null).map((e) => ({ date: e.month, value: e.currentIncome as number })) },
+    { label: "Net Production", color: CHART_COLORS[0], points: sortedDentalHistory.filter((e) => e.netProduction != null).map((e) => ({ date: e.month, value: e.netProduction as number })) },
   ];
 
   return (
@@ -1336,34 +1329,28 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
       </div>
 
       <div className="rounded-2xl bg-white shadow p-5">
-        <h2 className="font-bold text-slate-700 mb-1">Add / Backfill Open Dental Numbers</h2>
-        <p className="text-sm text-slate-500 mb-4">Enter the official figures for any month, past or present. This is a separate historical record from the day-to-day running numbers on Update Numbers — one won't overwrite the other.</p>
-        <div className="grid gap-3 sm:grid-cols-4 mb-3">
+        <h2 className="font-bold text-slate-700 mb-1">Add / Backfill Net Production</h2>
+        <p className="text-sm text-slate-500 mb-4">Enter the official net production figure for any month, past or present. This is a separate historical record from the day-to-day running numbers on Update Numbers — one won't overwrite the other.</p>
+        <div className="grid gap-3 sm:grid-cols-3 mb-3">
           <div>
             <label className="block text-sm text-slate-800 font-semibold mb-1">Month</label>
             <input type="month" value={dentalBackfillMonth} onChange={(e) => setDentalBackfillMonth(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
           <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Projected Total Production</label>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Net Production</label>
             <input type="number" onFocus={(e) => e.target.select()} value={dentalBackfillProduction} onChange={(e) => setDentalBackfillProduction(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Current Income</label>
-            <input type="number" onFocus={(e) => e.target.select()} value={dentalBackfillIncome} onChange={(e) => setDentalBackfillIncome(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Current Patient Income</label>
-            <input type="number" onFocus={(e) => e.target.select()} value={dentalBackfillPatientIncome} onChange={(e) => setDentalBackfillPatientIncome(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          <div className="flex items-end">
+            <button onClick={handleDentalBackfill} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition w-full" style={{ backgroundColor: "#e8622a" }}>Save</button>
           </div>
         </div>
-        <button onClick={handleDentalBackfill} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Save</button>
         {dentalBackfillConfirmation && <span className="text-sm text-emerald-600 font-semibold mt-2 block">{dentalBackfillConfirmation}</span>}
         {dentalBackfillError && <span className="text-sm text-red-600 font-semibold mt-2 block">⚠️ {dentalBackfillError}</span>}
       </div>
 
       <div className="rounded-2xl bg-white shadow p-5">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-bold text-slate-700">Open Dental — Production & Income</h2>
+          <h2 className="font-bold text-slate-700">Open Dental — Net Production</h2>
           <button onClick={() => setDepthView(depthView === "dental" ? null : "dental")} className="text-xs text-orange-500 hover:underline">{depthView === "dental" ? "Standard view" : "In-depth view"}</button>
         </div>
         <TrendLineChart series={dentalSeries} />
@@ -1373,11 +1360,7 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
               <div key={e.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
                 <span className="text-slate-600">{new Date(e.month + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
                 <span className="flex items-center gap-2 text-xs text-slate-400">
-                  <span>
-                    {e.projectedTotalProduction != null ? `Prod: $${formatMoney(e.projectedTotalProduction)}` : ""}
-                    {e.currentIncome != null ? ` · Income: $${formatMoney(e.currentIncome)}` : ""}
-                    {e.currentPatientIncome != null && e.currentIncome != null ? ` · Insurance: $${formatMoney(e.currentIncome - e.currentPatientIncome)}` : ""}
-                  </span>
+                  <span>{e.netProduction != null ? `$${formatMoney(e.netProduction)}` : ""}</span>
                   <button onClick={() => handleDeleteDentalEntry(e.id)} className="text-red-400 hover:underline">Delete</button>
                 </span>
               </div>
