@@ -500,6 +500,96 @@ export async function deleteWeeklyReview(id: string): Promise<void> {
   if (error) console.error("deleteWeeklyReview error:", error);
 }
 
+// ---------------- Open Dental monthly history (separate from daily running numbers) ----------------
+
+export interface DentalMonthlyEntry {
+  id: string;
+  month: string; // YYYY-MM
+  projectedTotalProduction: number | null;
+  currentIncome: number | null;
+  currentPatientIncome: number | null;
+  enteredAt: string;
+}
+
+function fromDentalMonthlyRow(row: any): DentalMonthlyEntry {
+  return {
+    id: row.id, month: row.month,
+    projectedTotalProduction: row.projected_total_production, currentIncome: row.current_income,
+    currentPatientIncome: row.current_patient_income, enteredAt: row.entered_at,
+  };
+}
+
+export async function loadDentalMonthlyHistory(): Promise<DentalMonthlyEntry[]> {
+  const { data, error } = await supabase.from("dental_monthly_entries").select("*").order("month", { ascending: false });
+  if (error) { console.error("loadDentalMonthlyHistory error:", error); return []; }
+  return (data ?? []).map(fromDentalMonthlyRow);
+}
+
+// Backfills or corrects a specific month's official Open Dental figures.
+// Entirely separate from the daily running numbers on Update Numbers.
+export async function backfillDentalMonth(
+  month: string, projectedTotalProduction: number | null, currentIncome: number | null, currentPatientIncome: number | null
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("dental_monthly_entries").upsert({
+    month, projected_total_production: projectedTotalProduction, current_income: currentIncome,
+    current_patient_income: currentPatientIncome, entered_at: new Date().toISOString(),
+  }, { onConflict: "month" });
+  if (error) { console.error("backfillDentalMonth error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
+export async function deleteDentalMonthlyEntry(id: string): Promise<void> {
+  const { error } = await supabase.from("dental_monthly_entries").delete().eq("id", id);
+  if (error) console.error("deleteDentalMonthlyEntry error:", error);
+}
+
+// ---------------- Open Dental — historical monthly summary ----------------
+// Deliberately a separate table from weekly_cash_reviews: that one holds the
+// day-to-day RUNNING figures shown on Update Numbers (which keep changing
+// until the month closes), while this one holds the locked-in HISTORICAL
+// figure for a finished month, used for Trends. Keeping them apart means a
+// running update and a historical entry can never collide on the same date.
+
+export interface DentalMonthlySummary {
+  id: string;
+  month: string; // YYYY-MM
+  projectedTotalProduction: number | null;
+  currentIncome: number | null;
+  currentPatientIncome: number | null;
+  enteredAt: string;
+}
+
+function fromDentalSummaryRow(row: any): DentalMonthlySummary {
+  return {
+    id: row.id, month: row.month,
+    projectedTotalProduction: row.projected_total_production, currentIncome: row.current_income,
+    currentPatientIncome: row.current_patient_income, enteredAt: row.entered_at,
+  };
+}
+
+export async function loadDentalMonthlySummaries(): Promise<DentalMonthlySummary[]> {
+  const { data, error } = await supabase.from("dental_monthly_summary").select("*").order("month", { ascending: false });
+  if (error) { console.error("loadDentalMonthlySummaries error:", error); return []; }
+  return (data ?? []).map(fromDentalSummaryRow);
+}
+
+export async function saveDentalMonthlySummary(
+  month: string, projectedTotalProduction: number | null, currentIncome: number | null, currentPatientIncome: number | null
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("dental_monthly_summary").upsert({
+    month, projected_total_production: projectedTotalProduction, current_income: currentIncome,
+    current_patient_income: currentPatientIncome, entered_at: new Date().toISOString(),
+  }, { onConflict: "month" });
+  if (error) { console.error("saveDentalMonthlySummary error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
+export async function deleteDentalMonthlySummary(id: string): Promise<void> {
+  const { error } = await supabase.from("dental_monthly_summary").delete().eq("id", id);
+  if (error) console.error("deleteDentalMonthlySummary error:", error);
+}
+
+
 // ---------------- Schedule computation ----------------
 
 export function computeDueDatesInRange(bill: RecurringBill, startDate: string, endDate: string): string[] {
