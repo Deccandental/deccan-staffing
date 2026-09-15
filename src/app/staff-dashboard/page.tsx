@@ -76,9 +76,10 @@ function certBadge(cert: Certification): { label: string; className: string } {
 interface CertFormState {
   title: string;
   expirationDate: string;
+  ceHours: string;
 }
 
-const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "" };
+const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "", ceHours: "" };
 
 function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
   const isManager = identity.canAdmin;
@@ -254,7 +255,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   }
 
   function startEditCert(cert: Certification) {
-    setCertForm({ title: cert.title, expirationDate: cert.expirationDate ?? "" });
+    setCertForm({ title: cert.title, expirationDate: cert.expirationDate ?? "", ceHours: cert.ceHours != null ? String(cert.ceHours) : "" });
     setEditingCertId(cert.id);
     setCertFile(null);
     setCertError("");
@@ -264,7 +265,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
   function openForRequiredTitle(title: string, existing?: Certification) {
     if (existing) { startEditCert(existing); return; }
-    setCertForm({ title, expirationDate: "" });
+    setCertForm({ title, expirationDate: "", ceHours: "" });
     setEditingCertId(null);
     setCertFile(null);
     setCertError("");
@@ -322,6 +323,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       employeeId: selectedId,
       title: certForm.title.trim(),
       expirationDate: resolvedExpiration,
+      ceHours: certForm.ceHours ? Number(certForm.ceHours) : null,
       fileUrl, fileName,
     };
 
@@ -605,18 +607,24 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
-            {selectedEmployee && (
-              <RequiredCertsSection
-                employee={selectedEmployee} certs={certs} requiredTypes={requiredTypesForCerts}
-                ceEntries={ceEntriesForCerts}
-                onAddCertForTitle={openForRequiredTitle}
-                refreshAll={refreshCertsData}
-              />
-            )}
-
             <div className="rounded-2xl bg-white p-4 shadow">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-bold text-slate-700">📄 Certifications</h2>
+              <div className="flex items-center gap-2 mb-3">
+                <span style={{ fontSize: 18 }}>📋</span>
+                <h2 className="font-bold" style={{ color: "#4A4238" }}>Certifications & CE</h2>
+              </div>
+
+              {selectedEmployee && (
+                <RequiredCertsSection
+                  employee={selectedEmployee} certs={certs} requiredTypes={requiredTypesForCerts}
+                  ceEntries={ceEntriesForCerts}
+                  onAddCertForTitle={openForRequiredTitle}
+                  refreshAll={refreshCertsData}
+                  bare
+                />
+              )}
+
+              <div className="flex items-center justify-between mt-4 mb-3">
+                <h3 className="text-sm font-semibold" style={{ color: "rgba(74,66,56,0.6)" }}>All documents on file</h3>
                 {!showCertForm && (
                   <button onClick={openNewCert} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
                     + Add Certification
@@ -670,6 +678,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       </>
                     );
                   })()}
+                  <input type="number" onFocus={(e) => e.target.select()} value={certForm.ceHours} onChange={(e) => setCertForm((f) => ({ ...f, ceHours: e.target.value }))}
+                    placeholder="CE credits earned (optional)" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                   <input type="file" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
                     className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" />
                   {editingCertId && <p className="text-xs text-slate-400">Leave file blank to keep the existing one.</p>}
