@@ -2,7 +2,7 @@ import { supabase } from "./supabase";
 
 export type RequiredCertRole = "Dentist" | "RDA" | "Hygienist" | "Specialist" | "Assistant";
 export type RequiredCertKind = "license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours";
-export type RequiredCertDateMode = "expiration" | "completion";
+export type RequiredCertDateMode = "expiration" | "completion" | "none";
 
 export interface RequiredCertType {
   id: string;
@@ -184,7 +184,9 @@ export function computeRequiredCertStatuses(
     // license or standalone: driven by a matching certification record.
     const cert = certsByTitle.get(type.title);
     const expirationDate = cert?.expirationDate ?? null;
-    const satisfied = !!expirationDate && expirationDate >= today;
+    // A cert marked "never expires" (dateMode 'none') is satisfied as long as
+    // it's on file at all — no expiration date is expected or computed for it.
+    const satisfied = type.dateMode === "none" ? !!cert : !!expirationDate && expirationDate >= today;
     return { type, expirationDate, totalHoursInWindow: 0, windowStart: null, windowEnd: null, satisfied, missingLicense: false, targetHours: type.targetHours };
   });
 }
