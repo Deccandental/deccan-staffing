@@ -412,28 +412,28 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             <div className="grid gap-5 lg:grid-cols-3">
 
             {(missingOrExpiredCertCount > 0 || pendingPolicies.length > 0 || checkinDue || checkinUpcoming) && (
-              <div className="lg:col-span-3 flex flex-wrap gap-2.5">
+              <div className="lg:col-span-3 flex flex-wrap gap-3">
                 {missingOrExpiredCertCount > 0 && (
-                  <a href="#certifications-card" className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition hover:opacity-80" style={{ background: "#FCEBEB", color: "#A32D2D" }}>
-                    <span>📄</span>
+                  <a href="#certifications-card" className="flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white transition hover:opacity-90" style={{ background: "#D64545", boxShadow: "0 4px 14px rgba(214,69,69,0.4)" }}>
+                    <span style={{ fontSize: 16 }}>📄</span>
                     {missingOrExpiredCertCount} certification{missingOrExpiredCertCount !== 1 ? "s" : ""} need{missingOrExpiredCertCount === 1 ? "s" : ""} attention
                   </a>
                 )}
                 {pendingPolicies.length > 0 && (
-                  <a href="/handbook" className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition hover:opacity-80" style={{ background: "#FAEEDA", color: "#854F0B" }}>
-                    <span>✍️</span>
+                  <a href="/handbook" className="flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white transition hover:opacity-90" style={{ background: "#D9891A", boxShadow: "0 4px 14px rgba(217,137,26,0.4)" }}>
+                    <span style={{ fontSize: 16 }}>✍️</span>
                     {pendingPolicies.length} signature{pendingPolicies.length !== 1 ? "s" : ""} needed
                   </a>
                 )}
                 {checkinDue && (
-                  <a href="/checkins" className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition hover:opacity-80" style={{ background: "#FAEEDA", color: "#854F0B" }}>
-                    <span>🤝</span>
+                  <a href="/checkins" className="flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white transition hover:opacity-90" style={{ background: "#D9891A", boxShadow: "0 4px 14px rgba(217,137,26,0.4)" }}>
+                    <span style={{ fontSize: 16 }}>🤝</span>
                     Check-in due
                   </a>
                 )}
                 {checkinUpcoming && (
-                  <span className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium" style={{ background: "#E6F1FB", color: "#185FA5" }}>
-                    <span>📅</span>
+                  <span className="flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white" style={{ background: "#378ADD", boxShadow: "0 4px 14px rgba(55,138,221,0.4)" }}>
+                    <span style={{ fontSize: 16 }}>📅</span>
                     Check-in {new Date(checkinUpcoming.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                   </span>
                 )}
