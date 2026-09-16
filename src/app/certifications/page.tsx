@@ -123,7 +123,7 @@ function statusBadge(cert: Certification): { label: string; className: string } 
 }
 
 function CertForm({
-  form, setForm, file, setFile, error, saving, staff, lockOwner, editingId, onSave, onCancel,
+  form, setForm, file, setFile, error, saving, staff, lockOwner, editingId, onSave, onCancel, onDelete,
   titleOptions, useCustomTitle, setUseCustomTitle, requiredTypes,
 }: {
   form: FormState;
@@ -137,6 +137,7 @@ function CertForm({
   editingId: string | null;
   onSave: () => void;
   onCancel: () => void;
+  onDelete?: () => void;
   titleOptions: string[];
   useCustomTitle: boolean;
   setUseCustomTitle: (v: boolean) => void;
@@ -252,6 +253,11 @@ function CertForm({
         <button onClick={onCancel} className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-50 transition">
           Cancel
         </button>
+        {editingId && onDelete && (
+          <button onClick={onDelete} className="rounded-xl border border-red-200 px-5 py-2.5 text-sm font-semibold text-red-500 hover:bg-red-50 transition ml-auto">
+            Delete
+          </button>
+        )}
       </div>
     </div>
   );
@@ -589,6 +595,14 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
     await refresh();
   }
 
+  async function handleDeleteFromForm() {
+    if (!editingId) return;
+    if (!confirm("Delete this certification/license? This can't be undone.")) return;
+    await deleteCertification(editingId);
+    closeForm();
+    await refresh();
+  }
+
   async function handleSendNow(id: string) {
     setNotifyMsg((m) => ({ ...m, [id]: "Sending…" }));
     try {
@@ -663,7 +677,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
             )}
             {showForm && identity.mode === "staff" && (
               <CertForm form={form} setForm={setForm} file={file} setFile={setFile} error={error} saving={saving}
-                staff={staff} lockOwner editingId={editingId} onSave={handleSave} onCancel={closeForm}
+                staff={staff} lockOwner editingId={editingId} onSave={handleSave} onCancel={closeForm} onDelete={editingId ? handleDeleteFromForm : undefined}
                 titleOptions={titleOptions} useCustomTitle={useCustomTitle} setUseCustomTitle={setUseCustomTitle} requiredTypes={requiredTypes} />
             )}
             <div className="space-y-3">
@@ -725,7 +739,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
             )}
             {showForm && (
               <CertForm form={form} setForm={setForm} file={file} setFile={setFile} error={error} saving={saving}
-                staff={staff} lockOwner={false} editingId={editingId} onSave={handleSave} onCancel={closeForm}
+                staff={staff} lockOwner={false} editingId={editingId} onSave={handleSave} onCancel={closeForm} onDelete={editingId ? handleDeleteFromForm : undefined}
                 titleOptions={titleOptions} useCustomTitle={useCustomTitle} setUseCustomTitle={setUseCustomTitle} requiredTypes={requiredTypes} />
             )}
 
