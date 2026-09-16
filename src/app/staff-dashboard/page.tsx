@@ -414,21 +414,25 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             {(missingOrExpiredCertCount > 0 || pendingPolicies.length > 0 || checkinDue || checkinUpcoming) && (
               <div className="lg:col-span-3 flex flex-wrap gap-3">
                 {missingOrExpiredCertCount > 0 && (
-                  <a href="#certifications-card" className="flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white transition hover:opacity-90" style={{ background: "#D64545", boxShadow: "0 4px 14px rgba(214,69,69,0.4)" }}>
-                    <span style={{ fontSize: 16 }}>📄</span>
-                    {missingOrExpiredCertCount} certification{missingOrExpiredCertCount !== 1 ? "s" : ""} need{missingOrExpiredCertCount === 1 ? "s" : ""} attention
+                  <a href="#certifications-card" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
+                    <span style={{ fontSize: 18 }}>📄</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#A32D2D", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
+                      {missingOrExpiredCertCount} certification{missingOrExpiredCertCount !== 1 ? "s" : ""} need{missingOrExpiredCertCount === 1 ? "s" : ""} attention
+                    </span>
                   </a>
                 )}
                 {pendingPolicies.length > 0 && (
-                  <a href="/handbook" className="flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white transition hover:opacity-90" style={{ background: "#D9891A", boxShadow: "0 4px 14px rgba(217,137,26,0.4)" }}>
-                    <span style={{ fontSize: 16 }}>✍️</span>
-                    {pendingPolicies.length} signature{pendingPolicies.length !== 1 ? "s" : ""} needed
+                  <a href="/handbook" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
+                    <span style={{ fontSize: 18 }}>✍️</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#A32D2D", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
+                      {pendingPolicies.length} signature{pendingPolicies.length !== 1 ? "s" : ""} needed
+                    </span>
                   </a>
                 )}
                 {checkinDue && (
-                  <a href="/checkins" className="flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white transition hover:opacity-90" style={{ background: "#D9891A", boxShadow: "0 4px 14px rgba(217,137,26,0.4)" }}>
-                    <span style={{ fontSize: 16 }}>🤝</span>
-                    Check-in due
+                  <a href="/checkins" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
+                    <span style={{ fontSize: 18 }}>🤝</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#A32D2D", fontVariant: "small-caps", letterSpacing: "0.03em" }}>check-in due</span>
                   </a>
                 )}
                 {checkinUpcoming && (
