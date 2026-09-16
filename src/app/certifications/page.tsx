@@ -14,7 +14,7 @@ import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredC
 import {
   RequiredCertType, RequiredCertRole, RequiredCertStatus, CeCourseEntry, GroupedRequiredType,
   loadRequiredCertTypes, createRequiredCertType, createRequiredCertTypeForRoles, renameRequiredCertType,
-  updateRequiredCertType, deleteRequiredCertType, deleteRequiredCertTypesByTitle, groupRequiredTypesByTitle,
+  updateRequiredCertType, updateRequiredCertTypeByTitle, deleteRequiredCertType, deleteRequiredCertTypesByTitle, groupRequiredTypesByTitle,
   addRoleToRequiredType, removeRoleFromRequiredType,
   loadAllCeCourseEntries, loadCeCourseEntriesForEmployee, addCeCourseEntry, deleteCeCourseEntry, computeRequiredCertStatuses, addMonths,
 } from "@/lib/requiredCertsStore";
@@ -278,6 +278,11 @@ function ManageRequiredTypesPanel({
   const [renameValue, setRenameValue] = useState("");
   const [promotingTitle, setPromotingTitle] = useState<string | null>(null);
   const [promoteRoles, setPromoteRoles] = useState<RequiredCertRole[]>([]);
+  const [editingTitle, setEditingTitle] = useState<string | null>(null);
+  const [editKind, setEditKind] = useState<"license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours">("standalone");
+  const [editDateMode, setEditDateMode] = useState<"expiration" | "completion" | "none">("completion");
+  const [editFrequency, setEditFrequency] = useState("24");
+  const [editTargetHours, setEditTargetHours] = useState("");
 
   const groups = groupRequiredTypesByTitle(requiredTypes);
   const requiredTitles = new Set(groups.map((g) => g.title));
@@ -316,6 +321,26 @@ function ManageRequiredTypesPanel({
     if (!result.ok) { setError(result.error ?? "Failed to rename."); return; }
     setError(null);
     setRenamingTitle(null);
+    await refreshAll();
+  }
+
+  function openEdit(group: GroupedRequiredType) {
+    setEditingTitle(group.title);
+    setEditKind(group.kind as any);
+    setEditDateMode(group.dateMode);
+    setEditFrequency(String(group.frequencyMonths));
+    setEditTargetHours(group.targetHours != null ? String(group.targetHours) : "");
+    setError(null);
+  }
+
+  async function handleSaveEdit(title: string) {
+    const result = await updateRequiredCertTypeByTitle(title, {
+      kind: editKind, frequencyMonths: Number(editFrequency) || 24,
+      dateMode: editDateMode, targetHours: editTargetHours ? Number(editTargetHours) : null,
+    });
+    if (!result.ok) { setError(result.error ?? "Failed to save."); return; }
+    setError(null);
+    setEditingTitle(null);
     await refreshAll();
   }
 
@@ -423,10 +448,37 @@ function ManageRequiredTypesPanel({
                   </span>
                 </span>
                 <span className="flex items-center gap-3">
+                  <button onClick={() => openEdit(group)} className="text-xs text-blue-500 hover:underline">Edit</button>
                   <button onClick={() => { setRenamingTitle(group.title); setRenameValue(group.title); }} className="text-xs text-orange-500 hover:underline">Rename</button>
                   <button onClick={() => handleMakeOptional(group.title)} className="text-xs text-amber-500 hover:underline">Make optional</button>
                   <button onClick={() => handleDeleteRequiredEntirely(group.title)} className="text-xs text-red-500 hover:underline">Delete</button>
                 </span>
+              </div>
+            )}
+            {editingTitle === group.title && (
+              <div className="mb-2 p-2 rounded-lg bg-white border border-slate-200">
+                <div className="flex gap-2 flex-wrap mb-2">
+                  <select value={editKind} onChange={(e) => setEditKind(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                    <option value="license">License (expiration date)</option>
+                    <option value="standalone">Standalone cert</option>
+                    <option value="ce_hours">CE hours (logged courses)</option>
+                    <option value="one_time_ce">One-time CE (never expires)</option>
+                    <option value="total_ce_hours">Total CE hours (running tally)</option>
+                  </select>
+                  <input type="number" value={editFrequency} onChange={(e) => setEditFrequency(e.target.value)} placeholder="Months" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none w-24" />
+                  {(editKind === "license" || editKind === "standalone") && (
+                    <select value={editDateMode} onChange={(e) => setEditDateMode(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                      <option value="expiration">Enter expiration date</option>
+                      <option value="completion">Enter completion date (auto-computes expiration)</option>
+                      <option value="none">Never expires — no date needed</option>
+                    </select>
+                  )}
+                  {(editKind === "one_time_ce" || editKind === "total_ce_hours") && (
+                    <input type="number" value={editTargetHours} onChange={(e) => setEditTargetHours(e.target.value)} placeholder="Target hrs" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none w-28" />
+                  )}
+                </div>
+                <button onClick={() => handleSaveEdit(group.title)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white mr-2" style={{ backgroundColor: "#e8622a" }}>Save</button>
+                <button onClick={() => setEditingTitle(null)} className="text-xs text-slate-400 hover:underline">Cancel</button>
               </div>
             )}
             {roleCheckboxes(group.roles, (r) => handleToggleRole(group, r))}
