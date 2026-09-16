@@ -461,39 +461,62 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {selectedEmployee?.growthBonusEligible && !showBonusCountdown && (
-              <div className="lg:col-span-3 rounded-2xl p-5" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)", boxShadow: bonusUnlocked ? "0 8px 24px rgba(16,185,129,0.2)" : "0 8px 24px rgba(245,158,11,0.2)" }}>
-                <h2 className="font-bold text-center" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>
-                  {bonusUnlocked ? "🎉 " : "🚀 "}{QUARTER_LABELS[currentQuarter]} {bonusYear} Bonus Progress{bonusUnlocked ? " — unlocked!" : ""}
-                </h2>
-                <p className="text-sm text-center mb-2" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>Received this year: <strong>${formatMoney(bonusReceivedThisYear)}</strong></p>
-                <div className="w-full h-3 rounded-full bg-white overflow-hidden">
+              <div className="lg:col-span-3 rounded-2xl p-6" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)", boxShadow: bonusUnlocked ? "0 8px 24px rgba(16,185,129,0.2)" : "0 8px 24px rgba(245,158,11,0.2)" }}>
+                <div className="text-center mb-4">
+                  <p className="text-sm font-semibold" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
+                    {QUARTER_LABELS[currentQuarter]} {bonusYear} bonus progress{bonusUnlocked ? " — unlocked!" : ""}
+                  </p>
+                  <p className="text-4xl font-bold mt-1" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>{bonusProgressPct}%</p>
+                  <p className="text-sm mt-1" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
+                    ${formatMoney(currentQuarterData?.netProductionCurrent ?? 0)} of ${formatMoney(requiredProduction)} goal
+                  </p>
+                </div>
+
+                <div className="w-full h-2.5 rounded-full bg-white overflow-hidden mb-5">
                   <div className="h-full rounded-full transition-all" style={{ width: `${bonusProgressPct}%`, backgroundColor: bonusUnlocked ? "#10b981" : "#f59e0b" }} />
                 </div>
-                <p className="text-xs text-center mt-1" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
-                  ${formatMoney(currentQuarterData?.netProductionCurrent ?? 0)} of ${formatMoney(requiredProduction)} goal ({bonusProgressPct}%){bonusUnlocked ? " — already there!" : ""}
-                </p>
 
-                {bonusBeingPaced && (
-                  <div className="mt-2 rounded-lg bg-white/80 px-3 py-2 flex items-center gap-2">
-                    <span className="text-base flex-shrink-0">💬</span>
-                    <p className="text-xs font-medium text-slate-700">
-                      Your bonus is being paid out gradually to match cash flow timing — nothing you've earned is reduced.
-                    </p>
+                <div className="grid gap-3 sm:grid-cols-2 mb-5">
+                  <div className="rounded-xl bg-white/70 p-3">
+                    <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Received this year</p>
+                    <p className="text-xl font-bold" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>${formatMoney(bonusReceivedThisYear)}</p>
                   </div>
-                )}
+                  {bonusBeingPaced ? (
+                    <div className="rounded-xl bg-white/70 p-3">
+                      <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Payout timing</p>
+                      <p className="text-xs mt-1 leading-snug text-slate-600">Paid out gradually — nothing earned is reduced</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl bg-white/70 p-3">
+                      <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Payout timing</p>
+                      <p className="text-xs mt-1 leading-snug text-slate-600">Paid in full once unlocked</p>
+                    </div>
+                  )}
+                </div>
 
-                <div className="mt-2 pt-2 border-t border-white/60 space-y-1">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{bonusYear} so far</p>
-                  {([1, 2, 3, 4] as const).filter((q) => q <= currentQuarter).map((q) => {
-                    const result = bonusForQuarter(q);
-                    if (!result) return null;
+                <div className="grid grid-cols-4 gap-2">
+                  {([1, 2, 3, 4] as const).map((q) => {
+                    const result = q <= currentQuarter ? bonusForQuarter(q) : null;
+                    const isPast = q < currentQuarter;
+                    const isCurrent = q === currentQuarter;
+                    const unlocked = result?.calc.eligible;
                     return (
-                      <div key={q} className="flex items-center justify-between text-sm bg-white/60 rounded-lg px-3 py-1.5">
-                        <span className="font-medium text-slate-700">{QUARTER_LABELS[q]}</span>
-                        {result.calc.eligible ? (
-                          <span className="text-emerald-700 font-semibold">✓ Unlocked — you earned ${formatMoney(result.myBonus)}</span>
+                      <div key={q} className="text-center rounded-xl py-3 px-1" style={{ background: unlocked ? "#EAF3DE" : isCurrent ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.4)", opacity: !isPast && !isCurrent ? 0.5 : 1 }}>
+                        <div className="text-xs mb-1" style={{ color: "rgba(74,66,56,0.5)" }}>{QUARTER_LABELS[q]}</div>
+                        {unlocked ? (
+                          <>
+                            <div style={{ color: "#3B6D11", fontSize: 16 }}>✓</div>
+                            <div className="text-xs font-semibold mt-0.5" style={{ color: "#3B6D11" }}>${formatMoney(result!.myBonus)}</div>
+                          </>
+                        ) : isPast ? (
+                          <div className="text-xs text-slate-400 mt-2">Not met</div>
+                        ) : isCurrent ? (
+                          <>
+                            <div style={{ fontSize: 16 }}>⏳</div>
+                            <div className="text-xs text-slate-500 mt-0.5">In progress</div>
+                          </>
                         ) : (
-                          <span className="text-slate-400">Not met</span>
+                          <div className="text-xs text-slate-400 mt-2">—</div>
                         )}
                       </div>
                     );
