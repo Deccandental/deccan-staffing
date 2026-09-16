@@ -595,7 +595,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             </div>
 
             <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(127,119,221,0.14)", borderTop: "4px solid #7F77DD" }}>
-              <h2 className="font-bold text-center mb-1" style={{ color: "#3C3489" }}>📝 Leave Requests</h2>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#3C3489" }}>📝 Leave Requests</h2>
               <div className="text-center mb-3">
                 <a href="/leave" className="inline-block rounded-full px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#534AB7" }}>
                   + Submit Leave Request
@@ -645,7 +645,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
-            <div id="certifications-card" className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(29,158,117,0.14)", borderTop: "4px solid #1D9E75" }}>
+            <div className="lg:col-span-3 grid gap-5 lg:grid-cols-2">
+            <div id="certifications-card" className={`rounded-2xl bg-white p-5 ${selectedEmployee && getApplicableRoles(selectedEmployee).length > 0 ? "" : "lg:col-span-2"}`} style={{ boxShadow: "0 8px 24px rgba(29,158,117,0.14)", borderTop: "4px solid #1D9E75" }}>
               <h2 className="font-bold text-center mb-3" style={{ color: "#0F6E56" }}>📋 Certificates</h2>
 
               {selectedEmployee && (
@@ -777,6 +778,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 />
               </div>
             )}
+            </div>
 
             {selectedEmployee?.hoBonusEligible && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
