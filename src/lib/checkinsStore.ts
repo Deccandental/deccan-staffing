@@ -56,6 +56,12 @@ export async function updateSlotNotes(slotId: string, notes: string): Promise<vo
   if (error) console.error("updateSlotNotes error:", error);
 }
 
+export async function updateSlotDateTime(slotId: string, date: string, time: string): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("checkin_slots").update({ date, time }).eq("id", slotId);
+  if (error) { console.error("updateSlotDateTime error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
 export async function deleteSlot(slotId: string): Promise<void> {
   const { error } = await supabase.from("checkin_slots").delete().eq("id", slotId);
   if (error) console.error("deleteSlot error:", error);
