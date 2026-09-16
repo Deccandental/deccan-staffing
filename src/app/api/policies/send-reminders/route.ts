@@ -32,7 +32,10 @@ export async function GET(req: NextRequest) {
 
     const { data: sigs } = await supabase.from("policy_signatures").select("employee_id").eq("requirement_id", req.id);
     const signedIds = new Set((sigs ?? []).map((s) => s.employee_id));
-    const pending = activeStaff.filter((e) => !signedIds.has(e.id));
+    const eligibleStaff = doc.restricted_to_employee_id != null
+      ? activeStaff.filter((e) => e.id === doc.restricted_to_employee_id)
+      : activeStaff;
+    const pending = eligibleStaff.filter((e) => !signedIds.has(e.id));
 
     for (const emp of pending) {
       const { data: reminderRow } = await supabase.from("policy_reminders_sent").select("sent_at")
