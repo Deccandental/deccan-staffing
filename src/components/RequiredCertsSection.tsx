@@ -31,11 +31,12 @@ function daysUntil(dateStr: string): number {
 }
 
 export function RequiredCertsSection({
-  employee, certs, requiredTypes, ceEntries, onAddCertForTitle, refreshAll, bare,
+  employee, certs, requiredTypes, ceEntries, onAddCertForTitle, refreshAll, bare, filter,
 }: {
   employee: Employee; certs: Certification[]; requiredTypes: RequiredCertType[]; ceEntries: CeCourseEntry[];
   onAddCertForTitle: (title: string, existing?: Certification) => void; refreshAll: () => void;
   bare?: boolean; // when true, renders without its own card wrapper/header — for embedding inside a parent card
+  filter?: "certificates" | "ce"; // when set, shows only license/standalone ("certificates") or only ce_hours/one_time_ce/total_ce_hours ("ce")
 }) {
   const [loggingTypeId, setLoggingTypeId] = useState<string | null>(null);
   const [ceCourseName, setCeCourseName] = useState("");
@@ -52,7 +53,11 @@ export function RequiredCertsSection({
   if (roles.length === 0) return null;
 
   const today = new Date().toISOString().slice(0, 10);
-  const statuses = computeRequiredCertStatuses(roles, requiredTypes, certs, ceEntries, today);
+  const CE_KINDS = new Set(["ce_hours", "one_time_ce", "total_ce_hours"]);
+  const allStatuses = computeRequiredCertStatuses(roles, requiredTypes, certs, ceEntries, today);
+  const statuses = filter === "ce" ? allStatuses.filter((s) => CE_KINDS.has(s.type.kind))
+    : filter === "certificates" ? allStatuses.filter((s) => !CE_KINDS.has(s.type.kind))
+    : allStatuses;
   if (statuses.length === 0) return null;
 
   async function handleLogCe(typeId: string) {
