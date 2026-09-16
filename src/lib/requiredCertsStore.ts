@@ -101,6 +101,22 @@ export async function updateRequiredCertType(id: string, updates: Partial<Omit<R
   return { ok: true };
 }
 
+// Updates settings (kind, frequency, date mode, target hours) shared across
+// every role-row for a title at once — the edit action for a grouped
+// requirement, since all its rows are meant to share the same settings.
+export async function updateRequiredCertTypeByTitle(
+  title: string, updates: Partial<Pick<RequiredCertType, "kind" | "frequencyMonths" | "dateMode" | "targetHours">>
+): Promise<{ ok: boolean; error?: string }> {
+  const payload: any = {};
+  if (updates.kind !== undefined) payload.kind = updates.kind;
+  if (updates.frequencyMonths !== undefined) payload.frequency_months = updates.frequencyMonths;
+  if (updates.dateMode !== undefined) payload.date_mode = updates.dateMode;
+  if (updates.targetHours !== undefined) payload.target_hours = updates.targetHours;
+  const { error } = await supabase.from("required_cert_types").update(payload).eq("title", title);
+  if (error) { console.error("updateRequiredCertTypeByTitle error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
 // Renames every row that shares the old title (across all its roles) AND
 // updates every certification record that used the old title, so existing
 // per-employee entries don't get orphaned — this is what lets you fix a
