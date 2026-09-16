@@ -619,7 +619,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             </div>
 
             <div id="certifications-card" className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(29,158,117,0.14)", borderTop: "4px solid #1D9E75" }}>
-              <h2 className="font-bold text-center mb-3" style={{ color: "#0F6E56" }}>📋 Certifications & CE</h2>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#0F6E56" }}>📋 Certificates</h2>
 
               {selectedEmployee && (
                 <RequiredCertsSection
@@ -628,6 +628,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   onAddCertForTitle={openForRequiredTitle}
                   refreshAll={refreshCertsData}
                   bare
+                  filter="certificates"
                 />
               )}
 
@@ -735,6 +736,20 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 </div>
               )}
             </div>
+
+            {selectedEmployee && getApplicableRoles(selectedEmployee).length > 0 && (
+              <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(127,119,221,0.14)", borderTop: "4px solid #7F77DD" }}>
+                <h2 className="font-bold text-center mb-3" style={{ color: "#3C3489" }}>🎓 CE Courses</h2>
+                <RequiredCertsSection
+                  employee={selectedEmployee} certs={certs} requiredTypes={requiredTypesForCerts}
+                  ceEntries={ceEntriesForCerts}
+                  onAddCertForTitle={openForRequiredTitle}
+                  refreshAll={refreshCertsData}
+                  bare
+                  filter="ce"
+                />
+              </div>
+            )}
 
             {selectedEmployee?.hoBonusEligible && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
