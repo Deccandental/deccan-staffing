@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#FAF5EC",
+  themeColor: "#FBF7EF",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -31,9 +31,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet" />
       </head>
-      <body style={{ background: "#f5f5f5", color: "#4A4238", fontFamily: "'Nunito', sans-serif" }} className="antialiased">
+      <body style={{ background: "#f5f5f5", color: "#232634", fontFamily: "'DM Sans', sans-serif" }} className="antialiased">
         {children}
       </body>
     </html>
