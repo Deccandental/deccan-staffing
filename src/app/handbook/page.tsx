@@ -164,6 +164,23 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
         </div>
       )}
 
+      {doc.countersignerEmployeeId != null && myEmployeeId === doc.countersignerEmployeeId && (() => {
+        const pendingSig = allSignatures.find((s) => !s.countersignedAt);
+        if (!pendingSig) return null;
+        return (
+          <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 flex items-center justify-between flex-wrap gap-2">
+            <p className="text-sm text-amber-800">
+              <strong>{pendingSig.employeeName}</strong> has signed <strong>{requirement.cycleLabel}</strong> — your countersignature is required.
+            </p>
+            {!showAdmin && (
+              <button onClick={() => { setShowAdmin(true); setCounterSigningId(pendingSig.id); }} className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+                Countersign now
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
       {isAdmin && (
         <button onClick={() => setShowAdmin((s) => !s)} className="text-xs text-slate-500 hover:underline">
           {showAdmin ? "Hide" : "Show"} admin compliance view
@@ -180,8 +197,9 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
           </div>
           {notifyResult && <p className="text-xs text-slate-500 mb-2">{notifyResult}</p>}
           <div className="space-y-1 max-h-64 overflow-y-auto">
-            {staff.filter((e) => !e.archived && !e.exemptFromPolicySigning).map((e) => {
+            {staff.filter((e) => !e.archived && !e.exemptFromPolicySigning && (doc.restrictedToEmployeeId == null || doc.restrictedToEmployeeId === e.id)).map((e) => {
               const sig = allSignatures.find((s) => s.employeeId === e.id);
+              const canCountersign = doc.countersignerEmployeeId == null || doc.countersignerEmployeeId === identity.employeeId || identity.mode === "super";
               return (
                 <div key={e.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
                   <span className="text-slate-700">{e.name}</span>
@@ -196,8 +214,10 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
                         <button onClick={handleCountersign} className="text-xs text-white px-2 py-0.5 rounded" style={{ backgroundColor: "#e8622a" }}>Save</button>
                         <button onClick={() => setCounterSigningId(null)} className="text-xs text-slate-400">✕</button>
                       </div>
-                    ) : (
+                    ) : canCountersign ? (
                       <button onClick={() => setCounterSigningId(sig.id)} className="text-xs text-orange-500 hover:underline">Signed — Countersign</button>
+                    ) : (
+                      <span className="text-amber-600 text-xs font-semibold">Signed — awaiting countersignature</span>
                     )
                   ) : (
                     <span className="text-slate-400 text-xs">Not yet signed</span>
@@ -270,7 +290,8 @@ function HandbookPageBody({ identity }: { identity: AppIdentity }) {
   useEffect(() => {
     Promise.all([loadPolicyDocuments(), loadStaff()]).then(([docs, s]) => {
       const visible = docs.filter((d) =>
-        d.restrictedToEmployeeId == null || d.restrictedToEmployeeId === identity.employeeId || identity.mode === "super"
+        d.restrictedToEmployeeId == null || d.restrictedToEmployeeId === identity.employeeId
+        || d.countersignerEmployeeId === identity.employeeId || identity.mode === "super"
       );
       setDocuments(visible);
       setStaff(s);
