@@ -173,3 +173,11 @@ export async function deleteCertification(id: string): Promise<void> {
   const { error } = await supabase.from("certifications").delete().eq("id", id);
   if (error) console.error("deleteCertification error:", error);
 }
+
+// Deletes every certification record with this exact title, across every
+// employee and the business itself — used when fully removing a certificate
+// title rather than just one person's record.
+export async function deleteCertificatesByTitle(title: string): Promise<void> {
+  const { error } = await supabase.from("certifications").delete().eq("title", title);
+  if (error) console.error("deleteCertificatesByTitle error:", error);
+}
