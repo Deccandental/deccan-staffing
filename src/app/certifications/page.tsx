@@ -12,8 +12,10 @@ import {
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredCertsSection";
 import {
-  RequiredCertType, RequiredCertRole, RequiredCertStatus, CeCourseEntry,
-  loadRequiredCertTypes, createRequiredCertType, renameRequiredCertType, updateRequiredCertType, deleteRequiredCertType,
+  RequiredCertType, RequiredCertRole, RequiredCertStatus, CeCourseEntry, GroupedRequiredType,
+  loadRequiredCertTypes, createRequiredCertType, createRequiredCertTypeForRoles, renameRequiredCertType,
+  updateRequiredCertType, deleteRequiredCertType, deleteRequiredCertTypesByTitle, groupRequiredTypesByTitle,
+  addRoleToRequiredType, removeRoleFromRequiredType,
   loadAllCeCourseEntries, loadCeCourseEntriesForEmployee, addCeCourseEntry, deleteCeCourseEntry, computeRequiredCertStatuses, addMonths,
 } from "@/lib/requiredCertsStore";
 
@@ -41,6 +43,73 @@ function daysUntil(dateStr: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return Math.round((target - today.getTime()) / 86400000);
+}
+
+interface GroupedCertRow {
+  title: string;
+  isRequired: boolean;
+  current: string[];
+  expiringSoon: string[];
+  expired: string[];
+  missing: string[];
+  optionalOnFile: { name: string; statusText: string; isExpired: boolean }[];
+}
+
+// Builds one row per certificate title in use — required titles get
+// current/expiring/expired/missing buckets scoped to whichever roles the
+// requirement applies to; titles that aren't tracked as a requirement just
+// list whoever currently has one on file.
+function buildGroupedCertRows(
+  requiredTypes: RequiredCertType[], staff: Employee[], allCerts: Certification[], allCeEntries: CeCourseEntry[], today: string
+): GroupedCertRow[] {
+  const groups = groupRequiredTypesByTitle(requiredTypes);
+  const rows: GroupedCertRow[] = [];
+
+  for (const group of groups) {
+    const current: string[] = [];
+    const expiringSoon: string[] = [];
+    const expired: string[] = [];
+    const missing: string[] = [];
+    const applicable = staff.filter((e) => !e.archived && getApplicableRoles(e).some((r) => group.roles.includes(r)));
+
+    for (const emp of applicable) {
+      const empCerts = allCerts.filter((c) => c.employeeId === emp.id);
+      const empCe = allCeEntries.filter((e) => e.employeeId === emp.id);
+      const statuses = computeRequiredCertStatuses(getApplicableRoles(emp), requiredTypes, empCerts, empCe, today);
+      const status = statuses.find((s) => s.type.title === group.title);
+      if (!status) { missing.push(emp.name); continue; }
+      if (group.kind === "ce_hours" || group.kind === "total_ce_hours" || group.kind === "one_time_ce") {
+        (status.satisfied ? current : missing).push(emp.name);
+      } else if (group.dateMode === "none") {
+        (status.satisfied ? current : missing).push(emp.name);
+      } else if (!status.expirationDate) {
+        missing.push(emp.name);
+      } else if (status.expirationDate < today) {
+        expired.push(emp.name);
+      } else if (daysUntil(status.expirationDate) <= 30) {
+        expiringSoon.push(emp.name);
+      } else {
+        current.push(emp.name);
+      }
+    }
+    rows.push({ title: group.title, isRequired: true, current, expiringSoon, expired, missing, optionalOnFile: [] });
+  }
+
+  const requiredTitleSet = new Set(groups.map((g) => g.title));
+  const optionalTitles = Array.from(new Set(allCerts.map((c) => c.title))).filter((t) => !requiredTitleSet.has(t));
+  for (const title of optionalTitles) {
+    const onFile = allCerts.filter((c) => c.title === title).map((c) => {
+      const name = c.ownerType === "business" ? "Business" : (staff.find((e) => e.id === c.employeeId)?.name ?? "Unknown");
+      const isExpired = !!c.expirationDate && c.expirationDate < today;
+      const statusText = c.expirationDate
+        ? `${isExpired ? "Expired" : "Expires"} ${new Date(c.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+        : "No expiration";
+      return { name, statusText, isExpired };
+    });
+    rows.push({ title, isRequired: false, current: [], expiringSoon: [], expired: [], missing: [], optionalOnFile: onFile });
+  }
+
+  return rows.sort((a, b) => a.title.localeCompare(b.title));
 }
 
 function statusBadge(cert: Certification): { label: string; className: string } {
@@ -188,63 +257,102 @@ function CertForm({
   );
 }
 
-function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes: RequiredCertType[]; refreshAll: () => void }) {
+function ManageRequiredTypesPanel({
+  requiredTypes, allCerts, refreshAll,
+}: { requiredTypes: RequiredCertType[]; allCerts: Certification[]; refreshAll: () => void }) {
+  const ALL_ROLES: RequiredCertRole[] = ["Dentist", "RDA", "Hygienist", "Specialist", "Assistant"];
   const [newTitle, setNewTitle] = useState("");
-  const [newRole, setNewRole] = useState<RequiredCertRole>("Dentist");
+  const [newRoles, setNewRoles] = useState<RequiredCertRole[]>([]);
   const [newKind, setNewKind] = useState<"license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours">("standalone");
   const [newDateMode, setNewDateMode] = useState<"expiration" | "completion" | "none">("completion");
   const [newFrequency, setNewFrequency] = useState("24");
   const [newTargetHours, setNewTargetHours] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renamingTitle, setRenamingTitle] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [promotingTitle, setPromotingTitle] = useState<string | null>(null);
+  const [promoteRoles, setPromoteRoles] = useState<RequiredCertRole[]>([]);
+
+  const groups = groupRequiredTypesByTitle(requiredTypes);
+  const requiredTitles = new Set(groups.map((g) => g.title));
+  const optionalTitles = Array.from(new Set(allCerts.map((c) => c.title))).filter((t) => !requiredTitles.has(t)).sort((a, b) => a.localeCompare(b));
+
+  function toggleNewRole(role: RequiredCertRole) {
+    setNewRoles((prev) => prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]);
+  }
 
   async function handleAdd() {
-    if (!newTitle.trim()) return;
-    const result = await createRequiredCertType({
-      title: newTitle.trim(), appliesToRole: newRole, kind: newKind,
-      frequencyMonths: Number(newFrequency) || 24, sortOrder: requiredTypes.filter((t) => t.appliesToRole === newRole).length + 1,
-      dateMode: newDateMode, targetHours: newTargetHours ? Number(newTargetHours) : null,
-    });
+    if (!newTitle.trim()) { setError("Please enter a title."); return; }
+    if (newRoles.length === 0) { setError("Please select at least one role."); return; }
+    const result = await createRequiredCertTypeForRoles({
+      title: newTitle.trim(), kind: newKind, frequencyMonths: Number(newFrequency) || 24,
+      sortOrder: 0, dateMode: newDateMode, targetHours: newTargetHours ? Number(newTargetHours) : null,
+    }, newRoles);
     if (!result.ok) { setError(result.error ?? "Failed to add."); return; }
     setError(null);
     setNewTitle("");
-    setNewTargetHours("");
+    setNewRoles([]);
     await refreshAll();
   }
 
-  async function handleRename(type: RequiredCertType) {
-    if (!renameValue.trim() || renameValue.trim() === type.title) { setRenamingId(null); return; }
-    const result = await renameRequiredCertType(type.id, type.title, renameValue.trim());
+  async function handleToggleRole(group: GroupedRequiredType, role: RequiredCertRole) {
+    if (group.roles.includes(role)) {
+      await removeRoleFromRequiredType(group, role, requiredTypes);
+    } else {
+      await addRoleToRequiredType(group, role);
+    }
+    await refreshAll();
+  }
+
+  async function handleRename(group: GroupedRequiredType) {
+    if (!renameValue.trim() || renameValue.trim() === group.title) { setRenamingTitle(null); return; }
+    const result = await renameRequiredCertType(group.title, renameValue.trim());
     if (!result.ok) { setError(result.error ?? "Failed to rename."); return; }
     setError(null);
-    setRenamingId(null);
+    setRenamingTitle(null);
     await refreshAll();
   }
 
-  async function handleToggleDateMode(type: RequiredCertType) {
-    const cycle: Record<string, "expiration" | "completion" | "none"> = { expiration: "completion", completion: "none", none: "expiration" };
-    const newMode = cycle[type.dateMode] ?? "expiration";
-    await updateRequiredCertType(type.id, { dateMode: newMode });
+  async function handleMakeOptional(title: string) {
+    if (!confirm(`Make "${title}" optional? It won't be tracked as a requirement for any role, but won't delete anyone's existing certifications.`)) return;
+    await deleteRequiredCertTypesByTitle(title);
     await refreshAll();
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("Delete this required type? This won't delete any existing certifications or CE entries, but staff will stop being tracked against it.")) return;
-    await deleteRequiredCertType(id);
+  function togglePromoteRole(role: RequiredCertRole) {
+    setPromoteRoles((prev) => prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]);
+  }
+
+  async function handleMakeRequired(title: string) {
+    if (promoteRoles.length === 0) { setError("Please select at least one role."); return; }
+    const result = await createRequiredCertTypeForRoles({
+      title, kind: "standalone", frequencyMonths: 24, sortOrder: 0, dateMode: "expiration", targetHours: null,
+    }, promoteRoles);
+    if (!result.ok) { setError(result.error ?? "Failed to update."); return; }
+    setError(null);
+    setPromotingTitle(null);
+    setPromoteRoles([]);
     await refreshAll();
   }
 
-  const roles: RequiredCertRole[] = ["Dentist", "RDA", "Hygienist", "Specialist", "Assistant"];
+  function roleCheckboxes(selected: RequiredCertRole[], onToggle: (r: RequiredCertRole) => void) {
+    return (
+      <div className="flex gap-3 flex-wrap">
+        {ALL_ROLES.map((r) => (
+          <label key={r} className="flex items-center gap-1 text-xs text-slate-600">
+            <input type="checkbox" checked={selected.includes(r)} onChange={() => onToggle(r)} />
+            {r}
+          </label>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl bg-white p-5 shadow">
-      <h3 className="font-bold text-slate-700 mb-3">Manage Required Certificate Types</h3>
-      <div className="grid gap-2 sm:grid-cols-7 mb-3">
+      <h3 className="font-bold text-slate-700 mb-3">Add a Required Certificate Type</h3>
+      <div className="grid gap-2 sm:grid-cols-4 mb-2">
         <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Title" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
-        <select value={newRole} onChange={(e) => setNewRole(e.target.value as RequiredCertRole)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
-          {roles.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
         <select value={newKind} onChange={(e) => setNewKind(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
           <option value="license">License (expiration date)</option>
           <option value="standalone">Standalone cert</option>
@@ -252,6 +360,9 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
           <option value="one_time_ce">One-time CE (never expires)</option>
           <option value="total_ce_hours">Total CE hours (running tally)</option>
         </select>
+        <input type="number" value={newFrequency} onChange={(e) => setNewFrequency(e.target.value)} placeholder="Months" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+      </div>
+      <div className="flex gap-2 mb-2 flex-wrap">
         {(newKind === "license" || newKind === "standalone") && (
           <select value={newDateMode} onChange={(e) => setNewDateMode(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
             <option value="expiration">Enter expiration date</option>
@@ -262,45 +373,64 @@ function ManageRequiredTypesPanel({ requiredTypes, refreshAll }: { requiredTypes
         {(newKind === "one_time_ce" || newKind === "total_ce_hours") && (
           <input type="number" value={newTargetHours} onChange={(e) => setNewTargetHours(e.target.value)} placeholder="Target hrs" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
         )}
-        <input type="number" value={newFrequency} onChange={(e) => setNewFrequency(e.target.value)} placeholder="Months" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+      </div>
+      <div className="mb-3">
+        <p className="text-xs font-semibold text-slate-500 mb-1">Applies to</p>
+        {roleCheckboxes(newRoles, toggleNewRole)}
       </div>
       <button onClick={handleAdd} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition mb-4" style={{ backgroundColor: "#e8622a" }}>+ Add Required Type</button>
       {error && <p className="text-sm text-red-600 mb-3">⚠️ {error}</p>}
 
-      <div className="space-y-1">
-        {requiredTypes.map((type) => (
-          <div key={type.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
-            {renamingId === type.id ? (
-              <div className="flex items-center gap-2 flex-1">
+      <h3 className="font-bold text-slate-700 mb-2 mt-6">Required Certificate Types</h3>
+      <div className="space-y-1 mb-6">
+        {groups.map((group) => (
+          <div key={group.title} className="rounded-lg bg-slate-50 p-3">
+            {renamingTitle === group.title ? (
+              <div className="flex items-center gap-2">
                 <input type="text" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none flex-1" autoFocus />
-                <button onClick={() => handleRename(type)} className="text-xs font-semibold text-emerald-600 hover:underline">Save</button>
-                <button onClick={() => setRenamingId(null)} className="text-xs text-slate-400 hover:underline">Cancel</button>
+                <button onClick={() => handleRename(group)} className="text-xs font-semibold text-emerald-600 hover:underline">Save</button>
+                <button onClick={() => setRenamingTitle(null)} className="text-xs text-slate-400 hover:underline">Cancel</button>
               </div>
             ) : (
-              <>
+              <div className="flex items-center justify-between text-sm mb-1">
                 <span className="text-slate-700">
-                  <strong>{type.title}</strong>
+                  <strong>{group.title}</strong>
                   <span className="text-xs text-slate-400 ml-2">
-                    {type.appliesToRole} · {
-                      type.kind === "ce_hours" ? "CE hours" :
-                      type.kind === "license" ? "License" :
-                      type.kind === "one_time_ce" ? `One-time CE (${type.targetHours ?? "?"} hrs)` :
-                      type.kind === "total_ce_hours" ? `Total CE hours (target ${type.targetHours ?? "?"})` :
-                      "Standalone"
-                    } · every {type.frequencyMonths}mo
-                    {(type.kind === "license" || type.kind === "standalone") && ` · ${type.dateMode === "completion" ? "completion date (auto-expires)" : type.dateMode === "none" ? "never expires" : "expiration date"}`}
+                    {group.kind === "ce_hours" ? "CE hours" : group.kind === "license" ? "License" : group.kind === "one_time_ce" ? `One-time CE (${group.targetHours ?? "?"} hrs)` : group.kind === "total_ce_hours" ? `Total CE hours (target ${group.targetHours ?? "?"})` : "Standalone"}
+                    {" · every "}{group.frequencyMonths}mo
+                    {(group.kind === "license" || group.kind === "standalone") && ` · ${group.dateMode === "completion" ? "completion date" : group.dateMode === "none" ? "never expires" : "expiration date"}`}
                   </span>
                 </span>
                 <span className="flex items-center gap-3">
-                  {(type.kind === "license" || type.kind === "standalone") && (
-                    <button onClick={() => handleToggleDateMode(type)} className="text-xs text-blue-500 hover:underline">
-                      Switch to {type.dateMode === "expiration" ? "completion date" : type.dateMode === "completion" ? "never expires" : "expiration date"}
-                    </button>
-                  )}
-                  <button onClick={() => { setRenamingId(type.id); setRenameValue(type.title); }} className="text-xs text-orange-500 hover:underline">Rename</button>
-                  <button onClick={() => handleDelete(type.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                  <button onClick={() => { setRenamingTitle(group.title); setRenameValue(group.title); }} className="text-xs text-orange-500 hover:underline">Rename</button>
+                  <button onClick={() => handleMakeOptional(group.title)} className="text-xs text-red-400 hover:underline">Make optional</button>
                 </span>
-              </>
+              </div>
+            )}
+            {roleCheckboxes(group.roles, (r) => handleToggleRole(group, r))}
+          </div>
+        ))}
+      </div>
+
+      <h3 className="font-bold text-slate-700 mb-2">Optional Certificates</h3>
+      <p className="text-xs text-slate-400 mb-2">Titles currently in use that aren't tracked as a requirement for any role.</p>
+      <div className="space-y-1">
+        {optionalTitles.length === 0 ? (
+          <p className="text-sm text-slate-400">None — every title in use is currently required for at least one role.</p>
+        ) : optionalTitles.map((title) => (
+          <div key={title} className="rounded-lg bg-slate-50 p-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-700">{title}</span>
+              <button onClick={() => { setPromotingTitle(promotingTitle === title ? null : title); setPromoteRoles([]); }} className="text-xs text-orange-500 hover:underline">
+                {promotingTitle === title ? "Cancel" : "Make required"}
+              </button>
+            </div>
+            {promotingTitle === title && (
+              <div className="mt-2">
+                {roleCheckboxes(promoteRoles, togglePromoteRole)}
+                <button onClick={() => handleMakeRequired(title)} className="mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ backgroundColor: "#e8622a" }}>Save</button>
+                <p className="text-xs text-slate-400 mt-1">Added as a standalone cert with an expiration date — you can change its kind afterward in the list above.</p>
+              </div>
             )}
           </div>
         ))}
@@ -316,7 +446,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
   const [allCerts, setAllCerts] = useState<Certification[]>([]);
   const [titleOptions, setTitleOptions] = useState<string[]>([]);
   const [useCustomTitle, setUseCustomTitle] = useState(false);
-  const [view, setView] = useState<"mine" | "all">("mine");
+  const [view, setView] = useState<"mine" | "all" | "manage">("mine");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -327,7 +457,6 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
   const [requiredTypes, setRequiredTypes] = useState<RequiredCertType[]>([]);
   const [allCeEntries, setAllCeEntries] = useState<CeCourseEntry[]>([]);
   const [showRequiredOverview, setShowRequiredOverview] = useState(false);
-  const [showManageTypes, setShowManageTypes] = useState(false);
 
   useEffect(() => { refresh(); }, []);
 
@@ -505,6 +634,10 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
               style={view === "all" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
               All Certifications & Licenses
             </button>
+            <button onClick={() => setView("manage")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
+              style={view === "manage" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
+              Manage Required Types
+            </button>
           </div>
         )}
 
@@ -565,18 +698,9 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
 
         {isManager && view === "all" && (
           <div className="max-w-3xl space-y-4">
-            <div className="flex gap-2 flex-wrap">
-              <button onClick={() => setShowRequiredOverview((s) => !s)} className="text-xs font-semibold text-orange-500 hover:underline">
-                {showRequiredOverview ? "Hide" : "Show"} Required Certificates & CE Overview
-              </button>
-              <button onClick={() => setShowManageTypes((s) => !s)} className="text-xs font-semibold text-orange-500 hover:underline">
-                {showManageTypes ? "Hide" : "Manage"} Required Certificate Types
-              </button>
-            </div>
-
-            {showManageTypes && (
-              <ManageRequiredTypesPanel requiredTypes={requiredTypes} refreshAll={refresh} />
-            )}
+            <button onClick={() => setShowRequiredOverview((s) => !s)} className="text-xs font-semibold text-orange-500 hover:underline">
+              {showRequiredOverview ? "Hide" : "Show"} Required Certificates & CE Overview (per employee)
+            </button>
 
             {showRequiredOverview && staff.filter((e) => !e.archived && getApplicableRoles(e).length > 0).map((emp) => (
               <RequiredCertsSection
@@ -604,40 +728,85 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
                 staff={staff} lockOwner={false} editingId={editingId} onSave={handleSave} onCancel={closeForm}
                 titleOptions={titleOptions} useCustomTitle={useCustomTitle} setUseCustomTitle={setUseCustomTitle} requiredTypes={requiredTypes} />
             )}
+
             <div className="space-y-3">
               {allCerts.length === 0 ? (
                 <div className="rounded-2xl bg-white p-8 text-center shadow"><p className="text-slate-400">No certifications or licenses on file.</p></div>
-              ) : allCerts.map((cert) => {
-                const badge = statusBadge(cert);
+              ) : buildGroupedCertRows(requiredTypes, staff, allCerts, allCeEntries, new Date().toISOString().slice(0, 10)).map((row) => {
+                function findCert(name: string): Certification | undefined {
+                  const emp = staff.find((e) => e.name === name);
+                  return allCerts.find((c) => c.title === row.title && (emp ? c.employeeId === emp.id : c.ownerType === "business"));
+                }
+                function openName(name: string) {
+                  const emp = staff.find((e) => e.name === name);
+                  const existing = findCert(name);
+                  if (existing) { startEdit(existing); return; }
+                  if (emp) openForRequiredItem(row.title, emp.id);
+                }
                 return (
-                  <div key={cert.id} className="rounded-2xl bg-white p-5 shadow flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-slate-700">{cert.title}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badge.className}`}>{badge.label}</span>
-                        <span className="rounded-full bg-slate-100 text-slate-500 px-2 py-0.5 text-xs">
-                          {cert.ownerType === "business" ? "Business" : employeeName(cert.employeeId)}
-                        </span>
-                      </div>
-                      <div className="text-sm text-slate-500 mt-0.5">
-                        {cert.expirationDate
-                          ? `Expires ${new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`
-                          : "No expiration date"}
-                      </div>
-                      <div className="flex items-center gap-3 mt-1">
-                        <a href={cert.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-600 hover:underline">View file →</a>
-                        <button onClick={() => handleSendNow(cert.id)} className="text-xs text-orange-500 hover:underline">Send reminder now</button>
-                        {notifyMsg[cert.id] && <span className="text-xs text-slate-400">{notifyMsg[cert.id]}</span>}
-                      </div>
+                  <div key={row.title} className="rounded-2xl bg-white p-5 shadow">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-slate-700">{row.title}</span>
+                      {!row.isRequired && <span className="rounded-full bg-slate-100 text-slate-500 px-2 py-0.5 text-xs">Optional</span>}
                     </div>
-                    <div className="flex flex-shrink-0 gap-2">
-                      <button onClick={() => startEdit(cert)} className="rounded-lg px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition font-medium">Edit</button>
-                      <button onClick={() => handleDelete(cert.id)} className="rounded-lg px-3 py-1.5 text-xs text-red-400 hover:bg-red-50 hover:text-red-600 transition font-medium">Delete</button>
-                    </div>
+                    {row.isRequired ? (
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div>
+                          <div className="text-xs font-semibold text-emerald-600 mb-1">Current — {row.current.length}</div>
+                          {row.current.length === 0 ? <p className="text-xs text-slate-300">—</p> : row.current.map((n) => (
+                            <button key={n} onClick={() => openName(n)} className="block text-sm text-slate-600 hover:underline text-left">{n}</button>
+                          ))}
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-amber-600 mb-1">Expiring soon — {row.expiringSoon.length}</div>
+                          {row.expiringSoon.length === 0 ? <p className="text-xs text-slate-300">—</p> : row.expiringSoon.map((n) => {
+                            const cert = findCert(n);
+                            return (
+                              <div key={n} className="flex items-center gap-2">
+                                <button onClick={() => openName(n)} className="text-sm text-amber-700 hover:underline text-left">{n}</button>
+                                {cert && <button onClick={() => handleSendNow(cert.id)} className="text-xs text-slate-400 hover:underline">{notifyMsg[cert.id] ?? "remind"}</button>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-red-500 mb-1">Expired / Missing — {row.expired.length + row.missing.length}</div>
+                          {row.expired.length === 0 && row.missing.length === 0 ? <p className="text-xs text-slate-300">—</p> : (
+                            <>
+                              {row.expired.map((n) => {
+                                const cert = findCert(n);
+                                return (
+                                  <div key={n} className="flex items-center gap-2">
+                                    <button onClick={() => openName(n)} className="text-sm text-red-500 hover:underline text-left">{n} (expired)</button>
+                                    {cert && <button onClick={() => handleSendNow(cert.id)} className="text-xs text-slate-400 hover:underline">{notifyMsg[cert.id] ?? "remind"}</button>}
+                                  </div>
+                                );
+                              })}
+                              {row.missing.map((n) => <button key={n} onClick={() => openName(n)} className="block text-sm text-red-500 hover:underline text-left">{n}</button>)}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {row.optionalOnFile.map((entry) => (
+                          <div key={entry.name} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
+                            <button onClick={() => openName(entry.name)} className="text-slate-600 hover:underline">{entry.name}</button>
+                            <span className={entry.isExpired ? "text-red-500 text-xs font-semibold" : "text-slate-400 text-xs"}>{entry.statusText}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {isManager && view === "manage" && (
+          <div className="max-w-3xl">
+            <ManageRequiredTypesPanel requiredTypes={requiredTypes} allCerts={allCerts} refreshAll={refresh} />
           </div>
         )}
       </div>
