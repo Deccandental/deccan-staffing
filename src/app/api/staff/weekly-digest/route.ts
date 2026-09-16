@@ -31,13 +31,16 @@ export async function GET(req: NextRequest) {
   ]);
   const today = new Date().toISOString().slice(0, 10);
 
-  const docRequirements: { docTitle: string; requirementId: string; cycleLabel: string; signedIds: Set<number> }[] = [];
+  const docRequirements: { docTitle: string; requirementId: string; cycleLabel: string; signedIds: Set<number>; restrictedToEmployeeId: number | null }[] = [];
   for (const doc of docs ?? []) {
     const { data: req } = await supabase.from("policy_requirements").select("*")
       .eq("document_id", doc.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (!req) continue;
     const { data: sigs } = await supabase.from("policy_signatures").select("employee_id").eq("requirement_id", req.id);
-    docRequirements.push({ docTitle: doc.title, requirementId: req.id, cycleLabel: req.cycle_label, signedIds: new Set((sigs ?? []).map((s) => s.employee_id)) });
+    docRequirements.push({
+      docTitle: doc.title, requirementId: req.id, cycleLabel: req.cycle_label,
+      signedIds: new Set((sigs ?? []).map((s) => s.employee_id)), restrictedToEmployeeId: doc.restricted_to_employee_id ?? null,
+    });
   }
 
   const results: { employeeId: number; itemCount: number; sent: boolean }[] = [];
@@ -54,6 +57,7 @@ export async function GET(req: NextRequest) {
 
     if (!emp.exempt_from_policy_signing) {
       for (const dr of docRequirements) {
+        if (dr.restrictedToEmployeeId != null && dr.restrictedToEmployeeId !== emp.id) continue;
         if (!dr.signedIds.has(emp.id)) items.push(`<strong>Signature needed:</strong> ${dr.docTitle} (${dr.cycleLabel})`);
       }
     }
