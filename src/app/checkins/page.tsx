@@ -7,7 +7,7 @@ import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
 import {
   CheckinSlot, loadAllSlots, createSlot, claimSlot, unclaimSlot,
-  markSlotCompleted, updateSlotNotes, deleteSlot, computeCheckinStatus,
+  markSlotCompleted, updateSlotNotes, updateSlotDateTime, deleteSlot, computeCheckinStatus,
 } from "@/lib/checkinsStore";
 
 function todayStr(): string {
@@ -42,6 +42,10 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
   const [claimingSlotId, setClaimingSlotId] = useState<string | null>(null);
   const [claimNotes, setClaimNotes] = useState("");
   const [notesDrafts, setNotesDrafts] = useState<Record<string, string>>({});
+  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTime, setRescheduleTime] = useState(TIME_OPTIONS[0]);
+  const [rescheduleError, setRescheduleError] = useState("");
 
   const today = todayStr();
   const isAdmin = !!identity.canAdmin;
@@ -97,6 +101,21 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
   async function handleDelete(slotId: string) {
     if (!confirm("Delete this slot? This can't be undone.")) return;
     await deleteSlot(slotId);
+    await refresh();
+  }
+
+  function openReschedule(slot: CheckinSlot) {
+    setReschedulingId(slot.id);
+    setRescheduleDate(slot.date);
+    setRescheduleTime(slot.time);
+    setRescheduleError("");
+  }
+
+  async function handleSaveReschedule(slotId: string) {
+    if (!rescheduleDate) { setRescheduleError("Please choose a date."); return; }
+    const result = await updateSlotDateTime(slotId, rescheduleDate, rescheduleTime);
+    if (!result.ok) { setRescheduleError(result.error ?? "Failed to save."); return; }
+    setReschedulingId(null);
     await refresh();
   }
 
@@ -214,13 +233,28 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
                                   <input type="checkbox" checked={slot.completed} onChange={() => handleToggleCompleted(slot)} />
                                   Completed
                                 </label>
+                                <button onClick={() => openReschedule(slot)} className="text-xs text-blue-500 hover:underline">Reschedule</button>
                                 <button onClick={() => handleUnclaim(slot.id)} className="text-xs text-amber-600 hover:underline">Unclaim</button>
                               </>
                             ) : (
-                              <button onClick={() => handleDelete(slot.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                              <>
+                                <button onClick={() => openReschedule(slot)} className="text-xs text-blue-500 hover:underline">Reschedule</button>
+                                <button onClick={() => handleDelete(slot.id)} className="text-xs text-red-400 hover:underline">Delete</button>
+                              </>
                             )}
                           </div>
                         </div>
+                        {reschedulingId === slot.id && (
+                          <div className="mt-2 flex items-center gap-2 flex-wrap">
+                            <input type="date" value={rescheduleDate} onChange={(e) => setRescheduleDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs focus:outline-none" />
+                            <select value={rescheduleTime} onChange={(e) => setRescheduleTime(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs focus:outline-none bg-white">
+                              {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                            <button onClick={() => handleSaveReschedule(slot.id)} className="text-xs font-semibold text-white rounded-lg px-3 py-1" style={{ backgroundColor: "#e8622a" }}>Save</button>
+                            <button onClick={() => setReschedulingId(null)} className="text-xs text-slate-400 hover:underline">Cancel</button>
+                            {rescheduleError && <p className="text-xs text-red-600 w-full">{rescheduleError}</p>}
+                          </div>
+                        )}
                         <div className="mt-2 flex items-center gap-2">
                           <input type="text" value={notesDrafts[slot.id] ?? slot.notes} onChange={(e) => setNotesDrafts((f) => ({ ...f, [slot.id]: e.target.value }))}
                             placeholder="Notes — what to discuss / what was discussed" className="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs focus:outline-none" />
