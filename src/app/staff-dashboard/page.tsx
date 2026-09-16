@@ -23,8 +23,8 @@ import { HoBonusMonth, loadHoBonusPayoutYear } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
 import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
 import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsStore";
-import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry } from "@/lib/requiredCertsStore";
-import { RequiredCertsSection } from "@/components/RequiredCertsSection";
+import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry, computeRequiredCertStatuses } from "@/lib/requiredCertsStore";
+import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredCertsSection";
 import { formatMoney } from "@/lib/format";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
@@ -171,6 +171,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       const docs = await loadPolicyDocuments();
       const pending: { title: string; cycleLabel: string }[] = [];
       for (const doc of docs) {
+        if (doc.restrictedToEmployeeId != null && doc.restrictedToEmployeeId !== selectedId) continue;
         const req = await loadLatestRequirement(doc.id);
         if (!req) continue;
         const sig = await loadMySignature(req.id, selectedId);
@@ -199,6 +200,14 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   }, [selectedId, staff]);
 
   const selectedEmployee = staff.find((e) => e.id === selectedId);
+
+  const missingOrExpiredCertCount = selectedEmployee ? (() => {
+    const roles = getApplicableRoles(selectedEmployee);
+    if (roles.length === 0) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const statuses = computeRequiredCertStatuses(roles, requiredTypesForCerts, certs, ceEntriesForCerts, today);
+    return statuses.filter((s) => !s.satisfied).length;
+  })() : 0;
 
   // Computes what this specific employee earned for a given quarter, by
   // splitting that quarter's pool across every eligible employee — mirrors
@@ -402,42 +411,32 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
             <div className="grid gap-5 lg:grid-cols-3">
 
-            {certs.some((c) => c.expirationDate && certBadge(c).label === "Expired") && (
-              <div className="lg:col-span-3 rounded-xl px-4 py-3 shadow flex items-center gap-3" style={{ background: "linear-gradient(135deg, #fee2e2, #fecaca)" }}>
-                <span className="text-lg flex-shrink-0">📄</span>
-                <p className="text-sm text-red-800">
-                  <strong>Certification expired:</strong>{" "}
-                  {certs.filter((c) => c.expirationDate && certBadge(c).label === "Expired").map((c) => c.title).join(", ")} — please renew and update it below.
-                </p>
-              </div>
-            )}
-
-            {pendingPolicies.length > 0 && (
-              <div className="lg:col-span-3 rounded-xl px-4 py-3 shadow flex items-center justify-between flex-wrap gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
-                <p className="text-sm text-amber-800 flex items-center gap-2">
-                  <span className="text-lg">✍️</span>
-                  <span>
-                    <strong>Signature needed:</strong> {pendingPolicies.map((p) => `${p.title} (${p.cycleLabel})`).join(", ")}
+            {(missingOrExpiredCertCount > 0 || pendingPolicies.length > 0 || checkinDue || checkinUpcoming) && (
+              <div className="lg:col-span-3 flex flex-wrap gap-2.5">
+                {missingOrExpiredCertCount > 0 && (
+                  <a href="#certifications-card" className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition hover:opacity-80" style={{ background: "#FCEBEB", color: "#A32D2D" }}>
+                    <span>📄</span>
+                    {missingOrExpiredCertCount} certification{missingOrExpiredCertCount !== 1 ? "s" : ""} need{missingOrExpiredCertCount === 1 ? "s" : ""} attention
+                  </a>
+                )}
+                {pendingPolicies.length > 0 && (
+                  <a href="/handbook" className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition hover:opacity-80" style={{ background: "#FAEEDA", color: "#854F0B" }}>
+                    <span>✍️</span>
+                    {pendingPolicies.length} signature{pendingPolicies.length !== 1 ? "s" : ""} needed
+                  </a>
+                )}
+                {checkinDue && (
+                  <a href="/checkins" className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition hover:opacity-80" style={{ background: "#FAEEDA", color: "#854F0B" }}>
+                    <span>🤝</span>
+                    Check-in due
+                  </a>
+                )}
+                {checkinUpcoming && (
+                  <span className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium" style={{ background: "#E6F1FB", color: "#185FA5" }}>
+                    <span>📅</span>
+                    Check-in {new Date(checkinUpcoming.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                   </span>
-                </p>
-                <a href="/handbook" className="text-xs font-semibold text-amber-900 underline flex-shrink-0">Sign now →</a>
-              </div>
-            )}
-
-            {checkinDue && (
-              <div className="lg:col-span-3 rounded-xl px-4 py-3 shadow flex items-center justify-between flex-wrap gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
-                <p className="text-sm text-amber-800 flex items-center gap-2">
-                  <span className="text-lg">🤝</span>
-                  <span><strong>Check-in due:</strong> please pick a slot for your 6-month check-in.</span>
-                </p>
-                <a href="/checkins" className="text-xs font-semibold text-amber-900 underline flex-shrink-0">Book now →</a>
-              </div>
-            )}
-
-            {checkinUpcoming && (
-              <div className="lg:col-span-3 rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #dbeafe, #bfdbfe)" }}>
-                <span className="text-lg">📅</span>
-                <p className="text-sm text-blue-800"><strong>Check-in scheduled:</strong> {new Date(checkinUpcoming.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {checkinUpcoming.time}.</p>
+                )}
               </div>
             )}
 
@@ -619,7 +618,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
-            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(29,158,117,0.14)", borderTop: "4px solid #1D9E75" }}>
+            <div id="certifications-card" className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(29,158,117,0.14)", borderTop: "4px solid #1D9E75" }}>
               <h2 className="font-bold text-center mb-3" style={{ color: "#0F6E56" }}>📋 Certifications & CE</h2>
 
               {selectedEmployee && (
