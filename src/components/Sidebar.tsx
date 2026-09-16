@@ -128,11 +128,11 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
 
   return (
     <>
-      <div className="px-5 py-5 flex-shrink-0" style={{ borderBottom: "1px solid rgba(74,66,56,0.08)" }}>
-        <div className="rounded-2xl px-3 py-2.5 flex items-center justify-center" style={{ background: "white" }}>
-          <Image src="/logo.svg" alt="Deccan Dental Sleep Center" width={160} height={55} className="object-contain" priority />
+      <div className="px-5 py-6 flex-shrink-0" style={{ borderBottom: "1px solid rgba(35,38,52,0.08)" }}>
+        <div className="flex items-center justify-center">
+          <Image src="/logo.svg" alt="Deccan Dental Sleep Center" width={230} height={80} className="object-contain" priority />
         </div>
-        <div className="mt-3 text-xs font-bold tracking-widest uppercase text-center" style={{ color: "rgba(74,66,56,0.5)" }}>
+        <div className="mt-3 text-xs font-semibold tracking-widest uppercase text-center" style={{ color: "rgba(35,38,52,0.45)", fontFamily: "'Poppins', sans-serif" }}>
           Staff Scheduler
         </div>
       </div>
@@ -165,7 +165,7 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
                 className="flex items-center gap-3 rounded-full px-4 py-2.5 text-sm font-semibold transition-all duration-150"
                 style={
                   active
-                    ? { background: "#e8622a", color: "white", boxShadow: "0 4px 14px rgba(232, 98, 42, 0.3)" }
+                    ? { background: "#EF843F", color: "white", boxShadow: "0 4px 14px rgba(239, 132, 63, 0.35)" }
                     : accessible
                     ? { color: "rgba(74,66,56,0.85)" }
                     : { color: "rgba(74,66,56,0.28)" }
@@ -204,7 +204,7 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
         {identity ? (
           <div>
             <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>
+              <div className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#EF843F" }}>
                 {identity.mode === "super" ? "A" : (identity.employeeName ?? "?").charAt(0).toUpperCase()}
               </div>
               <div>
@@ -224,7 +224,7 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
           </div>
         ) : (
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#e8622a" }}>D</div>
+            <div className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#EF843F" }}>D</div>
             <div>
               <div className="text-xs font-bold" style={{ color: "#4A4238" }}>Deccan Dental</div>
               <div className="text-xs" style={{ color: "rgba(74,66,56,0.55)" }}>Sleep Center</div>
@@ -245,20 +245,20 @@ export function Sidebar() {
       {/* ── Desktop sidebar (lg+) ── */}
       <aside
         className="hidden lg:flex fixed left-0 top-0 z-50 h-screen w-64 flex-col"
-        style={{ background: "#FAF5EC", borderRight: "1px solid rgba(74,66,56,0.08)" }}
+        style={{ background: "#FBF7EF", borderRight: "1px solid rgba(74,66,56,0.08)" }}
       >
         <NavContent pathname={pathname} />
       </aside>
 
       {/* ── Mobile top bar (< lg) ── */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-3" style={{ background: "#FAF5EC", boxShadow: "0 1px 3px rgba(74,66,56,0.08)" }}>
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-3" style={{ background: "#FBF7EF", boxShadow: "0 1px 3px rgba(74,66,56,0.08)" }}>
         <div>
-          <div style={{ fontWeight: 800, color: "#4A4238", fontSize: 16 }}>
-            deccan<span style={{ color: "#e8622a" }}>|</span>dental
+          <div style={{ fontWeight: 700, color: "#232634", fontSize: 17, fontFamily: "'Poppins', sans-serif" }}>
+            deccan<span style={{ color: "#EF843F" }}>|</span>dental
           </div>
-          <div style={{ fontSize: 10, color: "rgba(74,66,56,0.55)", letterSpacing: "0.1em" }}>STAFF SCHEDULER</div>
+          <div style={{ fontSize: 10, color: "rgba(35,38,52,0.5)", letterSpacing: "0.1em", fontFamily: "'Poppins', sans-serif", fontWeight: 600 }}>STAFF SCHEDULER</div>
         </div>
-        <button onClick={() => setOpen(true)} style={{ fontSize: 24, color: "#4A4238", lineHeight: 1 }} aria-label="Open menu">☰</button>
+        <button onClick={() => setOpen(true)} style={{ fontSize: 24, color: "#232634", lineHeight: 1 }} aria-label="Open menu">☰</button>
       </div>
 
       {/* ── Mobile drawer overlay ── */}
@@ -267,7 +267,7 @@ export function Sidebar() {
           <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setOpen(false)} />
           <aside
             className="relative flex flex-col w-72 h-full"
-            style={{ background: "#FAF5EC" }}
+            style={{ background: "#FBF7EF" }}
           >
             <button
               onClick={() => setOpen(false)}
