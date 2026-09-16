@@ -7,7 +7,7 @@ import { loadStaff } from "@/lib/staffStore";
 import {
   Certification, NewCertInput, CertOwnerType,
   loadAllCertifications, loadCertificationsForEmployee,
-  createCertification, updateCertification, deleteCertification, uploadCertFile,
+  createCertification, updateCertification, deleteCertification, deleteCertificatesByTitle, uploadCertFile,
 } from "@/lib/certsStore";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredCertsSection";
@@ -325,6 +325,19 @@ function ManageRequiredTypesPanel({
     await refreshAll();
   }
 
+  async function handleDeleteRequiredEntirely(title: string) {
+    if (!confirm(`Permanently delete "${title}"? This removes the requirement AND every employee's existing certification/CE record for it. This can't be undone.`)) return;
+    await deleteRequiredCertTypesByTitle(title);
+    await deleteCertificatesByTitle(title);
+    await refreshAll();
+  }
+
+  async function handleDeleteOptional(title: string) {
+    if (!confirm(`Permanently delete "${title}"? This removes every employee's certification record with this title. This can't be undone.`)) return;
+    await deleteCertificatesByTitle(title);
+    await refreshAll();
+  }
+
   function togglePromoteRole(role: RequiredCertRole) {
     setPromoteRoles((prev) => prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]);
   }
@@ -403,13 +416,16 @@ function ManageRequiredTypesPanel({
                   <strong>{group.title}</strong>
                   <span className="text-xs text-slate-400 ml-2">
                     {group.kind === "ce_hours" ? "CE hours" : group.kind === "license" ? "License" : group.kind === "one_time_ce" ? `One-time CE (${group.targetHours ?? "?"} hrs)` : group.kind === "total_ce_hours" ? `Total CE hours (target ${group.targetHours ?? "?"})` : "Standalone"}
-                    {" · every "}{group.frequencyMonths}mo
+                    {(group.kind === "ce_hours" || group.kind === "total_ce_hours" || ((group.kind === "license" || group.kind === "standalone") && group.dateMode !== "none")) && (
+                      <>{" · every "}{group.frequencyMonths}mo</>
+                    )}
                     {(group.kind === "license" || group.kind === "standalone") && ` · ${group.dateMode === "completion" ? "completion date" : group.dateMode === "none" ? "never expires" : "expiration date"}`}
                   </span>
                 </span>
                 <span className="flex items-center gap-3">
                   <button onClick={() => { setRenamingTitle(group.title); setRenameValue(group.title); }} className="text-xs text-orange-500 hover:underline">Rename</button>
-                  <button onClick={() => handleMakeOptional(group.title)} className="text-xs text-red-400 hover:underline">Make optional</button>
+                  <button onClick={() => handleMakeOptional(group.title)} className="text-xs text-amber-500 hover:underline">Make optional</button>
+                  <button onClick={() => handleDeleteRequiredEntirely(group.title)} className="text-xs text-red-500 hover:underline">Delete</button>
                 </span>
               </div>
             )}
@@ -427,9 +443,12 @@ function ManageRequiredTypesPanel({
           <div key={title} className="rounded-lg bg-slate-50 p-3">
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-700">{title}</span>
-              <button onClick={() => { setPromotingTitle(promotingTitle === title ? null : title); setPromoteRoles([]); }} className="text-xs text-orange-500 hover:underline">
-                {promotingTitle === title ? "Cancel" : "Make required"}
-              </button>
+              <span className="flex items-center gap-3">
+                <button onClick={() => { setPromotingTitle(promotingTitle === title ? null : title); setPromoteRoles([]); }} className="text-xs text-orange-500 hover:underline">
+                  {promotingTitle === title ? "Cancel" : "Make required"}
+                </button>
+                <button onClick={() => handleDeleteOptional(title)} className="text-xs text-red-500 hover:underline">Delete</button>
+              </span>
             </div>
             {promotingTitle === title && (
               <div className="mt-2">
