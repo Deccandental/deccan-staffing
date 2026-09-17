@@ -362,29 +362,33 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   return (
     <main className="min-h-screen" style={{ background: "linear-gradient(160deg, #FDF2E9 0%, #F5EFFA 50%, #EAF3F8 100%)" }}>
       <Sidebar />
-      <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
-        <header className="mb-6 flex items-center justify-between flex-wrap gap-3">
-          <h1 className="text-2xl font-bold" style={{ color: "#4A4238" }}>Staff Dashboard</h1>
-          <div className="flex items-center gap-2 rounded-full px-4 py-2 shadow-sm text-sm" style={{ background: "#FCE8D5" }}>
-            <span style={{ color: "#B8501E" }}>
-              {isManager ? "👔 Manager view" : `👤 ${identity.employeeName ?? ""}`}
-            </span>
-            <button onClick={logout} className="text-xs font-semibold underline" style={{ color: "#B8501E" }}>
-              Not you?
-            </button>
-          </div>
+      <div className="pt-24 lg:pt-12 lg:ml-64 p-4 lg:px-8 lg:pb-8">
+        <header className="mb-6 flex items-center justify-between flex-wrap gap-4">
+          <h1 className="text-2xl font-bold flex-shrink-0" style={{ color: "#4A4238" }}>Staff Dashboard</h1>
+          {isManager ? (
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="text-xs font-semibold flex-shrink-0" style={{ color: "rgba(74,66,56,0.55)" }}>View staff member</label>
+              <select value={selectedId ?? ""} onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : null)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none min-w-[220px]">
+                <option value="">Select a staff member...</option>
+                {staff.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}{e.archived ? " (archived)" : ""}</option>)}
+              </select>
+              <div className="flex items-center gap-2 rounded-full px-4 py-2 shadow-sm text-sm flex-shrink-0" style={{ background: "#FCE8D5" }}>
+                <span style={{ color: "#B8501E" }}>👔 Manager view</span>
+                <button onClick={logout} className="text-xs font-semibold underline" style={{ color: "#B8501E" }}>
+                  Not you?
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-full px-4 py-2 shadow-sm text-sm flex-shrink-0" style={{ background: "#FCE8D5" }}>
+              <span style={{ color: "#B8501E" }}>👤 {identity.employeeName ?? ""}</span>
+              <button onClick={logout} className="text-xs font-semibold underline" style={{ color: "#B8501E" }}>
+                Not you?
+              </button>
+            </div>
+          )}
         </header>
-
-        {isManager && (
-          <div className="mb-6 max-w-sm">
-            <label className="block text-xs font-semibold text-slate-500 mb-1">View staff member</label>
-            <select value={selectedId ?? ""} onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : null)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:outline-none">
-              <option value="">Select a staff member...</option>
-              {staff.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}{e.archived ? " (archived)" : ""}</option>)}
-            </select>
-          </div>
-        )}
 
         {selectedId == null ? (
           <div className="rounded-2xl bg-white p-10 text-center shadow max-w-lg">
