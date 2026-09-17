@@ -305,9 +305,9 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
         </div>
       )}
 
-      <div className="hidden lg:block"><Sidebar /></div>
+      <Sidebar />
 
-      <div className="lg:ml-64 p-4 lg:p-8">
+      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
         <div className="mb-6 flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h1 className="text-2xl lg:text-3xl font-bold" style={{ color: "#5a5a5a" }}>Leave & Absences</h1>
