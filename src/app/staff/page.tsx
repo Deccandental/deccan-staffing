@@ -199,7 +199,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     return (
       <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
         <Sidebar />
-        <div className="lg:ml-64 pt-16 lg:pt-0 flex items-center justify-center min-h-screen">
+        <div className="lg:ml-64 pt-24 lg:pt-0 flex items-center justify-center min-h-screen">
           <p className="text-gray-400">Loading staff...</p>
         </div>
       </main>
@@ -209,7 +209,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
       <Sidebar />
-      <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold" style={{ color: "#5a5a5a" }}>Staff Management</h1>
