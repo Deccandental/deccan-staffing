@@ -33,7 +33,7 @@ interface StoredIdentity {
 }
 
 const navItems: { label: string; href: string; icon: string; permission: PermissionLevel; group?: string }[] = [
-  { label: "Calendar", href: "/", icon: "📅", permission: "public" },
+  { label: "Calendar", href: "/calendar", icon: "📅", permission: "public" },
   { label: "Leave Request", href: "/leave", icon: "📝", permission: "any" },
   { label: "Staff Dashboard", href: "/staff-dashboard", icon: "🗂️", permission: "any" },
   { label: "Certifications", href: "/certifications", icon: "📄", permission: "any" },
@@ -50,6 +50,16 @@ const navItems: { label: string; href: string; icon: string; permission: Permiss
   { label: "Events", href: "/events", icon: "📌", permission: "canManageEvents", group: "Admin" },
   { label: "Payroll Dashboard", href: "/payroll", icon: "💵", permission: "canManagePayroll", group: "Finances" },
   { label: "Cash Flow", href: "/cashflow", icon: "📊", permission: "canManagePayroll", group: "Finances" },
+];
+
+// Quick-access tabs in the mobile toolbar — a handful of the most-used
+// pages, so switching between them doesn't require opening the full menu
+// each time. "More" (added separately) opens the full drawer for everything else.
+const MOBILE_QUICK_TABS = [
+  { label: "Dashboard", href: "/staff-dashboard", icon: "🗂️" },
+  { label: "Calendar", href: "/calendar", icon: "📅" },
+  { label: "Leave", href: "/leave", icon: "📝" },
+  { label: "Certs", href: "/certifications", icon: "📄" },
 ];
 
 function useIdentity(): StoredIdentity | null {
@@ -251,14 +261,28 @@ export function Sidebar() {
       </aside>
 
       {/* ── Mobile top bar (< lg) ── */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-3" style={{ background: "#FBF7EF", boxShadow: "0 1px 3px rgba(74,66,56,0.08)" }}>
-        <div>
-          <div style={{ fontWeight: 700, color: "#232634", fontSize: 17, fontFamily: "'Poppins', sans-serif" }}>
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50" style={{ background: "#FBF7EF", boxShadow: "0 1px 3px rgba(74,66,56,0.08)" }}>
+        <div className="flex items-center justify-between px-4 py-2">
+          <div style={{ fontWeight: 700, color: "#232634", fontSize: 16, fontFamily: "'Poppins', sans-serif" }}>
             deccan<span style={{ color: "#EF843F" }}>|</span>dental
           </div>
-          <div style={{ fontSize: 10, color: "rgba(35,38,52,0.5)", letterSpacing: "0.1em", fontFamily: "'Poppins', sans-serif", fontWeight: 600 }}>STAFF SCHEDULER</div>
         </div>
-        <button onClick={() => setOpen(true)} style={{ fontSize: 24, color: "#232634", lineHeight: 1 }} aria-label="Open menu">☰</button>
+        <div className="flex items-stretch border-t" style={{ borderColor: "rgba(35,38,52,0.08)" }}>
+          {MOBILE_QUICK_TABS.map((tab) => {
+            const active = pathname === tab.href;
+            return (
+              <a key={tab.href} href={tab.href} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2"
+                style={{ borderTop: active ? "2px solid #EF843F" : "2px solid transparent" }}>
+                <span style={{ fontSize: 19 }}>{tab.icon}</span>
+                <span style={{ fontSize: 10, fontWeight: active ? 700 : 500, color: active ? "#DE6C24" : "rgba(35,38,52,0.55)", fontFamily: "'Poppins', sans-serif" }}>{tab.label}</span>
+              </a>
+            );
+          })}
+          <button onClick={() => setOpen(true)} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2" style={{ borderTop: "2px solid transparent" }}>
+            <span style={{ fontSize: 19 }}>☰</span>
+            <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(35,38,52,0.55)", fontFamily: "'Poppins', sans-serif" }}>More</span>
+          </button>
+        </div>
       </div>
 
       {/* ── Mobile drawer overlay ── */}
