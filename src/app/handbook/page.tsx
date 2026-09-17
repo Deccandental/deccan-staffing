@@ -320,7 +320,7 @@ function HandbookPageBody({ identity }: { identity: AppIdentity }) {
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
       <Sidebar />
-      <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
         <header className="mb-4 print:hidden">
           <h1 className="text-2xl font-bold">Employee Handbook</h1>
           <p className="text-sm text-slate-500 mt-1">Read, search, and sign the current handbook and arbitration agreement.</p>
