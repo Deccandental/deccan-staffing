@@ -20,6 +20,7 @@ function EventsPageBody() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [events, setEvents] = useState<StaffEvent[]>([]);
   const [form, setForm] = useState<NewEventInput>(EMPTY_FORM);
+  const [allDay, setAllDay] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [announceNow, setAnnounceNow] = useState(false);
   const [error, setError] = useState("");
@@ -51,6 +52,7 @@ function EventsPageBody() {
       remind1Day: ev.remind1Day, remind1Week: ev.remind1Week, remind3Weeks: ev.remind3Weeks,
     });
     setEditingId(ev.id);
+    setAllDay(!ev.time && !ev.endTime);
     setAnnounceNow(false);
     setError("");
     setShowForm(true);
@@ -58,6 +60,7 @@ function EventsPageBody() {
 
   function closeForm() {
     setForm(EMPTY_FORM);
+    setAllDay(false);
     setEditingId(null);
     setAnnounceNow(false);
     setError("");
@@ -107,13 +110,13 @@ function EventsPageBody() {
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
       <Sidebar />
-      <div className="pt-16 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
         <header className="mb-8 flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-3xl font-bold">Events</h1>
             <p className="mt-1 text-slate-500">Staff meetings, trainings, and announcements — with automatic reminders.</p>
           </div>
-          <button onClick={() => { if (showForm) { closeForm(); } else { setForm(EMPTY_FORM); setEditingId(null); setShowForm(true); } }}
+          <button onClick={() => { if (showForm) { closeForm(); } else { setForm(EMPTY_FORM); setAllDay(false); setEditingId(null); setShowForm(true); } }}
             className="rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow hover:opacity-90 transition"
             style={{ backgroundColor: "#e8622a" }}>
             {showForm ? "✕ Cancel" : "+ New Event"}
@@ -131,16 +134,30 @@ function EventsPageBody() {
                 <input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-orange-400" />
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Start time (optional)</label>
-                <input type="time" value={form.time} onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-orange-400" />
+              <div className="sm:col-span-2 flex items-end pb-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={allDay} onChange={(e) => {
+                    const checked = e.target.checked;
+                    setAllDay(checked);
+                    if (checked) setForm((f) => ({ ...f, time: "", endTime: "" }));
+                  }} />
+                  <span className="text-sm font-medium text-slate-600">All Day</span>
+                </label>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">End time (optional)</label>
-                <input type="time" value={form.endTime} onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-orange-400" />
-              </div>
+              {!allDay && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Start time (optional)</label>
+                    <input type="time" value={form.time} onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-orange-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">End time (optional)</label>
+                    <input type="time" value={form.endTime} onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-orange-400" />
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="mb-4">
@@ -230,7 +247,7 @@ function EventsPageBody() {
                       {ev.announced && <span className="rounded-full bg-cyan-100 text-cyan-600 text-xs font-semibold px-2 py-0.5">Announced</span>}
                     </div>
                     <div className="text-sm text-slate-500 mt-0.5">
-                      {dateLabel}{ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : ""}
+                      {dateLabel}{ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : " · All Day"}
                     </div>
                     {ev.description && <p className="text-sm text-slate-600 mt-1.5">{ev.description}</p>}
                     <div className="text-xs text-slate-400 mt-2">
