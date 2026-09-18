@@ -50,7 +50,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
   const [filterEmployee, setFilterEmployee] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
   const [absenceSortField, setAbsenceSortField] = useState<"date" | "name" | "reason" | "status">("date");
-  const [absenceSortDir, setAbsenceSortDir] = useState<"asc" | "desc">("desc");
+  const [absenceSortDir, setAbsenceSortDir] = useState<"asc" | "desc">("asc");
   const [menuOpen, setMenuOpen] = useState(false);
   const today0 = new Date();
   const [calYear, setCalYear] = useState(today0.getFullYear());
@@ -225,7 +225,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
 
   function toggleAbsenceSort(field: typeof absenceSortField) {
     if (absenceSortField === field) { setAbsenceSortDir((d) => (d === "asc" ? "desc" : "asc")); }
-    else { setAbsenceSortField(field); setAbsenceSortDir(field === "date" ? "desc" : "asc"); }
+    else { setAbsenceSortField(field); setAbsenceSortDir("asc"); }
   }
 
   function absenceSortArrow(field: typeof absenceSortField) {
@@ -670,13 +670,13 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                               : `${new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date((a.endDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
                             return (
                               <tr key={i} className="hover:brightness-95 transition align-top"
-                                style={{ background: rowBg, borderBottom: "1px solid rgba(0,0,0,0.08)", borderTop: isNewMonth && i > 0 ? "2px solid rgba(0,0,0,0.18)" : undefined }}>
+                                style={{ background: rowBg, borderBottom: "1px solid rgba(0,0,0,0.08)", borderTop: isNewMonth && i > 0 ? "3px solid rgba(0,0,0,0.35)" : undefined }}>
                                 <td className="px-3 py-1.5 whitespace-nowrap">
                                   <div className="font-medium" style={{ color: "#5a5a5a" }}>{dateStr}</div>
                                   {a.totalDays && a.totalDays > 1 ? <div className="text-xs text-gray-400">{a.totalDays} days</div> : null}
                                 </td>
                                 <td className="px-3 py-1.5">
-                                  <span className="inline-block rounded-lg px-2.5 py-1 text-sm font-semibold" style={{ background: `${empColor}29`, color: empColor }}>
+                                  <span className="inline-block rounded-lg px-2.5 py-1 text-sm font-semibold whitespace-nowrap" style={{ background: `${empColor}29`, color: empColor }}>
                                     {a.employeeName}
                                   </span>
                                 </td>
