@@ -869,25 +869,44 @@ export interface ArHealthResult {
   pctCurrent: number; // % in 0-30
   pctOver60: number; // % in 61-90 + 90+
   pctOver90: number; // % in 90+ alone
+  arRatio: number | null; // True A/R ÷ average monthly production — target ~1.0, concerning above 1.5
+  daysInAr: number | null; // True A/R ÷ average net daily production — industry average ~45 days
   status: "good" | "fair" | "poor";
   reasons: string[];
 }
 
 // Benchmarks: healthy practices keep 70%+ of AR in the 0-30 bucket, no more
 // than 10% past 60 days combined, and no more than 5% in the 90+ bucket alone.
-export function computeArHealth(entry: { ar0to30: number; ar31to60: number; ar61to90: number; ar90plus: number; woEstimate?: number }): ArHealthResult {
+export function computeArHealth(
+  entry: { ar0to30: number; ar31to60: number; ar61to90: number; ar90plus: number; woEstimate?: number },
+  avgMonthlyProduction?: number | null
+): ArHealthResult {
   const rawTotal = entry.ar0to30 + entry.ar31to60 + entry.ar61to90 + entry.ar90plus;
   const trueAr = Math.max(0, rawTotal - (entry.woEstimate ?? 0));
-  if (rawTotal <= 0) return { totalAr: 0, pctCurrent: 0, pctOver60: 0, pctOver90: 0, status: "good", reasons: [] };
+  if (rawTotal <= 0) return { totalAr: 0, pctCurrent: 0, pctOver60: 0, pctOver90: 0, arRatio: null, daysInAr: null, status: "good", reasons: [] };
   const pctCurrent = (entry.ar0to30 / rawTotal) * 100;
   const pctOver60 = ((entry.ar61to90 + entry.ar90plus) / rawTotal) * 100;
   const pctOver90 = (entry.ar90plus / rawTotal) * 100;
+  const arRatio = avgMonthlyProduction && avgMonthlyProduction > 0 ? trueAr / avgMonthlyProduction : null;
+  const daysInAr = arRatio != null ? arRatio * 30 : null;
 
   const reasons: string[] = [];
   if (pctCurrent < 70) reasons.push(`Only ${pctCurrent.toFixed(0)}% of A/R is current (0-30 days) — target is 70%+`);
   if (pctOver60 > 10) reasons.push(`${pctOver60.toFixed(0)}% of A/R is over 60 days — target is under 10%`);
   if (pctOver90 > 5) reasons.push(`${pctOver90.toFixed(0)}% of A/R is over 90 days — target is under 5%`);
+  if (arRatio != null && arRatio > 1.5) reasons.push(`A/R Ratio is ${arRatio.toFixed(2)} — target is around 1.0, concerning above 1.5`);
+  if (daysInAr != null && daysInAr > 45) reasons.push(`Days in A/R is ${daysInAr.toFixed(0)} — industry average is around 45`);
 
-  const status: ArHealthResult["status"] = reasons.length === 0 ? "good" : (pctOver90 > 5 || pctCurrent < 55) ? "poor" : "fair";
-  return { totalAr: trueAr, pctCurrent, pctOver60, pctOver90, status, reasons };
+  const status: ArHealthResult["status"] = reasons.length === 0 ? "good" : (pctOver90 > 5 || pctCurrent < 55 || (arRatio != null && arRatio > 2)) ? "poor" : "fair";
+  return { totalAr: trueAr, pctCurrent, pctOver60, pctOver90, arRatio, daysInAr, status, reasons };
+}
+
+// Averages the most recent N months of logged Net Production (from the
+// Trends tab's monthly entries) to use as the denominator for A/R Ratio and
+// Days in A/R — a steadier figure than a single month's running total.
+export function computeAvgMonthlyProduction(history: DentalMonthlyEntry[], monthsToAverage: number = 3): number | null {
+  const withProduction = [...history].sort((a, b) => b.month.localeCompare(a.month)).filter((e) => e.netProduction != null).slice(0, monthsToAverage);
+  if (withProduction.length === 0) return null;
+  const sum = withProduction.reduce((total, e) => total + (e.netProduction as number), 0);
+  return sum / withProduction.length;
 }
