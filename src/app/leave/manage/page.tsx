@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate from "@/components/AppIdentityGate";
 import AccessDenied from "@/components/AccessDenied";
@@ -30,6 +30,9 @@ function LeaveManagePageBody() {
   const [editForm, setEditForm] = useState<{ startDate: string; endDate: string }>({ startDate: "", endDate: "" });
   const [sendingPayroll, setSendingPayroll] = useState(false);
   const [payrollMessage, setPayrollMessage] = useState("");
+  const [sortField, setSortField] = useState<"date" | "name" | "reason" | "status" | "days">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   async function handleSendPayrollSummary() {
     setSendingPayroll(true);
@@ -155,10 +158,28 @@ function LeaveManagePageBody() {
     await refresh();
   }
 
+  function toggleSort(field: "date" | "name" | "reason" | "status" | "days") {
+    if (sortField === field) { setSortDir((d) => (d === "asc" ? "desc" : "asc")); }
+    else { setSortField(field); setSortDir("asc"); }
+  }
+
   const filtered = requests
     .filter((r) => filter === "pending" ? r.status === "pending" : true)
-    .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+    .sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "date") cmp = a.startDate.localeCompare(b.startDate);
+      else if (sortField === "name") cmp = a.employeeName.localeCompare(b.employeeName);
+      else if (sortField === "reason") cmp = REASON_LABELS[a.reason].localeCompare(REASON_LABELS[b.reason]);
+      else if (sortField === "status") cmp = a.status.localeCompare(b.status);
+      else if (sortField === "days") cmp = a.totalDays - b.totalDays;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
   const pendingCount = requests.filter((r) => r.status === "pending").length;
+
+  function sortArrow(field: typeof sortField) {
+    if (sortField !== field) return <span style={{ opacity: 0.3 }}>↕</span>;
+    return <span>{sortDir === "asc" ? "↑" : "↓"}</span>;
+  }
 
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
@@ -187,145 +208,196 @@ function LeaveManagePageBody() {
           </div>
         </div>
 
-        <div className="space-y-4 max-w-3xl">
+        <div className="max-w-6xl">
           {filtered.length === 0 ? (
             <div className="rounded-2xl bg-white p-10 text-center shadow">
               <div className="text-4xl mb-3">✅</div>
               <p className="text-gray-400">No {filter === "pending" ? "pending" : ""} requests.</p>
             </div>
-          ) : filtered.map((req) => (
-            <div key={req.id} className="rounded-2xl bg-white p-6 shadow">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: "#e8622a" }}>
-                    {req.employeeName.charAt(0)}
-                  </div>
-                  <div>
-                    <div className="font-bold" style={{ color: "#5a5a5a" }}>{req.employeeName}</div>
-                    <div className="text-sm text-gray-400">{req.employeeEmail}</div>
-                  </div>
-                </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_STYLES[req.status]}`}>
-                  {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
-                </span>
-              </div>
+          ) : (
+            <div className="rounded-2xl bg-white shadow overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 text-left">
+                    <th className="px-4 py-3">
+                      <button onClick={() => toggleSort("date")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
+                        Dates {sortArrow("date")}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3">
+                      <button onClick={() => toggleSort("name")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
+                        Name {sortArrow("name")}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3">
+                      <button onClick={() => toggleSort("reason")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
+                        Reason {sortArrow("reason")}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3">
+                      <button onClick={() => toggleSort("days")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
+                        Days {sortArrow("days")}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3">
+                      <button onClick={() => toggleSort("status")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
+                        Status {sortArrow("status")}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Manage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((req) => (
+                    <Fragment key={req.id}>
+                      <tr key={req.id} className="border-b border-gray-50 hover:bg-gray-50 transition">
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="font-medium" style={{ color: "#5a5a5a" }}>
+                            {(() => {
+                              const startYear = req.startDate.slice(0, 4);
+                              const endYear = req.endDate.slice(0, 4);
+                              const crossesYear = startYear !== endYear;
+                              const startLabel = new Date(req.startDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: crossesYear ? "numeric" : undefined });
+                              if (req.startDate === req.endDate) {
+                                return new Date(req.startDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                              }
+                              const endLabel = new Date(req.endDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                              return `${startLabel} – ${endLabel}`;
+                            })()}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-7 w-7 rounded-full flex items-center justify-center text-white font-bold text-xs flex-shrink-0" style={{ backgroundColor: "#e8622a" }}>
+                              {req.employeeName.charAt(0)}
+                            </div>
+                            <span className="font-medium" style={{ color: "#5a5a5a" }}>{req.employeeName}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div style={{ color: "#5a5a5a" }}>{REASON_LABELS[req.reason]}</div>
+                          {req.isPartialDay && <div className="text-xs text-gray-400">{req.partialHours || "Partial day"}</div>}
+                        </td>
+                        <td className="px-4 py-3 text-gray-500">{req.totalDays}</td>
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLES[req.status]}`}>
+                            {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <button onClick={() => setExpandedId(expandedId === req.id ? null : req.id)} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
+                            {expandedId === req.id ? "Hide" : "Manage"}
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedId === req.id && (
+                        <tr key={`${req.id}-detail`} className="border-b border-gray-100 bg-gray-50/60">
+                          <td colSpan={6} className="px-4 py-4">
+                            <div className="text-xs text-gray-400 mb-3">{req.employeeEmail} · Submitted {new Date(req.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
 
-              {editing === req.id ? (
-                <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 mb-4 space-y-3">
-                  <p className="text-sm font-semibold text-blue-700">Edit Dates</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
-                      <input type="date" value={editForm.startDate}
-                        onChange={(e) => setEditForm((f) => ({ ...f, startDate: e.target.value }))}
-                        className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">End Date</label>
-                      <input type="date" value={editForm.endDate}
-                        onChange={(e) => setEditForm((f) => ({ ...f, endDate: e.target.value }))}
-                        className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none" />
-                    </div>
-                  </div>
-                  {editForm.startDate && editForm.endDate && (
-                    <p className="text-xs text-gray-500">📅 {countBusinessDays(editForm.startDate, editForm.endDate)} working days</p>
-                  )}
-                  <div className="flex gap-2">
-                    <button onClick={() => handleSaveEdit(req)} disabled={processing === req.id}
-                      className="rounded-xl px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
-                      style={{ backgroundColor: "#e8622a" }}>
-                      {processing === req.id ? "Saving..." : "Save Changes"}
-                    </button>
-                    <button onClick={() => setEditing(null)}
-                      className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-500 hover:bg-gray-50">
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-4 mb-4 rounded-xl bg-gray-50 p-4 text-sm">
-                  <div>
-                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Dates</div>
-                    <div className="font-medium" style={{ color: "#5a5a5a" }}>
-                      {new Date(req.startDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                      {req.startDate !== req.endDate && ` – ${new Date(req.endDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
-                    </div>
-                    <div className="text-xs text-gray-400">{req.totalDays} working day{req.totalDays !== 1 ? "s" : ""}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Reason</div>
-                    <div className="font-medium" style={{ color: "#5a5a5a" }}>{REASON_LABELS[req.reason]}</div>
-                    {req.isPartialDay && <div className="text-xs text-gray-400">{req.partialHours || "Partial day"}</div>}
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Submitted</div>
-                    <div className="font-medium" style={{ color: "#5a5a5a" }}>{new Date(req.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
-                  </div>
-                </div>
-              )}
+                            {editing === req.id ? (
+                              <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 mb-3 space-y-3">
+                                <p className="text-sm font-semibold text-blue-700">Edit Dates</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
+                                    <input type="date" value={editForm.startDate}
+                                      onChange={(e) => setEditForm((f) => ({ ...f, startDate: e.target.value }))}
+                                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none" />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-500 mb-1">End Date</label>
+                                    <input type="date" value={editForm.endDate}
+                                      onChange={(e) => setEditForm((f) => ({ ...f, endDate: e.target.value }))}
+                                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none" />
+                                  </div>
+                                </div>
+                                {editForm.startDate && editForm.endDate && (
+                                  <p className="text-xs text-gray-500">📅 {countBusinessDays(editForm.startDate, editForm.endDate)} working days</p>
+                                )}
+                                <div className="flex gap-2">
+                                  <button onClick={() => handleSaveEdit(req)} disabled={processing === req.id}
+                                    className="rounded-xl px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                                    style={{ backgroundColor: "#e8622a" }}>
+                                    {processing === req.id ? "Saving..." : "Save Changes"}
+                                  </button>
+                                  <button onClick={() => setEditing(null)}
+                                    className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-500 hover:bg-gray-50">
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
 
-              {req.notes && <div className="mb-4 rounded-xl border border-gray-100 px-4 py-3 text-sm text-gray-500 italic">"{req.notes}"</div>}
+                            {req.notes && <div className="mb-3 rounded-xl border border-gray-100 bg-white px-4 py-3 text-sm text-gray-500 italic">"{req.notes}"</div>}
 
-              {req.status === "pending" && editing !== req.id && (
-                <div className="space-y-3">
-                  <textarea value={reviewNote[req.id] ?? ""} onChange={(e) => setReviewNote((n) => ({ ...n, [req.id]: e.target.value }))}
-                    placeholder="Add a note (optional)..." rows={2}
-                    className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none resize-none" />
-                  <div className="flex flex-wrap gap-3">
-                    <button onClick={() => handleApprove(req)} disabled={processing === req.id}
-                      className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
-                      style={{ backgroundColor: "#16a34a" }}>
-                      {processing === req.id ? "Processing..." : "✓ Approve"}
-                    </button>
-                    <button onClick={() => handleDeny(req)} disabled={processing === req.id}
-                      className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 bg-red-500">
-                      {processing === req.id ? "Processing..." : "✕ Deny"}
-                    </button>
-                    <button onClick={() => startEdit(req)} disabled={processing === req.id}
-                      className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-500 hover:bg-gray-50 disabled:opacity-50">
-                      ✏️ Edit
-                    </button>
-                    <button onClick={() => handleDelete(req)} disabled={processing === req.id}
-                      className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-400 hover:bg-gray-50 disabled:opacity-50">
-                      {processing === req.id ? "Deleting..." : "🗑 Delete"}
-                    </button>
-                  </div>
-                </div>
-              )}
+                            {req.status === "pending" && editing !== req.id && (
+                              <div className="space-y-3">
+                                <textarea value={reviewNote[req.id] ?? ""} onChange={(e) => setReviewNote((n) => ({ ...n, [req.id]: e.target.value }))}
+                                  placeholder="Add a note (optional)..." rows={2}
+                                  className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm focus:outline-none resize-none bg-white" />
+                                <div className="flex flex-wrap gap-3">
+                                  <button onClick={() => handleApprove(req)} disabled={processing === req.id}
+                                    className="rounded-xl px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                                    style={{ backgroundColor: "#16a34a" }}>
+                                    {processing === req.id ? "Processing..." : "✓ Approve"}
+                                  </button>
+                                  <button onClick={() => handleDeny(req)} disabled={processing === req.id}
+                                    className="rounded-xl px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 bg-red-500">
+                                    {processing === req.id ? "Processing..." : "✕ Deny"}
+                                  </button>
+                                  <button onClick={() => startEdit(req)} disabled={processing === req.id}
+                                    className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-500 hover:bg-white disabled:opacity-50">
+                                    ✏️ Edit
+                                  </button>
+                                  <button onClick={() => handleDelete(req)} disabled={processing === req.id}
+                                    className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-400 hover:bg-white disabled:opacity-50">
+                                    {processing === req.id ? "Deleting..." : "🗑 Delete"}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
 
-              {(req.status === "approved" || req.status === "denied") && editing !== req.id && (
-                <div className="flex gap-2 mt-2">
-                  <button onClick={() => startEdit(req)} disabled={processing === req.id}
-                    className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-500 hover:bg-gray-50 disabled:opacity-50">
-                    ✏️ Edit Dates
-                  </button>
-                  <button onClick={() => handleCancel(req)} disabled={processing === req.id}
-                    className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-400 hover:bg-red-50 disabled:opacity-50">
-                    {processing === req.id ? "Cancelling..." : "✕ Cancel Request"}
-                  </button>
-                  <button onClick={() => handleDelete(req)} disabled={processing === req.id}
-                    className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-400 hover:bg-gray-50 disabled:opacity-50">
-                    {processing === req.id ? "Deleting..." : "🗑 Delete"}
-                  </button>
-                </div>
-              )}
+                            {(req.status === "approved" || req.status === "denied") && editing !== req.id && (
+                              <div className="flex gap-2">
+                                <button onClick={() => startEdit(req)} disabled={processing === req.id}
+                                  className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-500 hover:bg-white disabled:opacity-50">
+                                  ✏️ Edit Dates
+                                </button>
+                                <button onClick={() => handleCancel(req)} disabled={processing === req.id}
+                                  className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-400 hover:bg-red-50 disabled:opacity-50">
+                                  {processing === req.id ? "Cancelling..." : "✕ Cancel Request"}
+                                </button>
+                                <button onClick={() => handleDelete(req)} disabled={processing === req.id}
+                                  className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-400 hover:bg-white disabled:opacity-50">
+                                  {processing === req.id ? "Deleting..." : "🗑 Delete"}
+                                </button>
+                              </div>
+                            )}
 
-              {req.status === "cancelled" && (
-                <div className="flex gap-2 mt-2">
-                  <button onClick={() => handleDelete(req)} disabled={processing === req.id}
-                    className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-400 hover:bg-gray-50 disabled:opacity-50">
-                    {processing === req.id ? "Deleting..." : "🗑 Delete permanently"}
-                  </button>
-                </div>
-              )}
+                            {req.status === "cancelled" && (
+                              <div className="flex gap-2">
+                                <button onClick={() => handleDelete(req)} disabled={processing === req.id}
+                                  className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-400 hover:bg-white disabled:opacity-50">
+                                  {processing === req.id ? "Deleting..." : "🗑 Delete permanently"}
+                                </button>
+                              </div>
+                            )}
 
-              {req.reviewNote && req.status !== "pending" && (
-                <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500 mt-3">
-                  <span className="font-medium">Note:</span> {req.reviewNote}
-                </div>
-              )}
+                            {req.reviewNote && req.status !== "pending" && (
+                              <div className="rounded-lg bg-white px-3 py-2 text-sm text-gray-500 mt-3">
+                                <span className="font-medium">Note:</span> {req.reviewNote}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ))}
+          )}
         </div>
       </div>
     </main>
