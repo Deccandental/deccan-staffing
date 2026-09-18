@@ -654,28 +654,31 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                         {(() => {
                           let lastMonthKey: string | null = null;
                           let monthGroupIndex = -1;
+                          const MONTH_COLORS = ["#FDF2E9", "#F5EFFA", "#EAF3F8", "#EAF3DE", "#FCE8D5", "#FBEAF0"];
                           return filteredAbsences.map((a, i) => {
                             const emp = staff.find((e) => e.id === a.employeeId);
                             const rawDate = a.date ?? a.startDate ?? "";
                             const monthKey = rawDate.slice(0, 7);
-                            if (monthKey !== lastMonthKey) { lastMonthKey = monthKey; monthGroupIndex++; }
-                            const rowBg = monthGroupIndex % 2 === 0 ? "white" : "#FAF9F6";
+                            const isNewMonth = monthKey !== lastMonthKey;
+                            if (isNewMonth) { lastMonthKey = monthKey; monthGroupIndex++; }
+                            const rowBg = MONTH_COLORS[monthGroupIndex % MONTH_COLORS.length];
+                            const empColor = emp?.color ?? "#888888";
                             const dateStr = a.date
                               ? new Date(a.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                               : a.startDate === a.endDate
                               ? new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                               : `${new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date((a.endDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
                             return (
-                              <tr key={i} className="border-b border-gray-200 hover:bg-gray-100 transition align-top" style={{ background: rowBg }}>
+                              <tr key={i} className="hover:brightness-95 transition align-top"
+                                style={{ background: rowBg, borderBottom: "1px solid rgba(0,0,0,0.08)", borderTop: isNewMonth && i > 0 ? "2px solid rgba(0,0,0,0.18)" : undefined }}>
                                 <td className="px-3 py-1.5 whitespace-nowrap">
                                   <div className="font-medium" style={{ color: "#5a5a5a" }}>{dateStr}</div>
                                   {a.totalDays && a.totalDays > 1 ? <div className="text-xs text-gray-400">{a.totalDays} days</div> : null}
                                 </td>
                                 <td className="px-3 py-1.5">
-                                  <div className="flex items-center gap-2">
-                                    <div className="h-6 w-6 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }}>{a.employeeName.charAt(0)}</div>
-                                    <span className="font-medium" style={{ color: "#5a5a5a" }}>{a.employeeName}</span>
-                                  </div>
+                                  <span className="inline-block rounded-lg px-2.5 py-1 text-sm font-semibold" style={{ background: `${empColor}29`, color: empColor }}>
+                                    {a.employeeName}
+                                  </span>
                                 </td>
                                 <td className="px-3 py-1.5">
                                   <div className="flex items-center gap-2 flex-wrap">
