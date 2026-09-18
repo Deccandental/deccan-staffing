@@ -808,3 +808,80 @@ export function computeRequiredCollections(
   const requiredCollectionRate = projectedProduction && projectedProduction > 0 ? (requiredCollections / projectedProduction) * 100 : null;
   return { totalObligations, totalCushions, combinedCurrentBalance, knownInflows, requiredCollections, requiredCollectionRate };
 }
+
+// ---------------- Accounts Receivable (A/R) aging ----------------
+// Standard dental/medical A/R aging buckets: 0-30, 31-60, 61-90, 90+ days.
+// One entry per date, meant to be updated weekly — A/R shifts too slowly
+// for daily tracking but often enough to catch a bucket sliding into 90+
+// before it becomes uncollectable.
+
+export interface ArAgingEntry {
+  id: string;
+  entryDate: string; // YYYY-MM-DD
+  ar0to30: number;
+  ar31to60: number;
+  ar61to90: number;
+  ar90plus: number;
+  enteredAt: string;
+}
+
+function fromArAgingRow(row: any): ArAgingEntry {
+  return {
+    id: row.id, entryDate: row.entry_date,
+    ar0to30: row.ar_0_30, ar31to60: row.ar_31_60, ar61to90: row.ar_61_90, ar90plus: row.ar_90_plus,
+    enteredAt: row.entered_at,
+  };
+}
+
+export async function loadLatestArAging(): Promise<ArAgingEntry | null> {
+  const { data, error } = await supabase.from("ar_aging_entries").select("*").order("entry_date", { ascending: false }).limit(1).maybeSingle();
+  if (error) { console.error("loadLatestArAging error:", error); return null; }
+  return data ? fromArAgingRow(data) : null;
+}
+
+export async function loadArAgingHistory(limit: number = 26): Promise<ArAgingEntry[]> {
+  const { data, error } = await supabase.from("ar_aging_entries").select("*").order("entry_date", { ascending: false }).limit(limit);
+  if (error) { console.error("loadArAgingHistory error:", error); return []; }
+  return (data ?? []).map(fromArAgingRow);
+}
+
+export async function saveArAgingEntry(entry: Omit<ArAgingEntry, "id" | "enteredAt">): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("ar_aging_entries").upsert({
+    entry_date: entry.entryDate, ar_0_30: entry.ar0to30, ar_31_60: entry.ar31to60,
+    ar_61_90: entry.ar61to90, ar_90_plus: entry.ar90plus, entered_at: new Date().toISOString(),
+  }, { onConflict: "entry_date" });
+  if (error) { console.error("saveArAgingEntry error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
+export async function deleteArAgingEntry(id: string): Promise<void> {
+  const { error } = await supabase.from("ar_aging_entries").delete().eq("id", id);
+  if (error) console.error("deleteArAgingEntry error:", error);
+}
+
+export interface ArHealthResult {
+  totalAr: number;
+  pctCurrent: number; // % in 0-30
+  pctOver60: number; // % in 61-90 + 90+
+  pctOver90: number; // % in 90+ alone
+  status: "good" | "fair" | "poor";
+  reasons: string[];
+}
+
+// Benchmarks: healthy practices keep 70%+ of AR in the 0-30 bucket, no more
+// than 10% past 60 days combined, and no more than 5% in the 90+ bucket alone.
+export function computeArHealth(entry: { ar0to30: number; ar31to60: number; ar61to90: number; ar90plus: number }): ArHealthResult {
+  const totalAr = entry.ar0to30 + entry.ar31to60 + entry.ar61to90 + entry.ar90plus;
+  if (totalAr <= 0) return { totalAr: 0, pctCurrent: 0, pctOver60: 0, pctOver90: 0, status: "good", reasons: [] };
+  const pctCurrent = (entry.ar0to30 / totalAr) * 100;
+  const pctOver60 = ((entry.ar61to90 + entry.ar90plus) / totalAr) * 100;
+  const pctOver90 = (entry.ar90plus / totalAr) * 100;
+
+  const reasons: string[] = [];
+  if (pctCurrent < 70) reasons.push(`Only ${pctCurrent.toFixed(0)}% of A/R is current (0-30 days) — target is 70%+`);
+  if (pctOver60 > 10) reasons.push(`${pctOver60.toFixed(0)}% of A/R is over 60 days — target is under 10%`);
+  if (pctOver90 > 5) reasons.push(`${pctOver90.toFixed(0)}% of A/R is over 90 days — target is under 5%`);
+
+  const status: ArHealthResult["status"] = reasons.length === 0 ? "good" : (pctOver90 > 5 || pctCurrent < 55) ? "poor" : "fair";
+  return { totalAr, pctCurrent, pctOver60, pctOver90, status, reasons };
+}
