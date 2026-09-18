@@ -865,6 +865,8 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
   const [ar31to60, setAr31to60] = useState("");
   const [ar61to90, setAr61to90] = useState("");
   const [ar90plus, setAr90plus] = useState("");
+  const [arWoEstimate, setArWoEstimate] = useState("");
+  const [arInsuranceEstimate, setArInsuranceEstimate] = useState("");
   const [latestArAging, setLatestArAging] = useState<ArAgingEntry | null>(null);
   const [arSaved, setArSaved] = useState(false);
   const [arError, setArError] = useState<string | null>(null);
@@ -892,6 +894,8 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
         setAr31to60(String(latest.ar31to60));
         setAr61to90(String(latest.ar61to90));
         setAr90plus(String(latest.ar90plus));
+        setArWoEstimate(String(latest.woEstimate));
+        setArInsuranceEstimate(String(latest.insuranceEstimate));
       }
     });
   }, []);
@@ -925,6 +929,8 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
       ar31to60: ar31to60 ? Number(ar31to60) : 0,
       ar61to90: ar61to90 ? Number(ar61to90) : 0,
       ar90plus: ar90plus ? Number(ar90plus) : 0,
+      woEstimate: arWoEstimate ? Number(arWoEstimate) : 0,
+      insuranceEstimate: arInsuranceEstimate ? Number(arInsuranceEstimate) : 0,
     });
     if (!result.ok) { setArError(result.error ?? "Failed to save."); return; }
     setArError(null);
@@ -1078,7 +1084,7 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
           </span>
         </div>
         <p className="text-sm text-slate-500 mb-4">Enter the total dollar amount in each aging bucket from your A/R report — update weekly to catch balances sliding toward 90+ days.</p>
-        <div className="grid gap-3 sm:grid-cols-4 mb-4">
+        <div className="grid gap-3 sm:grid-cols-4 mb-3">
           <div>
             <label className="block text-sm text-slate-800 font-semibold mb-1">0–30 days</label>
             <input type="number" onFocus={(e) => e.target.select()} value={ar0to30} onChange={(e) => setAr0to30(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
@@ -1097,25 +1103,56 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
           </div>
         </div>
         {(() => {
+          const rawTotal = (ar0to30 ? Number(ar0to30) : 0) + (ar31to60 ? Number(ar31to60) : 0) + (ar61to90 ? Number(ar61to90) : 0) + (ar90plus ? Number(ar90plus) : 0);
+          const woNum = arWoEstimate ? Number(arWoEstimate) : 0;
+          const trueAr = Math.max(0, rawTotal - woNum);
+          const insNum = arInsuranceEstimate ? Number(arInsuranceEstimate) : 0;
+          const patientEstimate = trueAr - insNum;
+          return (
+            <div className="grid gap-3 sm:grid-cols-3 mb-4">
+              <div>
+                <label className="block text-sm text-slate-800 font-semibold mb-1">W/O Estimate <span className="text-slate-400 font-normal">(write-offs)</span></label>
+                <input type="number" onFocus={(e) => e.target.select()} value={arWoEstimate} onChange={(e) => setArWoEstimate(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-800 font-semibold mb-1">Insurance Estimate</label>
+                <input type="number" onFocus={(e) => e.target.select()} value={arInsuranceEstimate} onChange={(e) => setArInsuranceEstimate(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-800 font-semibold mb-1">Patient Estimate <span className="text-slate-400 font-normal">(auto: True A/R − Insurance)</span></label>
+                <div className="w-full rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 text-sm text-slate-600">
+                  {rawTotal > 0 ? `$${formatMoney(patientEstimate)}` : "—"}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+        {(() => {
           const health = computeArHealth({
             ar0to30: ar0to30 ? Number(ar0to30) : 0, ar31to60: ar31to60 ? Number(ar31to60) : 0,
             ar61to90: ar61to90 ? Number(ar61to90) : 0, ar90plus: ar90plus ? Number(ar90plus) : 0,
+            woEstimate: arWoEstimate ? Number(arWoEstimate) : 0,
           });
-          if (health.totalAr <= 0) return null;
-          const style = health.status === "good" ? { bg: "#EAF3DE", color: "#3B6D11", label: "✓ Healthy" }
-            : health.status === "fair" ? { bg: "#FAEEDA", color: "#854F0B", label: "⚠️ Needs attention" }
-            : { bg: "#FCEBEB", color: "#A32D2D", label: "⚠️ Poor" };
+          if (health.totalAr <= 0 && !ar0to30 && !ar31to60 && !ar61to90 && !ar90plus) return null;
+          const style = health.status === "good" ? { bg: "linear-gradient(135deg, #d1fae5, #a7f3d0)", color: "#065f46", ring: "#10b981", label: "✓ Healthy", icon: "💚" }
+            : health.status === "fair" ? { bg: "linear-gradient(135deg, #fff7ed, #ffedd5)", color: "#92400e", ring: "#f59e0b", label: "Needs Attention", icon: "⚠️" }
+            : { bg: "linear-gradient(135deg, #fee2e2, #fecaca)", color: "#991b1b", ring: "#dc2626", label: "Poor", icon: "🚨" };
           return (
-            <div className="rounded-xl p-3 mb-4" style={{ background: style.bg }}>
-              <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
-                <span className="text-sm font-semibold" style={{ color: style.color }}>Total A/R: ${formatMoney(health.totalAr)}</span>
-                <span className="rounded-full px-3 py-1 text-xs font-bold" style={{ background: "white", color: style.color }}>{style.label}</span>
+            <div className="rounded-2xl p-5 mb-4" style={{ background: style.bg, boxShadow: `0 8px 24px ${style.ring}33`, border: `2px solid ${style.ring}` }}>
+              <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
+                <div className="flex items-center gap-3">
+                  <span style={{ fontSize: 32 }}>{style.icon}</span>
+                  <div>
+                    <div className="text-2xl font-bold" style={{ color: style.color }}>{style.label}</div>
+                    <div className="text-sm" style={{ color: style.color }}>True A/R: ${formatMoney(health.totalAr)}</div>
+                  </div>
+                </div>
               </div>
-              <p className="text-xs" style={{ color: style.color }}>
-                {health.pctCurrent.toFixed(0)}% current (0-30) · {health.pctOver60.toFixed(0)}% over 60 days · {health.pctOver90.toFixed(0)}% over 90 days
+              <p className="text-sm font-medium" style={{ color: style.color }}>
+                {health.pctCurrent.toFixed(0)}% current (0–30) · {health.pctOver60.toFixed(0)}% over 60 days · {health.pctOver90.toFixed(0)}% over 90 days
               </p>
               {health.reasons.length > 0 && (
-                <ul className="text-xs mt-1 space-y-0.5" style={{ color: style.color }}>
+                <ul className="text-sm mt-2 space-y-1 font-medium" style={{ color: style.color }}>
                   {health.reasons.map((r) => <li key={r}>• {r}</li>)}
                 </ul>
               )}
