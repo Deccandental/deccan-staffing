@@ -15,7 +15,7 @@ import {
   loadCreditCards, updateStatementBalance,
   loadCardCharges, addCardCharge, updateCardCharge, deleteCardCharge,
   loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview, deleteWeeklyReview,
-  ArAgingEntry, loadLatestArAging, loadArAgingHistory, saveArAgingEntry, deleteArAgingEntry, computeArHealth,
+  ArAgingEntry, loadLatestArAging, loadArAgingHistory, saveArAgingEntry, deleteArAgingEntry, computeArHealth, computeAvgMonthlyProduction,
   loadDentalMonthlyHistory, backfillDentalMonth, deleteDentalMonthlyEntry, DentalMonthlyEntry,
   loadDentalMonthlySummaries, saveDentalMonthlySummary, deleteDentalMonthlySummary, DentalMonthlySummary,
   buildOccurrences, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
@@ -868,6 +868,7 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
   const [arWoEstimate, setArWoEstimate] = useState("");
   const [arInsuranceEstimate, setArInsuranceEstimate] = useState("");
   const [latestArAging, setLatestArAging] = useState<ArAgingEntry | null>(null);
+  const [avgMonthlyProduction, setAvgMonthlyProduction] = useState<number | null>(null);
   const [arSaved, setArSaved] = useState(false);
   const [arError, setArError] = useState<string | null>(null);
 
@@ -897,6 +898,9 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
         setArWoEstimate(String(latest.woEstimate));
         setArInsuranceEstimate(String(latest.insuranceEstimate));
       }
+    });
+    loadDentalMonthlyHistory().then((history) => {
+      setAvgMonthlyProduction(computeAvgMonthlyProduction(history));
     });
   }, []);
 
@@ -1132,7 +1136,7 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
             ar0to30: ar0to30 ? Number(ar0to30) : 0, ar31to60: ar31to60 ? Number(ar31to60) : 0,
             ar61to90: ar61to90 ? Number(ar61to90) : 0, ar90plus: ar90plus ? Number(ar90plus) : 0,
             woEstimate: arWoEstimate ? Number(arWoEstimate) : 0,
-          });
+          }, avgMonthlyProduction);
           if (health.totalAr <= 0 && !ar0to30 && !ar31to60 && !ar61to90 && !ar90plus) return null;
           const style = health.status === "good" ? { bg: "linear-gradient(135deg, #d1fae5, #a7f3d0)", color: "#065f46", ring: "#10b981", label: "✓ Healthy", icon: "💚" }
             : health.status === "fair" ? { bg: "linear-gradient(135deg, #fff7ed, #ffedd5)", color: "#92400e", ring: "#f59e0b", label: "Needs Attention", icon: "⚠️" }
@@ -1151,6 +1155,15 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
               <p className="text-sm font-medium" style={{ color: style.color }}>
                 {health.pctCurrent.toFixed(0)}% current (0–30) · {health.pctOver60.toFixed(0)}% over 60 days · {health.pctOver90.toFixed(0)}% over 90 days
               </p>
+              {health.arRatio != null && health.daysInAr != null ? (
+                <p className="text-sm font-medium mt-1" style={{ color: style.color }}>
+                  A/R Ratio: {health.arRatio.toFixed(2)} (target ~1.0) · Days in A/R: {health.daysInAr.toFixed(0)} (industry avg ~45)
+                </p>
+              ) : (
+                <p className="text-xs mt-1 opacity-75" style={{ color: style.color }}>
+                  A/R Ratio and Days in A/R need at least one month of Net Production logged on the Trends tab.
+                </p>
+              )}
               {health.reasons.length > 0 && (
                 <ul className="text-sm mt-2 space-y-1 font-medium" style={{ color: style.color }}>
                   {health.reasons.map((r) => <li key={r}>• {r}</li>)}
