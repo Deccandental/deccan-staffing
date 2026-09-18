@@ -569,17 +569,21 @@ function CreditCardsPanel({ cards, charges, cashAccounts, latestBalances, allBil
 
 // ---------------- Weekly Review Panel ----------------
 
-function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, latestBalances }: {
+function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, latestBalances, onViewArDetails }: {
   cashAccounts: CashAccount[]; cards: CreditCard[]; charges: CardCharge[]; allBills: RecurringBill[]; allPayments: BillPayment[];
-  latestBalances: Record<string, BalanceCheck>;
+  latestBalances: Record<string, BalanceCheck>; onViewArDetails: () => void;
 }) {
   const [latestReview, setLatestReview] = useState<WeeklyCashReview | null>(null);
   const [history, setHistory] = useState<WeeklyCashReview[]>([]);
+  const [latestArAging, setLatestArAging] = useState<ArAgingEntry | null>(null);
+  const [avgMonthlyProduction, setAvgMonthlyProduction] = useState<number | null>(null);
 
   useEffect(() => {
-    Promise.all([loadLatestWeeklyReview(), loadWeeklyReviewHistory(8)]).then(([latest, hist]) => {
+    Promise.all([loadLatestWeeklyReview(), loadWeeklyReviewHistory(8), loadLatestArAging(), loadDentalMonthlyHistory()]).then(([latest, hist, ar, dentalHist]) => {
       setLatestReview(latest);
       setHistory(hist);
+      setLatestArAging(ar);
+      setAvgMonthlyProduction(computeAvgMonthlyProduction(dentalHist));
     });
   }, []);
 
@@ -713,6 +717,32 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
           <p className="text-[11px] text-slate-400 mt-0.5">calculated</p>
         </div>
       </div>
+
+      {latestArAging && (() => {
+        const health = computeArHealth({
+          ar0to30: latestArAging.ar0to30, ar31to60: latestArAging.ar31to60,
+          ar61to90: latestArAging.ar61to90, ar90plus: latestArAging.ar90plus,
+          woEstimate: latestArAging.woEstimate,
+        }, avgMonthlyProduction);
+        const style = health.status === "good" ? { bg: "linear-gradient(135deg, #d1fae5, #a7f3d0)", color: "#065f46", label: "A/R Healthy", icon: "💚" }
+          : health.status === "fair" ? { bg: "linear-gradient(135deg, #fff7ed, #ffedd5)", color: "#92400e", label: "A/R Needs Attention", icon: "⚠️" }
+          : { bg: "linear-gradient(135deg, #fee2e2, #fecaca)", color: "#991b1b", label: "A/R Poor", icon: "🚨" };
+        return (
+          <div className="rounded-xl p-4 shadow flex items-center justify-between flex-wrap gap-3" style={{ background: style.bg }}>
+            <div className="flex items-center gap-3">
+              <span style={{ fontSize: 24 }}>{style.icon}</span>
+              <div>
+                <p className="font-bold" style={{ color: style.color }}>{style.label}</p>
+                <p className="text-xs" style={{ color: style.color }}>
+                  True A/R: ${formatMoney(health.totalAr)}
+                  {health.daysInAr != null ? ` · Days in A/R: ${health.daysInAr.toFixed(0)}` : ""}
+                </p>
+              </div>
+            </div>
+            <button onClick={onViewArDetails} className="text-xs font-semibold underline" style={{ color: style.color }}>See details in Update Numbers →</button>
+          </div>
+        );
+      })()}
       {incomeNum != null && productionNum != null && incomeNum < productionNum * monthProgress * 0.8 && (
         <p className="text-xs text-amber-600">Collections are lagging materially behind production — consider reviewing insurance AR aging before discretionary spending.</p>
       )}
@@ -1638,7 +1668,7 @@ export default function CashFlowPage() {
               <CreditCardsPanel cards={creditCards} charges={cardCharges} cashAccounts={cashAccounts} latestBalances={latestBalances} allBills={bills} allPayments={payments} refreshAll={refresh} />
             )}
             {activeTab === "overview" && (
-              <OverviewPanel cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} />
+              <OverviewPanel cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setActiveTab("entry")} />
             )}
             {activeTab === "entry" && (
               <EntryPanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={refresh} />
