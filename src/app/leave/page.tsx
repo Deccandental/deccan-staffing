@@ -621,13 +621,13 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                     {months.map((m) => <option key={m} value={m}>{new Date(m + "-01").toLocaleDateString("en-US", { month: "long", year: "numeric" })}</option>)}
                   </select>
                 </div>
-                <div className="rounded-2xl bg-white shadow overflow-hidden">
+                <div className="rounded-2xl bg-white shadow overflow-hidden max-w-3xl">
                   {filteredAbsences.length === 0 ? (
                     <div className="p-8 text-center"><p className="text-gray-300">No absences found</p></div>
                   ) : (
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b border-gray-100 text-left">
+                        <tr className="border-b border-gray-200 text-left">
                           <th className="px-3 py-2">
                             <button onClick={() => toggleAbsenceSort("date")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
                               Date {absenceSortArrow("date")}
@@ -643,50 +643,58 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                               Reason {absenceSortArrow("reason")}
                             </button>
                           </th>
-                          <th className="px-3 py-2">
-                            <button onClick={() => toggleAbsenceSort("status")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
+                          <th className="px-3 py-2 text-right">
+                            <button onClick={() => toggleAbsenceSort("status")} className="flex items-center gap-1 ml-auto text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
                               Status {absenceSortArrow("status")}
                             </button>
                           </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredAbsences.map((a, i) => {
-                          const emp = staff.find((e) => e.id === a.employeeId);
-                          const dateStr = a.date
-                            ? new Date(a.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                            : a.startDate === a.endDate
-                            ? new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                            : `${new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date((a.endDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
-                          return (
-                            <tr key={i} className="border-b border-gray-50 hover:bg-gray-50 transition align-top">
-                              <td className="px-3 py-2 whitespace-nowrap">
-                                <div className="font-medium" style={{ color: "#5a5a5a" }}>{dateStr}</div>
-                                {a.totalDays && a.totalDays > 1 ? <div className="text-xs text-gray-400">{a.totalDays} days</div> : null}
-                              </td>
-                              <td className="px-3 py-2">
-                                <div className="flex items-center gap-2">
-                                  <div className="h-6 w-6 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }}>{a.employeeName.charAt(0)}</div>
-                                  <span className="font-medium" style={{ color: "#5a5a5a" }}>{a.employeeName}</span>
-                                </div>
-                              </td>
-                              <td className="px-3 py-2">
-                                <div style={{ color: "#5a5a5a" }}>{a.reason}</div>
-                                <div className="flex items-center gap-1">
-                                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${a.type === "manual" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
-                                    {a.type === "manual" ? "Manually marked" : "Leave request"}
+                        {(() => {
+                          let lastMonthKey: string | null = null;
+                          let monthGroupIndex = -1;
+                          return filteredAbsences.map((a, i) => {
+                            const emp = staff.find((e) => e.id === a.employeeId);
+                            const rawDate = a.date ?? a.startDate ?? "";
+                            const monthKey = rawDate.slice(0, 7);
+                            if (monthKey !== lastMonthKey) { lastMonthKey = monthKey; monthGroupIndex++; }
+                            const rowBg = monthGroupIndex % 2 === 0 ? "white" : "#FAF9F6";
+                            const dateStr = a.date
+                              ? new Date(a.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                              : a.startDate === a.endDate
+                              ? new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                              : `${new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date((a.endDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+                            return (
+                              <tr key={i} className="border-b border-gray-200 hover:bg-gray-100 transition align-top" style={{ background: rowBg }}>
+                                <td className="px-3 py-1.5 whitespace-nowrap">
+                                  <div className="font-medium" style={{ color: "#5a5a5a" }}>{dateStr}</div>
+                                  {a.totalDays && a.totalDays > 1 ? <div className="text-xs text-gray-400">{a.totalDays} days</div> : null}
+                                </td>
+                                <td className="px-3 py-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <div className="h-6 w-6 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }}>{a.employeeName.charAt(0)}</div>
+                                    <span className="font-medium" style={{ color: "#5a5a5a" }}>{a.employeeName}</span>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-1.5">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span style={{ color: "#5a5a5a" }}>{a.reason}</span>
+                                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${a.type === "manual" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
+                                      {a.type === "manual" ? "Manually marked" : "Leave request"}
+                                    </span>
+                                  </div>
+                                  {(a.notes || a.reviewNote) && <p className="text-xs text-gray-400 italic mt-0.5">"{a.notes || a.reviewNote}"</p>}
+                                </td>
+                                <td className="px-3 py-1.5 text-right">
+                                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLES[a.status ?? "manual"]}`}>
+                                    {a.status === "manual" ? "Marked" : (a.status ?? "").charAt(0).toUpperCase() + (a.status ?? "").slice(1)}
                                   </span>
-                                </div>
-                                {(a.notes || a.reviewNote) && <p className="text-xs text-gray-400 italic mt-1">"{a.notes || a.reviewNote}"</p>}
-                              </td>
-                              <td className="px-3 py-2">
-                                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLES[a.status ?? "manual"]}`}>
-                                  {a.status === "manual" ? "Marked" : (a.status ?? "").charAt(0).toUpperCase() + (a.status ?? "").slice(1)}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
                       </tbody>
                     </table>
                   )}
