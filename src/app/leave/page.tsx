@@ -49,6 +49,8 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
   const [noticeWarning, setNoticeWarning] = useState("");
   const [filterEmployee, setFilterEmployee] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
+  const [absenceSortField, setAbsenceSortField] = useState<"date" | "name" | "reason" | "status">("date");
+  const [absenceSortDir, setAbsenceSortDir] = useState<"asc" | "desc">("desc");
   const [menuOpen, setMenuOpen] = useState(false);
   const today0 = new Date();
   const [calYear, setCalYear] = useState(today0.getFullYear());
@@ -212,7 +214,24 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
       if (!date.startsWith(filterMonth)) return false;
     }
     return true;
+  }).sort((a, b) => {
+    let cmp = 0;
+    if (absenceSortField === "date") cmp = (a.startDate ?? a.date ?? "").localeCompare(b.startDate ?? b.date ?? "");
+    else if (absenceSortField === "name") cmp = a.employeeName.localeCompare(b.employeeName);
+    else if (absenceSortField === "reason") cmp = a.reason.localeCompare(b.reason);
+    else if (absenceSortField === "status") cmp = (a.status ?? "manual").localeCompare(b.status ?? "manual");
+    return absenceSortDir === "asc" ? cmp : -cmp;
   });
+
+  function toggleAbsenceSort(field: typeof absenceSortField) {
+    if (absenceSortField === field) { setAbsenceSortDir((d) => (d === "asc" ? "desc" : "asc")); }
+    else { setAbsenceSortField(field); setAbsenceSortDir(field === "date" ? "desc" : "asc"); }
+  }
+
+  function absenceSortArrow(field: typeof absenceSortField) {
+    if (absenceSortField !== field) return <span style={{ opacity: 0.3 }}>↕</span>;
+    return <span>{absenceSortDir === "asc" ? "↑" : "↓"}</span>;
+  }
 
   const summaryByEmployee = staff.map((emp) => {
     const empRequests = requests.filter((r) => r.employeeId === emp.id);
@@ -602,40 +621,75 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                     {months.map((m) => <option key={m} value={m}>{new Date(m + "-01").toLocaleDateString("en-US", { month: "long", year: "numeric" })}</option>)}
                   </select>
                 </div>
-                <div className="space-y-3">
+                <div className="rounded-2xl bg-white shadow overflow-hidden">
                   {filteredAbsences.length === 0 ? (
-                    <div className="rounded-2xl bg-white p-8 text-center shadow"><p className="text-gray-300">No absences found</p></div>
-                  ) : filteredAbsences.map((a, i) => {
-                    const emp = staff.find((e) => e.id === a.employeeId);
-                    const dateStr = a.date
-                      ? new Date(a.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                      : a.startDate === a.endDate
-                      ? new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                      : `${new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date((a.endDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
-                    return (
-                      <div key={i} className="rounded-2xl bg-white p-4 shadow">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }}>{a.employeeName.charAt(0)}</div>
-                            <div>
-                              <div className="font-semibold text-sm" style={{ color: "#5a5a5a" }}>{a.employeeName}</div>
-                              <div className="text-xs text-gray-400">{dateStr}{a.totalDays && a.totalDays > 1 ? ` · ${a.totalDays} days` : ""}</div>
-                            </div>
-                          </div>
-                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold flex-shrink-0 ml-2 ${STATUS_STYLES[a.status ?? "manual"]}`}>
-                            {a.status === "manual" ? "Marked" : (a.status ?? "").charAt(0).toUpperCase() + (a.status ?? "").slice(1)}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          <span className="text-xs text-gray-500">{a.reason}</span>
-                          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${a.type === "manual" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
-                            {a.type === "manual" ? "Manually marked" : "Leave request"}
-                          </span>
-                        </div>
-                        {(a.notes || a.reviewNote) && <p className="text-xs text-gray-400 italic mt-1">"{a.notes || a.reviewNote}"</p>}
-                      </div>
-                    );
-                  })}
+                    <div className="p-8 text-center"><p className="text-gray-300">No absences found</p></div>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-100 text-left">
+                          <th className="px-3 py-2">
+                            <button onClick={() => toggleAbsenceSort("date")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
+                              Date {absenceSortArrow("date")}
+                            </button>
+                          </th>
+                          <th className="px-3 py-2">
+                            <button onClick={() => toggleAbsenceSort("name")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
+                              Name {absenceSortArrow("name")}
+                            </button>
+                          </th>
+                          <th className="px-3 py-2">
+                            <button onClick={() => toggleAbsenceSort("reason")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
+                              Reason {absenceSortArrow("reason")}
+                            </button>
+                          </th>
+                          <th className="px-3 py-2">
+                            <button onClick={() => toggleAbsenceSort("status")} className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600">
+                              Status {absenceSortArrow("status")}
+                            </button>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredAbsences.map((a, i) => {
+                          const emp = staff.find((e) => e.id === a.employeeId);
+                          const dateStr = a.date
+                            ? new Date(a.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                            : a.startDate === a.endDate
+                            ? new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                            : `${new Date((a.startDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date((a.endDate ?? "") + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+                          return (
+                            <tr key={i} className="border-b border-gray-50 hover:bg-gray-50 transition align-top">
+                              <td className="px-3 py-2 whitespace-nowrap">
+                                <div className="font-medium" style={{ color: "#5a5a5a" }}>{dateStr}</div>
+                                {a.totalDays && a.totalDays > 1 ? <div className="text-xs text-gray-400">{a.totalDays} days</div> : null}
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="h-6 w-6 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }}>{a.employeeName.charAt(0)}</div>
+                                  <span className="font-medium" style={{ color: "#5a5a5a" }}>{a.employeeName}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2">
+                                <div style={{ color: "#5a5a5a" }}>{a.reason}</div>
+                                <div className="flex items-center gap-1">
+                                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${a.type === "manual" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
+                                    {a.type === "manual" ? "Manually marked" : "Leave request"}
+                                  </span>
+                                </div>
+                                {(a.notes || a.reviewNote) && <p className="text-xs text-gray-400 italic mt-1">"{a.notes || a.reviewNote}"</p>}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLES[a.status ?? "manual"]}`}>
+                                  {a.status === "manual" ? "Marked" : (a.status ?? "").charAt(0).toUpperCase() + (a.status ?? "").slice(1)}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </div>
             )}
