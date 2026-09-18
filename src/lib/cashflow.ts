@@ -822,6 +822,8 @@ export interface ArAgingEntry {
   ar31to60: number;
   ar61to90: number;
   ar90plus: number;
+  woEstimate: number; // estimated write-offs, subtracted from the raw 4-bucket sum to get "True A/R"
+  insuranceEstimate: number; // manually entered; patient estimate is always derived as True A/R - this
   enteredAt: string;
 }
 
@@ -829,6 +831,7 @@ function fromArAgingRow(row: any): ArAgingEntry {
   return {
     id: row.id, entryDate: row.entry_date,
     ar0to30: row.ar_0_30, ar31to60: row.ar_31_60, ar61to90: row.ar_61_90, ar90plus: row.ar_90_plus,
+    woEstimate: row.wo_estimate ?? 0, insuranceEstimate: row.insurance_estimate ?? 0,
     enteredAt: row.entered_at,
   };
 }
@@ -848,7 +851,9 @@ export async function loadArAgingHistory(limit: number = 26): Promise<ArAgingEnt
 export async function saveArAgingEntry(entry: Omit<ArAgingEntry, "id" | "enteredAt">): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("ar_aging_entries").upsert({
     entry_date: entry.entryDate, ar_0_30: entry.ar0to30, ar_31_60: entry.ar31to60,
-    ar_61_90: entry.ar61to90, ar_90_plus: entry.ar90plus, entered_at: new Date().toISOString(),
+    ar_61_90: entry.ar61to90, ar_90_plus: entry.ar90plus,
+    wo_estimate: entry.woEstimate, insurance_estimate: entry.insuranceEstimate,
+    entered_at: new Date().toISOString(),
   }, { onConflict: "entry_date" });
   if (error) { console.error("saveArAgingEntry error:", error); return { ok: false, error: error.message }; }
   return { ok: true };
@@ -870,12 +875,13 @@ export interface ArHealthResult {
 
 // Benchmarks: healthy practices keep 70%+ of AR in the 0-30 bucket, no more
 // than 10% past 60 days combined, and no more than 5% in the 90+ bucket alone.
-export function computeArHealth(entry: { ar0to30: number; ar31to60: number; ar61to90: number; ar90plus: number }): ArHealthResult {
-  const totalAr = entry.ar0to30 + entry.ar31to60 + entry.ar61to90 + entry.ar90plus;
-  if (totalAr <= 0) return { totalAr: 0, pctCurrent: 0, pctOver60: 0, pctOver90: 0, status: "good", reasons: [] };
-  const pctCurrent = (entry.ar0to30 / totalAr) * 100;
-  const pctOver60 = ((entry.ar61to90 + entry.ar90plus) / totalAr) * 100;
-  const pctOver90 = (entry.ar90plus / totalAr) * 100;
+export function computeArHealth(entry: { ar0to30: number; ar31to60: number; ar61to90: number; ar90plus: number; woEstimate?: number }): ArHealthResult {
+  const rawTotal = entry.ar0to30 + entry.ar31to60 + entry.ar61to90 + entry.ar90plus;
+  const trueAr = Math.max(0, rawTotal - (entry.woEstimate ?? 0));
+  if (rawTotal <= 0) return { totalAr: 0, pctCurrent: 0, pctOver60: 0, pctOver90: 0, status: "good", reasons: [] };
+  const pctCurrent = (entry.ar0to30 / rawTotal) * 100;
+  const pctOver60 = ((entry.ar61to90 + entry.ar90plus) / rawTotal) * 100;
+  const pctOver90 = (entry.ar90plus / rawTotal) * 100;
 
   const reasons: string[] = [];
   if (pctCurrent < 70) reasons.push(`Only ${pctCurrent.toFixed(0)}% of A/R is current (0-30 days) — target is 70%+`);
@@ -883,5 +889,5 @@ export function computeArHealth(entry: { ar0to30: number; ar31to60: number; ar61
   if (pctOver90 > 5) reasons.push(`${pctOver90.toFixed(0)}% of A/R is over 90 days — target is under 5%`);
 
   const status: ArHealthResult["status"] = reasons.length === 0 ? "good" : (pctOver90 > 5 || pctCurrent < 55) ? "poor" : "fair";
-  return { totalAr, pctCurrent, pctOver60, pctOver90, status, reasons };
+  return { totalAr: trueAr, pctCurrent, pctOver60, pctOver90, status, reasons };
 }
