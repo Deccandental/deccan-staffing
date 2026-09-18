@@ -15,6 +15,7 @@ import {
   loadCreditCards, updateStatementBalance,
   loadCardCharges, addCardCharge, updateCardCharge, deleteCardCharge,
   loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview, deleteWeeklyReview,
+  ArAgingEntry, loadLatestArAging, loadArAgingHistory, saveArAgingEntry, deleteArAgingEntry, computeArHealth,
   loadDentalMonthlyHistory, backfillDentalMonth, deleteDentalMonthlyEntry, DentalMonthlyEntry,
   loadDentalMonthlySummaries, saveDentalMonthlySummary, deleteDentalMonthlySummary, DentalMonthlySummary,
   buildOccurrences, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
@@ -860,6 +861,14 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
 
+  const [ar0to30, setAr0to30] = useState("");
+  const [ar31to60, setAr31to60] = useState("");
+  const [ar61to90, setAr61to90] = useState("");
+  const [ar90plus, setAr90plus] = useState("");
+  const [latestArAging, setLatestArAging] = useState<ArAgingEntry | null>(null);
+  const [arSaved, setArSaved] = useState(false);
+  const [arError, setArError] = useState<string | null>(null);
+
   const [balanceInputs, setBalanceInputs] = useState<Record<string, string>>({});
   const [stmtInputs, setStmtInputs] = useState<Record<string, string>>({});
   const [bankStmtInputs, setBankStmtInputs] = useState<Record<string, string>>({});
@@ -874,6 +883,15 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
         setCurrentIncome(latest.currentIncome != null ? String(latest.currentIncome) : "");
         setCurrentPatientIncome(latest.currentPatientIncome != null ? String(latest.currentPatientIncome) : "");
         setNotes(latest.notes);
+      }
+    });
+    loadLatestArAging().then((latest) => {
+      setLatestArAging(latest);
+      if (latest) {
+        setAr0to30(String(latest.ar0to30));
+        setAr31to60(String(latest.ar31to60));
+        setAr61to90(String(latest.ar61to90));
+        setAr90plus(String(latest.ar90plus));
       }
     });
   }, []);
@@ -898,6 +916,22 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
     setTimeout(() => setSaved(false), 3000);
     const latest = await loadLatestWeeklyReview();
     setLatestReview(latest);
+  }
+
+  async function handleSaveAr() {
+    const result = await saveArAgingEntry({
+      entryDate: today,
+      ar0to30: ar0to30 ? Number(ar0to30) : 0,
+      ar31to60: ar31to60 ? Number(ar31to60) : 0,
+      ar61to90: ar61to90 ? Number(ar61to90) : 0,
+      ar90plus: ar90plus ? Number(ar90plus) : 0,
+    });
+    if (!result.ok) { setArError(result.error ?? "Failed to save."); return; }
+    setArError(null);
+    setArSaved(true);
+    setTimeout(() => setArSaved(false), 3000);
+    const latest = await loadLatestArAging();
+    setLatestArAging(latest);
   }
 
   async function handleSaveAllBalances() {
@@ -996,7 +1030,12 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
       </div>
 
       <div className="rounded-2xl bg-white shadow p-5">
-        <h2 className="font-bold text-slate-700 mb-1">Open Dental Numbers</h2>
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <h2 className="font-bold text-slate-700">Open Dental Numbers</h2>
+          <span className="text-xs text-slate-400">
+            {latestReview ? `Last updated ${new Date(latestReview.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : "Never entered"}
+          </span>
+        </div>
         <p className="text-sm text-slate-500 mb-4">Enter this week's figures — insurance income is calculated for you.</p>
         <div className="grid gap-3 sm:grid-cols-2 mb-4">
           <div>
@@ -1029,6 +1068,65 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
           {hasUnsavedIncomeChanges ? "Save This Week's Review — Unsaved Changes" : "Save This Week's Review"}
         </button>
         {saved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
+      </div>
+
+      <div className="rounded-2xl bg-white shadow p-5">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <h2 className="font-bold text-slate-700">Accounts Receivable (A/R) Aging</h2>
+          <span className="text-xs text-slate-400">
+            {latestArAging ? `Last updated ${new Date(latestArAging.entryDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : "Never entered"}
+          </span>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">Enter the total dollar amount in each aging bucket from your A/R report — update weekly to catch balances sliding toward 90+ days.</p>
+        <div className="grid gap-3 sm:grid-cols-4 mb-4">
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">0–30 days</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={ar0to30} onChange={(e) => setAr0to30(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">31–60 days</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={ar31to60} onChange={(e) => setAr31to60(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">61–90 days</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={ar61to90} onChange={(e) => setAr61to90(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-800 font-semibold mb-1">90+ days</label>
+            <input type="number" onFocus={(e) => e.target.select()} value={ar90plus} onChange={(e) => setAr90plus(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+          </div>
+        </div>
+        {(() => {
+          const health = computeArHealth({
+            ar0to30: ar0to30 ? Number(ar0to30) : 0, ar31to60: ar31to60 ? Number(ar31to60) : 0,
+            ar61to90: ar61to90 ? Number(ar61to90) : 0, ar90plus: ar90plus ? Number(ar90plus) : 0,
+          });
+          if (health.totalAr <= 0) return null;
+          const style = health.status === "good" ? { bg: "#EAF3DE", color: "#3B6D11", label: "✓ Healthy" }
+            : health.status === "fair" ? { bg: "#FAEEDA", color: "#854F0B", label: "⚠️ Needs attention" }
+            : { bg: "#FCEBEB", color: "#A32D2D", label: "⚠️ Poor" };
+          return (
+            <div className="rounded-xl p-3 mb-4" style={{ background: style.bg }}>
+              <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+                <span className="text-sm font-semibold" style={{ color: style.color }}>Total A/R: ${formatMoney(health.totalAr)}</span>
+                <span className="rounded-full px-3 py-1 text-xs font-bold" style={{ background: "white", color: style.color }}>{style.label}</span>
+              </div>
+              <p className="text-xs" style={{ color: style.color }}>
+                {health.pctCurrent.toFixed(0)}% current (0-30) · {health.pctOver60.toFixed(0)}% over 60 days · {health.pctOver90.toFixed(0)}% over 90 days
+              </p>
+              {health.reasons.length > 0 && (
+                <ul className="text-xs mt-1 space-y-0.5" style={{ color: style.color }}>
+                  {health.reasons.map((r) => <li key={r}>• {r}</li>)}
+                </ul>
+              )}
+            </div>
+          );
+        })()}
+        <button onClick={handleSaveAr} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>
+          Save A/R Aging
+        </button>
+        {arSaved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
+        {arError && <span className="ml-3 text-xs text-red-600 font-semibold">⚠️ {arError}</span>}
       </div>
     </div>
   );
@@ -1131,18 +1229,21 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const [statementHistories, setStatementHistories] = useState<Record<string, CardStatementEntry[]>>({});
   const [bankStatementHistories, setBankStatementHistories] = useState<Record<string, BankStatementEntry[]>>({});
   const [dentalMonthlyHistory, setDentalMonthlyHistory] = useState<DentalMonthlyEntry[]>([]);
-  const [depthView, setDepthView] = useState<string | null>(null); // 'cardStatement' | 'dental' | null
+  const [arAgingHistory, setArAgingHistory] = useState<ArAgingEntry[]>([]);
+  const [depthView, setDepthView] = useState<string | null>(null); // 'cardStatement' | 'dental' | 'ar' | null
 
   async function loadAll() {
-    const [statementHists, dentalHistory, bankHists] = await Promise.all([
+    const [statementHists, dentalHistory, bankHists, arHistory] = await Promise.all([
       Promise.all(cards.map((c) => loadStatementHistoryForCard(c.id))),
       loadDentalMonthlyHistory(),
       Promise.all(cashAccounts.map((a) => loadStatementHistoryForAccount(a.id))),
+      loadArAgingHistory(52),
     ]);
     const stmtMap: Record<string, CardStatementEntry[]> = {};
     cards.forEach((c, i) => { stmtMap[c.id] = statementHists[i]; });
     setStatementHistories(stmtMap);
     setDentalMonthlyHistory(dentalHistory);
+    setArAgingHistory(arHistory);
     const bankMap: Record<string, BankStatementEntry[]> = {};
     cashAccounts.forEach((a, i) => { bankMap[a.id] = bankHists[i]; });
     setBankStatementHistories(bankMap);
@@ -1219,6 +1320,12 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
     await loadAll();
   }
 
+  async function handleDeleteArEntry(id: string) {
+    if (!confirm("Delete this A/R aging entry? This can't be undone.")) return;
+    await deleteArAgingEntry(id);
+    await loadAll();
+  }
+
   const cardStatementSeries = cards.map((c, i) => ({
     label: c.name, color: CHART_COLORS[i % CHART_COLORS.length],
     points: [...(statementHistories[c.id] ?? [])].reverse().map((e) => ({ date: e.month, value: e.balance })),
@@ -1232,6 +1339,12 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const sortedDentalHistory = [...dentalMonthlyHistory].sort((a, b) => a.month.localeCompare(b.month));
   const dentalSeries = [
     { label: "Net Production", color: CHART_COLORS[0], points: sortedDentalHistory.filter((e) => e.netProduction != null).map((e) => ({ date: e.month, value: e.netProduction as number })) },
+  ];
+
+  const sortedArHistory = [...arAgingHistory].sort((a, b) => a.entryDate.localeCompare(b.entryDate));
+  const arSeries = [
+    { label: "Total A/R", color: CHART_COLORS[0], points: sortedArHistory.map((e) => ({ date: e.entryDate, value: e.ar0to30 + e.ar31to60 + e.ar61to90 + e.ar90plus })) },
+    { label: "90+ days", color: "#dc2626", points: sortedArHistory.map((e) => ({ date: e.entryDate, value: e.ar90plus })) },
   ];
 
   return (
@@ -1368,10 +1481,33 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
           </div>
         )}
       </div>
+
+      <div className="rounded-2xl bg-white shadow p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold text-slate-700">Accounts Receivable Trend</h2>
+          <button onClick={() => setDepthView(depthView === "ar" ? null : "ar")} className="text-xs text-orange-500 hover:underline">{depthView === "ar" ? "Standard view" : "In-depth view"}</button>
+        </div>
+        <TrendLineChart series={arSeries} />
+        {depthView === "ar" && (
+          <div className="mt-3 space-y-1 max-h-60 overflow-y-auto">
+            {[...arAgingHistory].sort((a, b) => b.entryDate.localeCompare(a.entryDate)).map((e) => {
+              const total = e.ar0to30 + e.ar31to60 + e.ar61to90 + e.ar90plus;
+              return (
+                <div key={e.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
+                  <span className="text-slate-600">{new Date(e.entryDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                  <span className="flex items-center gap-2 text-xs text-slate-400">
+                    <span>Total: ${formatMoney(total)} · 90+: ${formatMoney(e.ar90plus)}</span>
+                    <button onClick={() => handleDeleteArEntry(e.id)} className="text-red-400 hover:underline">Delete</button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
-
 
 export default function CashFlowPage() {
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
