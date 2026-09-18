@@ -307,6 +307,22 @@ function HandbookPageBody({ identity }: { identity: AppIdentity }) {
       for (const doc of documents) {
         const req = await loadLatestRequirement(doc.id);
         if (!req) continue;
+
+        const isRestrictedToSomeoneElse = doc.restrictedToEmployeeId != null && doc.restrictedToEmployeeId !== identity.employeeId;
+        if (isRestrictedToSomeoneElse) {
+          // I'm not the one meant to sign this — I'm here only as the
+          // designated countersigner (or Super Admin). Only flag it if
+          // I'm the countersigner and there's a signature still awaiting
+          // my countersignature.
+          if (doc.countersignerEmployeeId === identity.employeeId) {
+            const sigs = await loadSignaturesForRequirement(req.id);
+            result[doc.slug] = sigs.some((s) => !s.countersignedAt);
+          } else {
+            result[doc.slug] = false;
+          }
+          continue;
+        }
+
         const sig = await loadMySignature(req.id, identity.employeeId!);
         result[doc.slug] = !sig;
       }
