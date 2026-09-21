@@ -890,6 +890,22 @@ function GrowthBonusPanel() {
   );
 }
 
+// Standard semi-monthly pay periods: 1st-15th, then 16th-end of month.
+// Generates the 6 periods that fall inside a given quarter, so they can be
+// picked from a dropdown instead of typed by hand every time.
+function getSemiMonthlyPayPeriodsForQuarter(year: number, quarter: 1 | 2 | 3 | 4): { start: string; end: string; label: string }[] {
+  const monthsInQuarter = { 1: [1, 2, 3], 2: [4, 5, 6], 3: [7, 8, 9], 4: [10, 11, 12] }[quarter];
+  const periods: { start: string; end: string; label: string }[] = [];
+  for (const month of monthsInQuarter) {
+    const mm = String(month).padStart(2, "0");
+    const lastDay = new Date(year, month, 0).getDate();
+    const monthName = new Date(year, month - 1, 1).toLocaleDateString("en-US", { month: "short" });
+    periods.push({ start: `${year}-${mm}-01`, end: `${year}-${mm}-15`, label: `${monthName} 1–15` });
+    periods.push({ start: `${year}-${mm}-16`, end: `${year}-${mm}-${String(lastDay).padStart(2, "0")}`, label: `${monthName} 16–${lastDay}` });
+  }
+  return periods;
+}
+
 function PvBonusPanel() {
   const currentYear = new Date().getFullYear();
   const [staff, setStaff] = useState<Employee[]>([]);
@@ -1137,8 +1153,15 @@ function PvBonusPanel() {
                                         )}
                                       </div>
                                       <div className="flex flex-wrap items-center gap-1.5">
-                                        <input type="date" value={payrollForm.payPeriodStart} onChange={(e) => setPayrollForm((f) => ({ ...f, payPeriodStart: e.target.value }))} className={`${cellClass} w-32`} title="Pay period start" />
-                                        <input type="date" value={payrollForm.payPeriodEnd} onChange={(e) => setPayrollForm((f) => ({ ...f, payPeriodEnd: e.target.value }))} className={`${cellClass} w-32`} title="Pay period end" />
+                                        <select value={payrollForm.payPeriodStart} onChange={(e) => {
+                                          const period = getSemiMonthlyPayPeriodsForQuarter(year, quarter).find((p) => p.start === e.target.value);
+                                          setPayrollForm((f) => ({ ...f, payPeriodStart: period?.start ?? "", payPeriodEnd: period?.end ?? "" }));
+                                        }} className={`${cellClass} bg-white`}>
+                                          <option value="">Select pay period…</option>
+                                          {getSemiMonthlyPayPeriodsForQuarter(year, quarter).map((p) => (
+                                            <option key={p.start} value={p.start}>{p.label}</option>
+                                          ))}
+                                        </select>
                                         <input type="number" onFocus={(e) => e.target.select()} value={payrollForm.amount} onChange={(e) => setPayrollForm((f) => ({ ...f, amount: e.target.value }))} placeholder="$" className={`${cellClass} w-20`} />
                                         <button onClick={handleAddPayrollEntry} className="rounded-lg px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>
                                           {editingPayrollId ? "Save" : "+ Add"}
