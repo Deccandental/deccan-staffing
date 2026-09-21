@@ -18,7 +18,10 @@ import {
   isEligibleForQuarter, computeHoursWorkedInQuarter, hoursToDays, splitBonusPool, getQuarterDateRange,
   loadGrowthBonusHoursOverrides, GrowthBonusQuarter,
 } from "@/lib/growthBonus";
-import { PvBonusQuarter, loadPvBonusYear } from "@/lib/pvBonus";
+import {
+  PvBonusQuarter, loadAllPvBonusQuarters, PvBonusPayrollEntry, loadPvBonusPayrollEntries,
+  PvBonusPayment, loadPvBonusPayments, computePvQuarterCalcs,
+} from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusPayoutYear } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
 import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
@@ -100,7 +103,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [yearDaysOverrides, setYearDaysOverrides] = useState<Record<number, Record<number, number>>>({});
   const [yearPayrollEntries, setYearPayrollEntries] = useState<PayrollEntry[]>([]);
   const [bonusReceivedThisYear, setBonusReceivedThisYear] = useState(0);
-  const [pvQuarters, setPvQuarters] = useState<PvBonusQuarter[]>([]);
+  const [pvAllQuarters, setPvAllQuarters] = useState<PvBonusQuarter[]>([]);
+  const [pvPayrollEntries, setPvPayrollEntries] = useState<PvBonusPayrollEntry[]>([]);
+  const [pvPayments, setPvPayments] = useState<PvBonusPayment[]>([]);
   const [hygieneEntries, setHygieneEntries] = useState<HygieneBonusEntry[]>([]);
   const [hoMonths, setHoMonths] = useState<HoBonusMonth[]>([]);
   const [loading, setLoading] = useState(false);
@@ -135,12 +140,14 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       loadGrowthBonusHoursOverrides(bonusYear, 3), loadGrowthBonusHoursOverrides(bonusYear, 4),
       loadPayrollEntriesInRange(yearStart, yearEnd),
       loadGrowthBonusPayments(selectedId),
-      loadPvBonusYear(selectedId, bonusYear),
+      loadAllPvBonusQuarters(selectedId),
+      loadPvBonusPayrollEntries(selectedId),
+      loadPvBonusPayments(selectedId),
       loadHygieneBonusEntries(selectedId, yearStart, yearEnd),
       loadHoBonusPayoutYear(selectedId, bonusYear),
     ]).then(([
       shiftData, leaveData, certData, eventData, requiredTypes, ceEntries,
-      q1, q2, q3, q4, d1, d2, d3, d4, entries, payments, pvYear, hygieneYear, hoYear,
+      q1, q2, q3, q4, d1, d2, d3, d4, entries, payments, pvAllQuarters, pvPayrollEntries, pvPayments, hygieneYear, hoYear,
     ]) => {
       if (cancelled) return;
       setShifts(shiftData);
@@ -153,7 +160,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       setYearQuartersData({ 1: q1, 2: q2, 3: q3, 4: q4 });
       setYearDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
       setYearPayrollEntries(entries);
-      setPvQuarters(pvYear);
+      setPvAllQuarters(pvAllQuarters);
+      setPvPayrollEntries(pvPayrollEntries);
+      setPvPayments(pvPayments);
       setHygieneEntries(hygieneYear);
       setHoMonths(hoYear);
       setBonusReceivedThisYear(payments.filter((p) => p.date.startsWith(String(bonusYear))).reduce((sum, p) => sum + p.amount, 0));
@@ -537,26 +546,33 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               <div className="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
                 <h2 className="font-bold text-slate-700 mb-2">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
                 <div className="space-y-1.5">
-                  {pvQuarters.map((q) => {
+                  {(() => {
                     const percent = selectedEmployee.netProductionBonusPercent ?? 30;
-                    const owed = q.totalIncome * (percent / 100);
-                    const balance = owed - q.amountPaid;
-                    return (
-                      <div key={q.quarter} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
-                        <span className="font-medium text-slate-700">{QUARTER_LABELS[q.quarter]}</span>
+                    const allYears = Array.from(new Set([...pvAllQuarters.map((q) => q.year), bonusYear]));
+                    const fullQuarterSet: PvBonusQuarter[] = [];
+                    for (const y of allYears) {
+                      for (const q of [1, 2, 3, 4] as const) {
+                        const existing = pvAllQuarters.find((row) => row.year === y && row.quarter === q);
+                        fullQuarterSet.push(existing ?? { employeeId: selectedEmployee.id, year: y, quarter: q, totalIncome: 0, notes: "" });
+                      }
+                    }
+                    const calcs = computePvQuarterCalcs(fullQuarterSet, pvPayrollEntries, pvPayments, percent).filter((c) => c.year === bonusYear);
+                    return calcs.map((c) => (
+                      <div key={c.quarter} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
+                        <span className="font-medium text-slate-700">{QUARTER_LABELS[c.quarter]}</span>
                         <div className="flex items-center gap-3">
-                          <span className="text-slate-400 text-xs">{percent}%: ${formatMoney(owed)}</span>
-                          {balance > 0 ? (
-                            <span className="text-amber-600 font-semibold">Bonus: ${formatMoney(balance)}</span>
-                          ) : q.totalIncome > 0 ? (
+                          <span className="text-slate-400 text-xs">{percent}%: ${formatMoney(c.thirtyPercent)}</span>
+                          {c.balance > 0 ? (
+                            <span className="text-amber-600 font-semibold">Balance: ${formatMoney(c.balance)}</span>
+                          ) : c.totalIncome > 0 ? (
                             <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
                           ) : (
                             <span className="text-slate-400">Not started</span>
                           )}
                         </div>
                       </div>
-                    );
-                  })}
+                    ));
+                  })()}
                 </div>
               </div>
             )}
