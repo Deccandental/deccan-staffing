@@ -543,9 +543,11 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {selectedEmployee?.pvBonusEligible && (
-              <div className="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
-                <h2 className="font-bold text-slate-700 mb-2">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
-                <div className="space-y-1.5">
+              <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
+                <div className="p-4 pb-2">
+                  <h2 className="font-bold text-slate-700">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
+                </div>
+                <div className="overflow-x-auto">
                   {(() => {
                     const percent = selectedEmployee.netProductionBonusPercent ?? 30;
                     const allYears = Array.from(new Set([...pvAllQuarters.map((q) => q.year), bonusYear]));
@@ -557,21 +559,42 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       }
                     }
                     const calcs = computePvQuarterCalcs(fullQuarterSet, pvPayrollEntries, pvPayments, percent).filter((c) => c.year === bonusYear);
-                    return calcs.map((c) => (
-                      <div key={c.quarter} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
-                        <span className="font-medium text-slate-700">{QUARTER_LABELS[c.quarter]}</span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-slate-400 text-xs">{percent}%: ${formatMoney(c.thirtyPercent)}</span>
-                          {c.balance > 0 ? (
-                            <span className="text-amber-600 font-semibold">Balance: ${formatMoney(c.balance)}</span>
-                          ) : c.totalIncome > 0 ? (
-                            <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
-                          ) : (
-                            <span className="text-slate-400">Not started</span>
-                          )}
-                        </div>
-                      </div>
-                    ));
+                    return (
+                      <table className="w-full text-sm border-collapse min-w-[760px]">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                            <th className="px-5 py-2 font-medium">Quarter</th>
+                            <th className="px-2 py-2 font-medium">Total Income</th>
+                            <th className="px-2 py-2 font-medium">{percent}%</th>
+                            <th className="px-2 py-2 font-medium">Gusto Payroll</th>
+                            <th className="px-2 py-2 font-medium">Bonus</th>
+                            <th className="px-2 py-2 font-medium">Bonus Paid</th>
+                            <th className="px-2 py-2 font-medium">Date Paid</th>
+                            <th className="px-5 py-2 font-medium">Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {calcs.map((c) => (
+                            <tr key={c.quarter} className="border-b border-slate-50 last:border-0">
+                              <td className="px-5 py-2 font-medium text-slate-700 whitespace-nowrap">{QUARTER_LABELS[c.quarter]}</td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(c.totalIncome)}</td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(c.thirtyPercent)}</td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(c.gustoPayroll)}</td>
+                              <td className="px-2 py-2 font-semibold text-slate-700">${formatMoney(c.bonus)}</td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(c.bonusPaid)}</td>
+                              <td className="px-2 py-2 text-slate-500 text-xs whitespace-nowrap">
+                                {c.datesPaid.length > 0
+                                  ? c.datesPaid.length === 1
+                                    ? new Date(c.datesPaid[0] + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                                    : `${c.datesPaid.length} payments`
+                                  : "—"}
+                              </td>
+                              <td className={`px-5 py-2 font-semibold whitespace-nowrap ${c.balance > 0 ? "text-amber-600" : c.balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(c.balance)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    );
                   })()}
                 </div>
               </div>
