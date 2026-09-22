@@ -112,7 +112,7 @@ export default function DailyAssignmentPanel({
         .map((e) => (e as Employee).id)
     );
     return staff.filter((e) =>
-      e.skills.includes("Assistant") && !e.archived && !hygienistIds.has(e.id) && !sameDentistOtherSlots.has(e.id) && e.id !== resolvedFloater?.id
+      (e.skills.includes("Assistant") || e.skills.includes("RDA")) && !e.archived && !hygienistIds.has(e.id) && !sameDentistOtherSlots.has(e.id) && e.id !== resolvedFloater?.id
     );
   }
 
@@ -163,7 +163,7 @@ export default function DailyAssignmentPanel({
     assignments.dentists.forEach(({ dentist }) => {
       getResolvedSlots(dentist.id).forEach((a) => { if (a) dentistAssistantIds.add(a.id); });
     });
-    return staff.filter((e) => e.skills.includes("Assistant") && !e.archived && !hygienistIds.has(e.id) && !dentistAssistantIds.has(e.id));
+    return staff.filter((e) => (e.skills.includes("Assistant") || e.skills.includes("RDA")) && !e.archived && !hygienistIds.has(e.id) && !dentistAssistantIds.has(e.id));
   }
 
   function handleFloaterChange(value: string) {
