@@ -1,753 +1,909 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { DailyAssignmentsResult } from "@/lib/assignmentEngine";
+import { useState, useEffect, Fragment } from "react";
+import { Sidebar } from "@/components/Sidebar";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
-import { AssistantOverrides } from "@/lib/scheduleStore";
-import { resolveDentistAssistants, resolveFloater, getDentistSlotOverrides, setDentistSlotOverride, clearDentistSlotOverride } from "@/lib/assistantSlots";
-import { TempStaff } from "@/app/temps/page";
-import { TempAssignment, getTempAssignments, addTempAssignment, removeTempAssignment } from "@/lib/tempAssignments";
-import { supabase } from "@/lib/supabase";
+import { LeaveRequest } from "@/types/leave";
+import { loadLeaveRequests } from "@/lib/leaveStore";
+import {
+  Certification, NewCertInput, loadCertificationsForEmployee,
+  createCertification, updateCertification, deleteCertification, uploadCertFile,
+} from "@/lib/certsStore";
+import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
+import { UpcomingShift, loadUpcomingShiftsForEmployee } from "@/lib/staffSchedule";
+import { PayrollEntry, loadPayrollEntriesInRange } from "@/lib/payrollStore";
+import {
+  getCurrentQuarter, computeQuarterCalc, loadGrowthBonusQuarter, loadGrowthBonusPayments,
+  isEligibleForQuarter, computeHoursWorkedInQuarter, hoursToDays, splitBonusPool, getQuarterDateRange,
+  loadGrowthBonusHoursOverrides, GrowthBonusQuarter,
+} from "@/lib/growthBonus";
+import {
+  PvBonusQuarter, loadAllPvBonusQuarters, PvBonusPayrollEntry, loadPvBonusPayrollEntries,
+  PvBonusPayment, loadPvBonusPayments, computePvQuarterCalcs, getPvQuarterDateRange,
+} from "@/lib/pvBonus";
+import { HoBonusMonth, loadHoBonusPayoutYear } from "@/lib/hoBonus";
+import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
+import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
+import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsStore";
+import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry, computeRequiredCertStatuses } from "@/lib/requiredCertsStore";
+import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredCertsSection";
+import { formatMoney } from "@/lib/format";
+import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
-interface Props {
-  selectedDate: string;
-  assignments?: DailyAssignmentsResult;
-  assistantOverrides?: AssistantOverrides;
-  onOverrideChange?: (overrides: AssistantOverrides) => void;
-  assistantCounts?: Record<number, number>;
-  onAssistantCountChange?: (dentistId: number, count: number) => void;
-  hygienistsRequired?: number;
-  hygienistOverrides?: Record<number, number | null>;
-  onHygienistOverrideChange?: (overrides: Record<number, number | null>) => void;
-  floaterAssistantId?: number | null;
-  onFloaterChange?: (assistantId: number | null) => void;
-  onTempAssignmentsChange?: (date: string, assignments: TempAssignment[]) => void;
-  frontDeskRequired?: number;
-}
-
-const EMPTY: DailyAssignmentsResult = { dentists: [], frontDesk: [], hygienists: [], warnings: [] };
-
-const ROLE_COLORS: Record<string, string> = {
-  Dentist: "#2563eb", RDA: "#dc2626", Assistant: "#db2777",
-  "Front Desk": "#0284c7", Hygienist: "#059669", Other: "#6b7280",
+const REASON_LABELS: Record<string, string> = {
+  sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other",
 };
 
-async function loadTemps(): Promise<TempStaff[]> {
-  const { data, error } = await supabase.from("temps").select("*").order("rating", { ascending: false });
-  if (error) { console.error("loadTemps error:", error); return []; }
-  return (data ?? []).map((row) => ({
-    id: row.id, name: row.name, phone: row.phone ?? "", email: row.email ?? "",
-    role: row.role, skills: row.skills ?? [], rating: row.rating ?? 0,
-    notes: row.notes ?? "", addedAt: row.added_at,
-  }));
+const LEAVE_STATUS_STYLES: Record<string, string> = {
+  pending: "bg-amber-100 text-amber-700",
+  approved: "bg-green-100 text-green-700",
+  denied: "bg-red-100 text-red-700",
+  cancelled: "bg-slate-100 text-slate-400",
+};
+
+const ROLE_ICONS: Record<UpcomingShift["role"], string> = {
+  Dentist: "🦷", Assistant: "🤝", "Front Desk": "🖥️", Hygienist: "✨", Floater: "🔄",
+};
+
+const QUARTER_LABELS: Record<1 | 2 | 3 | 4, string> = { 1: "Q1 (Jan–Mar)", 2: "Q2 (Apr–Jun)", 3: "Q3 (Jul–Sep)", 4: "Q4 (Oct–Dec)" };
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function daysUntil(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const target = new Date(y, m - 1, d).getTime();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target - today.getTime()) / 86400000);
 }
 
-export default function DailyAssignmentPanel({
-  selectedDate, assignments = EMPTY, assistantOverrides = {}, onOverrideChange,
-  assistantCounts = {}, onAssistantCountChange,
-  hygienistsRequired, hygienistOverrides = {}, onHygienistOverrideChange,
-  floaterAssistantId = null, onFloaterChange,
-  onTempAssignmentsChange,
-  frontDeskRequired = 2,
-}: Props) {
-  const [overrides, setOverrides] = useState<AssistantOverrides>(assistantOverrides);
-  const [hygOverrides, setHygOverrides] = useState<Record<number, number | null>>(hygienistOverrides);
-  const [floaterId, setFloaterId] = useState<number | null>(floaterAssistantId);
-  const [swapping, setSwapping] = useState<{ dentistId: number; slotIndex: number } | null>(null);
-  const [floaterSwapping, setFloaterSwapping] = useState(false);
-  const [hygSwapping, setHygSwapping] = useState<number | null>(null);
+function addMonths(dateStr: string, months: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(y, m - 1 + months, d);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function certBadge(cert: Certification): { label: string; className: string } {
+  if (!cert.expirationDate) return { label: "No expiration", className: "bg-slate-100 text-slate-500" };
+  const days = daysUntil(cert.expirationDate);
+  if (days < 0) return { label: "Expired", className: "bg-red-100 text-red-700" };
+  if (days <= 7) return { label: `Expires in ${days}d`, className: "bg-red-100 text-red-700" };
+  if (days <= 30) return { label: `Expires in ${days}d`, className: "bg-amber-100 text-amber-700" };
+  if (days <= 60) return { label: `Expires in ${days}d`, className: "bg-yellow-100 text-yellow-700" };
+  return { label: "Current", className: "bg-green-100 text-green-700" };
+}
+
+interface CertFormState {
+  title: string;
+  expirationDate: string;
+  ceHours: string;
+}
+
+const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "", ceHours: "" };
+
+function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
+  const isManager = identity.canAdmin;
   const [staff, setStaff] = useState<Employee[]>([]);
-  const [temps, setTemps] = useState<TempStaff[]>([]);
-  const [tempAssignments, setTempAssignments] = useState<TempAssignment[]>([]);
-  const [assigningRole, setAssigningRole] = useState<string | null>(null);
-  const [selectedTempId, setSelectedTempId] = useState("");
-  const [selectedDentistId, setSelectedDentistId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(identity.mode === "staff" ? (identity.employeeId ?? null) : null);
+  const [shifts, setShifts] = useState<UpcomingShift[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [certs, setCerts] = useState<Certification[]>([]);
+  const [pendingPolicies, setPendingPolicies] = useState<{ title: string; cycleLabel: string }[]>([]);
+  const [checkinDue, setCheckinDue] = useState(false);
+  const [checkinUpcoming, setCheckinUpcoming] = useState<CheckinSlot | null>(null);
+  const [titleOptions, setTitleOptions] = useState<string[]>([]);
+  const [requiredTypesForCerts, setRequiredTypesForCerts] = useState<RequiredCertType[]>([]);
+  const [ceEntriesForCerts, setCeEntriesForCerts] = useState<CeCourseEntry[]>([]);
+  const [events, setEvents] = useState<StaffEvent[]>([]);
+  const [bonusYear] = useState(new Date().getFullYear());
+  const [yearQuartersData, setYearQuartersData] = useState<Record<number, GrowthBonusQuarter>>({});
+  const [yearDaysOverrides, setYearDaysOverrides] = useState<Record<number, Record<number, number>>>({});
+  const [yearPayrollEntries, setYearPayrollEntries] = useState<PayrollEntry[]>([]);
+  const [bonusReceivedThisYear, setBonusReceivedThisYear] = useState(0);
+  const [pvAllQuarters, setPvAllQuarters] = useState<PvBonusQuarter[]>([]);
+  const [pvPayrollEntries, setPvPayrollEntries] = useState<PvBonusPayrollEntry[]>([]);
+  const [pvPayments, setPvPayments] = useState<PvBonusPayment[]>([]);
+  const [expandedPvQuarter, setExpandedPvQuarter] = useState<string | null>(null);
+  const [hygieneEntries, setHygieneEntries] = useState<HygieneBonusEntry[]>([]);
+  const [hoMonths, setHoMonths] = useState<HoBonusMonth[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const [showCertForm, setShowCertForm] = useState(false);
+  const [editingCertId, setEditingCertId] = useState<string | null>(null);
+  const [certForm, setCertForm] = useState<CertFormState>(EMPTY_CERT_FORM);
+  const [useCustomTitle, setUseCustomTitle] = useState(false);
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const [certError, setCertError] = useState("");
+  const [certSaving, setCertSaving] = useState(false);
+
+  useEffect(() => { loadStaff().then(setStaff); }, []);
 
   useEffect(() => {
-    loadStaff().then(setStaff);
-    loadTemps().then(setTemps);
-  }, []);
+    if (selectedId == null) return;
+    let cancelled = false;
+    setLoading(true);
+    const todayStr = new Date().toISOString().split("T")[0];
+    const yearStart = `${bonusYear}-01-01`;
+    const yearEnd = `${bonusYear}-12-31`;
+    Promise.all([
+      loadUpcomingShiftsForEmployee(selectedId),
+      loadLeaveRequests(),
+      loadCertificationsForEmployee(selectedId),
+      loadUpcomingEvents(todayStr),
+      loadRequiredCertTypes(),
+      loadCeCourseEntriesForEmployee(selectedId),
+      loadGrowthBonusQuarter(bonusYear, 1), loadGrowthBonusQuarter(bonusYear, 2),
+      loadGrowthBonusQuarter(bonusYear, 3), loadGrowthBonusQuarter(bonusYear, 4),
+      loadGrowthBonusHoursOverrides(bonusYear, 1), loadGrowthBonusHoursOverrides(bonusYear, 2),
+      loadGrowthBonusHoursOverrides(bonusYear, 3), loadGrowthBonusHoursOverrides(bonusYear, 4),
+      loadPayrollEntriesInRange(yearStart, yearEnd),
+      loadGrowthBonusPayments(selectedId),
+      loadAllPvBonusQuarters(selectedId),
+      loadPvBonusPayrollEntries(selectedId),
+      loadPvBonusPayments(selectedId),
+      loadHygieneBonusEntries(selectedId, yearStart, yearEnd),
+      loadHoBonusPayoutYear(selectedId, bonusYear),
+    ]).then(([
+      shiftData, leaveData, certData, eventData, requiredTypes, ceEntries,
+      q1, q2, q3, q4, d1, d2, d3, d4, entries, payments, pvAllQuarters, pvPayrollEntries, pvPayments, hygieneYear, hoYear,
+    ]) => {
+      if (cancelled) return;
+      setShifts(shiftData);
+      setLeaveRequests(leaveData.filter((r) => r.employeeId === selectedId));
+      setCerts(certData);
+      setEvents(eventData.filter((ev) => ev.inviteAll || ev.invitedStaffIds.includes(selectedId)));
+      setRequiredTypesForCerts(requiredTypes);
+      setCeEntriesForCerts(ceEntries);
+      setTitleOptions(Array.from(new Set(requiredTypes.map((t: any) => t.title))).sort((a: any, b: any) => a.localeCompare(b)) as string[]);
+      setYearQuartersData({ 1: q1, 2: q2, 3: q3, 4: q4 });
+      setYearDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
+      setYearPayrollEntries(entries);
+      setPvAllQuarters(pvAllQuarters);
+      setPvPayrollEntries(pvPayrollEntries);
+      setPvPayments(pvPayments);
+      setHygieneEntries(hygieneYear);
+      setHoMonths(hoYear);
+      setBonusReceivedThisYear(payments.filter((p) => p.date.startsWith(String(bonusYear))).reduce((sum, p) => sum + p.amount, 0));
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [selectedId]);
 
   useEffect(() => {
-    setOverrides(assistantOverrides);
-    setHygOverrides(hygienistOverrides);
-    setFloaterId(floaterAssistantId);
-    setSwapping(null);
-    setFloaterSwapping(false);
-    setHygSwapping(null);
-    setAssigningRole(null);
-    setSelectedTempId("");
-    setSelectedDentistId(null);
-    if (selectedDate) {
-      getTempAssignments(selectedDate).then(setTempAssignments);
-    }
-  }, [selectedDate, JSON.stringify(assistantOverrides), JSON.stringify(hygienistOverrides), floaterAssistantId]);
-
-  const dateLabel = selectedDate
-    ? new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
-        weekday: "long", month: "long", day: "numeric",
-      })
-    : "";
-
-  // Resolves the full, ordered list of assistants for one dentist, applying
-  // any manual per-slot overrides on top of the engine's auto-assignment.
-  function getResolvedSlots(dentistId: number): (Employee | null)[] {
-    const autoAssigned = assignments.dentists.find((d) => d.dentist.id === dentistId)?.assistants ?? [];
-    return resolveDentistAssistants(dentistId, autoAssigned, assistantCounts, overrides, staff);
-  }
-
-  // Available assistants for a specific dentist slot. Excludes people
-  // currently working as a hygienist today (cross-role conflict, no auto
-  // swap), and excludes anyone already filling ANOTHER slot for this SAME
-  // dentist (no point offering a duplicate). Assistants already assigned to
-  // a DIFFERENT dentist are still shown — picking one triggers a true swap
-  // (see handleOverride) instead of creating a duplicate.
-  function getAvailableAssistantsFor(dentistId: number, excludingSlot: number): Employee[] {
-    const hygienistIds = new Set(resolvedHygienists.map((h) => h.id));
-    const sameDentistOtherSlots = new Set(
-      getResolvedSlots(dentistId)
-        .filter((_, i) => i !== excludingSlot)
-        .filter(Boolean)
-        .map((e) => (e as Employee).id)
-    );
-    return staff.filter((e) =>
-      (e.skills.includes("Assistant") || e.skills.includes("RDA")) && !e.archived && !hygienistIds.has(e.id) && !sameDentistOtherSlots.has(e.id) && e.id !== resolvedFloater?.id
-    );
-  }
-
-  // For showing "(currently with Dr. X)" hints in the swap dropdown — scans
-  // every dentist's every slot except the one being edited.
-  function getCurrentAssignmentFor(
-    assistantId: number,
-    excludingDentistId: number,
-    excludingSlot: number
-  ): { dentist: Employee; slotIndex: number } | null {
-    for (const { dentist } of assignments.dentists) {
-      const slots = getResolvedSlots(dentist.id);
-      for (let i = 0; i < slots.length; i++) {
-        if (dentist.id === excludingDentistId && i === excludingSlot) continue;
-        if (slots[i]?.id === assistantId) return { dentist, slotIndex: i };
+    if (selectedId == null) return;
+    const emp = staff.find((e) => e.id === selectedId);
+    if (emp?.exemptFromPolicySigning) { setPendingPolicies([]); return; }
+    let cancelled = false;
+    (async () => {
+      const docs = await loadPolicyDocuments();
+      const pending: { title: string; cycleLabel: string }[] = [];
+      for (const doc of docs) {
+        if (doc.restrictedToEmployeeId != null && doc.restrictedToEmployeeId !== selectedId) continue;
+        const req = await loadLatestRequirement(doc.id);
+        if (!req) continue;
+        const sig = await loadMySignature(req.id, selectedId);
+        if (!sig) pending.push({ title: doc.title, cycleLabel: req.cycleLabel });
       }
-    }
-    return null;
-  }
+      if (!cancelled) setPendingPolicies(pending);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId, staff]);
 
-  // Hygienist slots: independent "seats" (0-indexed, up to hygienistsRequired)
-  // rather than one slot per person, since hygienist need isn't tied to a
-  // specific dentist. Slot N defaults to assignments.hygienists[N] (the
-  // engine's priority pick — e.g. Cindy stays first choice) unless overridden.
-  const hygSlotCount = hygienistsRequired ?? assignments.hygienists.length;
-  const hygSlotsAuto: (Employee | null)[] = Array.from({ length: hygSlotCount }, (_, i) => assignments.hygienists[i] ?? null);
+  useEffect(() => {
+    if (selectedId == null) return;
+    const emp = staff.find((e) => e.id === selectedId);
+    if (emp?.exemptFromCheckin) { setCheckinDue(false); setCheckinUpcoming(null); return; }
+    let cancelled = false;
+    (async () => {
+      const slots = await loadAllSlots();
+      const today = new Date().toISOString().slice(0, 10);
+      const status = computeCheckinStatus(selectedId, slots, today);
+      if (!cancelled) {
+        setCheckinDue(status.isDue && !status.upcomingSlot);
+        setCheckinUpcoming(status.upcomingSlot);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId, staff]);
 
-  function getHygienist(slotIndex: number): Employee | null {
-    if (slotIndex in hygOverrides) {
-      const ovId = hygOverrides[slotIndex];
-      return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null;
-    }
-    return hygSlotsAuto[slotIndex] ?? null;
-  }
+  const selectedEmployee = staff.find((e) => e.id === selectedId);
 
-  const resolvedHygienists = Array.from({ length: hygSlotCount }, (_, i) => getHygienist(i)).filter(Boolean) as Employee[];
+  const missingOrExpiredCertCount = selectedEmployee ? (() => {
+    const roles = getApplicableRoles(selectedEmployee);
+    if (roles.length === 0) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const statuses = computeRequiredCertStatuses(roles, requiredTypesForCerts, certs, ceEntriesForCerts, today);
+    return statuses.filter((s) => !s.satisfied).length;
+  })() : 0;
 
-  // Today's Floater — one extra assistant added for the day, independent of
-  // any dentist. Resolved from the stored id, defaulting to none.
-  const resolvedFloater = resolveFloater(floaterId, staff);
+  // Computes what this specific employee earned for a given quarter, by
+  // splitting that quarter's pool across every eligible employee — mirrors
+  // the same logic used in the Payroll Dashboard's Growth Bonus tab.
+  const isHygienist = selectedEmployee && (selectedEmployee.role === "Hygienist" || selectedEmployee.skills.includes("Hygienist"));
 
-  // Available assistants for the Floater slot. Excludes hygienists and
-  // anyone already assisting a dentist today, so the Floater represents
-  // genuinely extra coverage rather than a duplicate assignment.
-  function getAvailableAssistantsForFloater(): Employee[] {
-    const hygienistIds = new Set(resolvedHygienists.map((h) => h.id));
-    const dentistAssistantIds = new Set<number>();
-    assignments.dentists.forEach(({ dentist }) => {
-      getResolvedSlots(dentist.id).forEach((a) => { if (a) dentistAssistantIds.add(a.id); });
+  const isFullTime = (selectedEmployee?.employmentType ?? "full_time") === "full_time";
+  const ptoEligibilityDate = selectedEmployee?.hireDate ? addMonths(selectedEmployee.hireDate, 4) : null;
+  const ptoDaysLeft = ptoEligibilityDate ? daysUntil(ptoEligibilityDate) : null;
+  const showPtoCountdown = isFullTime && ptoDaysLeft != null && ptoDaysLeft > 0;
+
+  const bonusEligibilityDate = selectedEmployee?.hireDate ? addMonths(selectedEmployee.hireDate, 5) : null;
+  const bonusDaysLeft = bonusEligibilityDate ? daysUntil(bonusEligibilityDate) : null;
+  const showBonusCountdown = !!selectedEmployee?.growthBonusEligible && bonusDaysLeft != null && bonusDaysLeft > 0;
+  const hygieneEarned = hygieneEntries.reduce((sum, e) => sum + e.patientCount * HYGIENE_BONUS_PER_PATIENT, 0);
+  const hygienePaid = hygieneEntries.reduce((sum, e) => sum + e.amountPaid, 0);
+  const hygieneBalance = hygieneEarned - hygienePaid;
+
+  function bonusForQuarter(q: 1 | 2 | 3 | 4): { calc: ReturnType<typeof computeQuarterCalc>; myBonus: number } | null {
+    const qData = yearQuartersData[q];
+    if (!qData || !selectedEmployee) return null;
+    const calc = computeQuarterCalc(qData);
+    const { start, end } = getQuarterDateRange(bonusYear, q);
+    const eligible = staff.filter((e) => isEligibleForQuarter(e, end));
+    const overridesForQ = yearDaysOverrides[q] ?? {};
+    const rows = eligible.map((e) => {
+      const hours = overridesForQ[e.id] ?? computeHoursWorkedInQuarter(e.id, start, end, yearPayrollEntries);
+      return { employee: e, days: hoursToDays(hours) };
     });
-    return staff.filter((e) => (e.skills.includes("Assistant") || e.skills.includes("RDA")) && !e.archived && !hygienistIds.has(e.id) && !dentistAssistantIds.has(e.id));
+    const split = calc.eligible ? splitBonusPool(calc.bonusPool, rows) : [];
+    const mine = split.find((r) => r.employee.id === selectedEmployee.id);
+    return { calc, myBonus: mine?.bonus ?? 0 };
   }
 
-  function handleFloaterChange(value: string) {
-    const newId = value ? Number(value) : null;
-    setFloaterId(newId);
-    setFloaterSwapping(false);
-    onFloaterChange?.(newId);
+  const currentQuarter = getCurrentQuarter().quarter;
+  const currentQuarterData = yearQuartersData[currentQuarter];
+  const currentCalc = currentQuarterData ? computeQuarterCalc(currentQuarterData) : null;
+  const requiredProduction = currentQuarterData ? Math.max(currentQuarterData.bamThreshold, currentQuarterData.netProductionPriorYear * 1.2) : 0;
+  const bonusProgressPct = currentQuarterData && requiredProduction > 0
+    ? Math.min(100, Math.round((currentQuarterData.netProductionCurrent / requiredProduction) * 100)) : 0;
+  const bonusUnlocked = !!currentCalc?.eligible;
+  const totalEarnedThisYear = ([1, 2, 3, 4] as const)
+    .filter((q) => q <= currentQuarter)
+    .reduce((sum, q) => sum + (bonusForQuarter(q)?.myBonus ?? 0), 0);
+  const bonusBeingPaced = totalEarnedThisYear > bonusReceivedThisYear;
+
+  function openNewCert() {
+    setCertForm(EMPTY_CERT_FORM);
+    setEditingCertId(null);
+    setCertFile(null);
+    setCertError("");
+    setUseCustomTitle(titleOptions.length === 0);
+    setShowCertForm(true);
   }
 
-  function handleRemoveFloater() {
-    setFloaterId(null);
-    onFloaterChange?.(null);
+  function startEditCert(cert: Certification) {
+    setCertForm({ title: cert.title, expirationDate: cert.expirationDate ?? "", ceHours: cert.ceHours != null ? String(cert.ceHours) : "" });
+    setEditingCertId(cert.id);
+    setCertFile(null);
+    setCertError("");
+    setUseCustomTitle(!titleOptions.includes(cert.title));
+    setShowCertForm(true);
   }
 
-  // Available hygienists for a slot. Exclude people currently working as an
-  // assistant today (cross-role conflict, no auto swap). People already in
-  // ANOTHER hygienist slot are still shown — picking one triggers a true
-  // swap (see handleHygOverride) instead of creating a duplicate.
-  function getAvailableHygienistsFor(slotIndex: number): Employee[] {
-    const assistantIds = new Set<number>();
-    assignments.dentists.forEach(({ dentist }) => {
-      getResolvedSlots(dentist.id).forEach((a) => { if (a) assistantIds.add(a.id); });
-    });
-    return staff.filter((e) => (e.role === "Hygienist" || e.skills.includes("Hygienist")) && !e.archived && !assistantIds.has(e.id));
+  function openForRequiredTitle(title: string, existing?: Certification) {
+    if (existing) { startEditCert(existing); return; }
+    setCertForm({ title, expirationDate: "", ceHours: "" });
+    setEditingCertId(null);
+    setCertFile(null);
+    setCertError("");
+    setUseCustomTitle(false);
+    setShowCertForm(true);
   }
 
-  // For showing "(swap with slot N's person)" hints in the hygienist dropdown.
-  function getCurrentHygSlotFor(employeeId: number, excludingSlot: number): number | null {
-    for (let i = 0; i < hygSlotCount; i++) {
-      if (i === excludingSlot) continue;
-      if (getHygienist(i)?.id === employeeId) return i;
-    }
-    return null;
+  function closeCertForm() {
+    setShowCertForm(false);
+    setEditingCertId(null);
+    setCertForm(EMPTY_CERT_FORM);
+    setCertFile(null);
+    setCertError("");
   }
 
-  function handleHygOverride(slotIndex: number, value: string) {
-    const newId = value ? Number(value) : null;
-    const newHygOverrides = { ...hygOverrides };
+  async function refreshCertsData() {
+    if (selectedId == null) return;
+    const [freshCerts, freshTypes, freshCe] = await Promise.all([
+      loadCertificationsForEmployee(selectedId), loadRequiredCertTypes(), loadCeCourseEntriesForEmployee(selectedId),
+    ]);
+    setCerts(freshCerts);
+    setRequiredTypesForCerts(freshTypes);
+    setCeEntriesForCerts(freshCe);
+    setTitleOptions(Array.from(new Set(freshTypes.map((t) => t.title))).sort((a, b) => a.localeCompare(b)));
+  }
 
-    if (newId !== null) {
-      const currentAtSlot = getHygienist(slotIndex);
-      const conflictingSlot = getCurrentHygSlotFor(newId, slotIndex);
-      if (conflictingSlot !== null) {
-        newHygOverrides[conflictingSlot] = currentAtSlot ? currentAtSlot.id : null;
+  async function handleSaveCert() {
+    if (selectedId == null) return;
+    setCertError("");
+    if (!certForm.title.trim()) { setCertError("Please enter a document name."); return; }
+    if (!editingCertId && !certFile) { setCertError("Please choose a file to upload."); return; }
+
+    setCertSaving(true);
+    try {
+      let fileUrl = "";
+      let fileName = "";
+      if (certFile) {
+        const uploaded = await uploadCertFile(certFile);
+        if ("error" in uploaded) { setCertError(uploaded.error); setCertSaving(false); return; }
+        fileUrl = uploaded.url;
+        fileName = uploaded.name;
+      } else if (editingCertId) {
+        const existing = certs.find((c) => c.id === editingCertId);
+        fileUrl = existing?.fileUrl ?? "";
+        fileName = existing?.fileName ?? "";
       }
-    }
 
-    newHygOverrides[slotIndex] = newId;
-    setHygOverrides(newHygOverrides);
-    setHygSwapping(null);
-    onHygienistOverrideChange?.(newHygOverrides);
-  }
+      const matchingType = (requiredTypesForCerts ?? []).find((t) => t.title === certForm.title.trim());
+      const isCompletionMode = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "completion";
+      const isNeverExpires = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "none";
+      const resolvedExpiration = isNeverExpires
+        ? null
+        : isCompletionMode && certForm.expirationDate
+          ? addMonthsToDate(certForm.expirationDate, matchingType!.frequencyMonths)
+          : certForm.expirationDate || null;
 
-  function handleClearHygOverride(slotIndex: number) {
-    const newHygOverrides = { ...hygOverrides };
-    delete newHygOverrides[slotIndex];
-    setHygOverrides(newHygOverrides);
-    onHygienistOverrideChange?.(newHygOverrides);
-  }
+      const input: NewCertInput = {
+        ownerType: "personnel",
+        employeeId: selectedId,
+        title: certForm.title.trim(),
+        expirationDate: resolvedExpiration,
+        ceHours: certForm.ceHours ? Number(certForm.ceHours) : null,
+        fileUrl, fileName,
+      };
 
-  function handleOverride(dentistId: number, slotIndex: number, value: string) {
-    const newAssistantId = value ? Number(value) : null;
-    let newOverrides = overrides;
+      const saved = editingCertId ? await updateCertification(editingCertId, input) : await createCertification(input);
+      setCertSaving(false);
+      if (!saved) { setCertError("Something went wrong — not saved. Try again."); return; }
 
-    if (newAssistantId !== null) {
-      // If this assistant is already filling a different slot (their own or
-      // another dentist's) today, swap: give that slot whoever is currently
-      // here, instead of leaving two slots pointing at the same person.
-      const conflict = getCurrentAssignmentFor(newAssistantId, dentistId, slotIndex);
-      if (conflict) {
-        const currentAtThisSlot = getResolvedSlots(dentistId)[slotIndex];
-        newOverrides = setDentistSlotOverride(newOverrides, conflict.dentist.id, conflict.slotIndex, currentAtThisSlot ? currentAtThisSlot.id : null);
-      }
-    }
-
-    newOverrides = setDentistSlotOverride(newOverrides, dentistId, slotIndex, newAssistantId);
-    setOverrides(newOverrides);
-    setSwapping(null);
-    onOverrideChange?.(newOverrides);
-  }
-
-  function handleClearOverride(dentistId: number, slotIndex: number) {
-    const newOverrides = clearDentistSlotOverride(overrides, dentistId, slotIndex);
-    setOverrides(newOverrides);
-    onOverrideChange?.(newOverrides);
-  }
-
-  async function handleAssignTemp() {
-    if (!selectedTempId || !assigningRole) return;
-    if (assigningRole === "Assistant" && !selectedDentistId) return;
-    const notes = assigningRole === "Assistant" && selectedDentistId
-      ? `dentist:${selectedDentistId}`
-      : "";
-    await addTempAssignment({ date: selectedDate, tempId: selectedTempId, role: assigningRole, notes });
-    const updated = await getTempAssignments(selectedDate);
-    setTempAssignments(updated);
-    onTempAssignmentsChange?.(selectedDate, updated);
-    setAssigningRole(null);
-    setSelectedTempId("");
-    setSelectedDentistId(null);
-  }
-
-  async function handleRemoveTemp(id: string) {
-    await removeTempAssignment(id);
-    const updated = await getTempAssignments(selectedDate);
-    setTempAssignments(updated);
-    onTempAssignmentsChange?.(selectedDate, updated);
-  }
-
-  function getTempsForRole(role: string): TempStaff[] {
-    return temps.filter((t) => t.role === role || t.skills.includes(role));
-  }
-
-  const workingDentists = assignments.dentists.map((d) => d.dentist);
-
-  function getTempDentistName(notes: string): string {
-    if (!notes.startsWith("dentist:")) return "";
-    const dentistId = Number(notes.replace("dentist:", ""));
-    return staff.find((e) => e.id === dentistId)?.name ?? "";
-  }
-
-  const tempsByRole: Record<string, { assignment: TempAssignment; temp: TempStaff | undefined }[]> = {};
-  for (const ta of tempAssignments) {
-    if (!tempsByRole[ta.role]) tempsByRole[ta.role] = [];
-    tempsByRole[ta.role].push({ assignment: ta, temp: temps.find((t) => t.id === ta.tempId) });
-  }
-
-  // Determine which dentists still need at least one assistant (some empty
-  // slot, no override filling it, no temp covering the dentist).
-  const dentistsStillNeedingAssistant = assignments.dentists.filter((d) => {
-    const hasTemp = tempAssignments.some((ta) => ta.role === "Assistant" && ta.notes === `dentist:${d.dentist.id}`);
-    if (hasTemp) return false;
-    return getResolvedSlots(d.dentist.id).some((slot) => slot === null);
-  });
-
-  const hygienistsFilled = resolvedHygienists.length + (tempsByRole["Hygienist"]?.length ?? 0);
-  const hygienistStillNeeded = hygSlotCount > 0 && hygienistsFilled < hygSlotCount && assignments.dentists.length > 0;
-  const frontDeskFilled = assignments.frontDesk.length + (tempsByRole["Front Desk"]?.length ?? 0);
-  const frontDeskStillShort = assignments.warnings.some((w) => w.message.includes("front desk")) && frontDeskFilled < frontDeskRequired;
-
-  // Assign each temp hygienist to the next empty slot (by slot order), so
-  // temps render inline against "Hygienist 1 / 2" instead of in a separate
-  // list below. Any temps beyond the number of empty slots (more temps than
-  // slots available) overflow into an extra list underneath.
-  const hygTemps = tempsByRole["Hygienist"] ?? [];
-  const hygSlotTemps: (typeof hygTemps[number] | undefined)[] = [];
-  let hygTempPointer = 0;
-  for (let i = 0; i < hygSlotCount; i++) {
-    if (getHygienist(i)) {
-      hygSlotTemps.push(undefined);
-    } else {
-      hygSlotTemps.push(hygTemps[hygTempPointer]);
-      if (hygTemps[hygTempPointer]) hygTempPointer++;
+      closeCertForm();
+      await refreshCertsData();
+    } catch (err) {
+      console.error("handleSaveCert error:", err);
+      setCertError(err instanceof Error ? `Save failed: ${err.message}` : "Something went wrong — not saved. Try again.");
+      setCertSaving(false);
     }
   }
-  const overflowHygTemps = hygTemps.slice(hygTempPointer);
 
-  // Filter warnings to hide ones already resolved by temps
-  const visibleWarnings = assignments.warnings.filter((w) => {
-    if (w.message.includes("hygienist")) return hygienistStillNeeded;
-    if (w.message.includes("front desk")) return frontDeskStillShort;
-    if (w.message.includes("assistant")) {
-      // Check if this is a dentist-specific warning
-      const dentistMatch = assignments.dentists.find((d) => w.message.includes(d.dentist.name));
-      if (dentistMatch) {
-        const hasTemp = tempAssignments.some((ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentistMatch.dentist.id}`);
-        const hasAnyOverride = Object.keys(getDentistSlotOverrides(overrides, dentistMatch.dentist.id)).length > 0;
-        return !hasTemp && !hasAnyOverride;
-      }
-      // General assistant shortage warning
-      return dentistsStillNeedingAssistant.length > 0;
-    }
-    return true;
-  });
+  async function handleDeleteCert(id: string) {
+    if (!confirm("Delete this certification/document? This can't be undone.")) return;
+    await deleteCertification(id);
+    await refreshCertsData();
+  }
 
   return (
-    <div className="rounded-2xl bg-white p-6 shadow">
-      <div className="mb-5">
-        <h2 className="text-2xl font-bold">Daily Assignments</h2>
-        <p className="mt-1 text-slate-500">{dateLabel || "Select a day"}</p>
-      </div>
-
-      {visibleWarnings.length > 0 && (
-        <div className="mb-4 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          {visibleWarnings.map((w, i) => {
-            let tempRole: string | null = null;
-            if (w.message.includes("assistant")) tempRole = "Assistant";
-            else if (w.message.includes("front desk")) tempRole = "Front Desk";
-            else if (w.message.includes("hygienist")) tempRole = "Hygienist";
-
-            return (
-              <div key={i} className="flex items-center justify-between gap-2">
-                <p className={`text-sm ${w.severity === "error" ? "text-red-600" : "text-amber-700"}`}>
-                  {w.severity === "error" ? "🔴" : "⚠️"} {w.message}
-                </p>
-                {tempRole && (
-                  <button onClick={() => { setAssigningRole(tempRole); setSelectedTempId(""); setSelectedDentistId(null); }}
-                    className="flex-shrink-0 rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90 transition"
-                    style={{ backgroundColor: ROLE_COLORS[tempRole] ?? "#6b7280" }}>
-                    + Assign Temp
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {assigningRole && (
-        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-blue-700">Assign Temp {assigningRole}</p>
-            <button onClick={() => { setAssigningRole(null); setSelectedTempId(""); setSelectedDentistId(null); }}
-              className="text-xs text-blue-400 hover:text-blue-600">✕ Cancel</button>
-          </div>
-
-          {assigningRole === "Assistant" && workingDentists.length > 0 && (
-            <div className="mb-3">
-              <p className="text-xs font-semibold text-blue-600 mb-2">Which dentist are they assisting?</p>
-              <div className="grid gap-1.5">
-                {workingDentists.map((dentist) => {
-                  const alreadyHasTemp = tempAssignments.some((ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`);
-                  return (
-                    <button key={dentist.id}
-                      disabled={alreadyHasTemp}
-                      onClick={() => setSelectedDentistId(dentist.id)}
-                      className="flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition disabled:opacity-40 disabled:cursor-not-allowed"
-                      style={selectedDentistId === dentist.id
-                        ? { borderColor: dentist.color, backgroundColor: "#f0f9ff" }
-                        : { borderColor: "#e5e7eb", background: "white" }}>
-                      <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: dentist.color }} />
-                      <span className="text-sm font-medium text-slate-700">{dentist.name}</span>
-                      {alreadyHasTemp && <span className="ml-auto text-xs text-slate-400">Already has temp</span>}
-                      {selectedDentistId === dentist.id && (
-                        <span className="ml-auto text-xs font-bold" style={{ color: dentist.color }}>✓</span>
-                      )}
-                    </button>
-                  );
-                })}
+    <main className="min-h-screen" style={{ background: "linear-gradient(160deg, #FDF2E9 0%, #F5EFFA 50%, #EAF3F8 100%)" }}>
+      <Sidebar />
+      <div className="pt-24 lg:pt-12 lg:ml-64 p-4 lg:px-8 lg:pb-8">
+        <header className="mb-6 flex items-center justify-between flex-wrap gap-4">
+          <h1 className="text-2xl font-bold flex-shrink-0" style={{ color: "#4A4238" }}>Staff Dashboard</h1>
+          {isManager ? (
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="text-xs font-semibold flex-shrink-0" style={{ color: "rgba(74,66,56,0.55)" }}>View staff member</label>
+              <select value={selectedId ?? ""} onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : null)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none min-w-[220px]">
+                <option value="">Select a staff member...</option>
+                {staff.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}{e.archived ? " (archived)" : ""}</option>)}
+              </select>
+              <div className="flex items-center gap-2 rounded-full px-4 py-2 shadow-sm text-sm flex-shrink-0" style={{ background: "#FCE8D5" }}>
+                <span style={{ color: "#B8501E" }}>👔 Manager view</span>
+                <button onClick={logout} className="text-xs font-semibold underline" style={{ color: "#B8501E" }}>
+                  Not you?
+                </button>
               </div>
             </div>
-          )}
-
-          {getTempsForRole(assigningRole).length === 0 ? (
-            <p className="text-sm text-blue-400">No temps available for this role. <a href="/temps" className="underline">Add to roster →</a></p>
           ) : (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-blue-600 mb-2">Select a temp:</p>
-              <div className="grid gap-2">
-                {getTempsForRole(assigningRole).map((temp) => (
-                  <button key={temp.id} onClick={() => setSelectedTempId(temp.id)}
-                    className="flex items-center gap-3 rounded-xl border p-3 text-left transition"
-                    style={selectedTempId === temp.id
-                      ? { borderColor: ROLE_COLORS[assigningRole] ?? "#6b7280", backgroundColor: "#f0f9ff" }
-                      : { borderColor: "#e5e7eb", background: "white" }}>
-                    <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
-                      style={{ backgroundColor: ROLE_COLORS[temp.role] ?? "#6b7280" }}>
-                      {temp.name.charAt(0)}
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-sm font-semibold text-slate-700">{temp.name}</div>
-                      <div className="text-xs text-slate-400">{temp.role} · {temp.phone}</div>
-                    </div>
-                    <div className="text-amber-400 text-xs">{"★".repeat(temp.rating)}</div>
-                    {selectedTempId === temp.id && (
-                      <span className="text-xs font-bold" style={{ color: ROLE_COLORS[assigningRole] ?? "#6b7280" }}>✓</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <button onClick={handleAssignTemp}
-                disabled={!selectedTempId || (assigningRole === "Assistant" && !selectedDentistId)}
-                className="w-full rounded-xl py-2.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-40"
-                style={{ backgroundColor: ROLE_COLORS[assigningRole] ?? "#6b7280" }}>
-                {assigningRole === "Assistant" && !selectedDentistId ? "Select a dentist first" : "Confirm Assignment"}
+            <div className="flex items-center gap-2 rounded-full px-4 py-2 shadow-sm text-sm flex-shrink-0" style={{ background: "#FCE8D5" }}>
+              <span style={{ color: "#B8501E" }}>👤 {identity.employeeName ?? ""}</span>
+              <button onClick={logout} className="text-xs font-semibold underline" style={{ color: "#B8501E" }}>
+                Not you?
               </button>
             </div>
           )}
-        </div>
-      )}
+        </header>
 
-      {tempAssignments.length > 0 && (
-        <div className="mb-4 rounded-xl border border-teal-200 bg-teal-50 p-4">
-          <p className="text-sm font-semibold text-teal-700 mb-3">🔄 Temp Staff Assigned</p>
-          <div className="space-y-2">
-            {tempAssignments.map((ta) => {
-              const temp = temps.find((t) => t.id === ta.tempId);
-              const dentistName = ta.role === "Assistant" ? getTempDentistName(ta.notes) : "";
-              return (
-                <div key={ta.id} className="flex items-center justify-between rounded-xl bg-white border border-teal-100 px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <div className="h-7 w-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                      style={{ backgroundColor: ROLE_COLORS[ta.role] ?? "#6b7280" }}>
-                      {temp?.name.charAt(0) ?? "?"}
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold text-slate-700">{temp?.name ?? "Unknown"}</div>
-                      <div className="text-xs text-slate-400">
-                        {ta.role}{dentistName ? ` → ${dentistName}` : ""}
-                      </div>
-                    </div>
-                  </div>
-                  <button onClick={() => handleRemoveTemp(ta.id)}
-                    className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 rounded px-2 py-1 transition">
-                    Remove
-                  </button>
-                </div>
-              );
-            })}
+        {selectedId == null ? (
+          <div className="rounded-2xl bg-white p-10 text-center shadow max-w-lg">
+            <p className="text-slate-400">Select a staff member above to view their dashboard.</p>
           </div>
-        </div>
-      )}
-
-      <section className="mb-4 rounded-xl border p-4">
-        <h3 className="mb-3 font-semibold text-slate-700">Dentist / Assistant Pairings</h3>
-        {assignments.dentists.length === 0 ? (
-          <p className="text-sm text-slate-400">No dentists selected.</p>
+        ) : loading ? (
+          <div className="rounded-2xl bg-white p-10 text-center shadow max-w-lg">
+            <p className="text-slate-400">Loading…</p>
+          </div>
         ) : (
-          <div className="space-y-3">
-            {assignments.dentists.map(({ dentist }) => {
-              const count = Math.max(0, assistantCounts[dentist.id] ?? 1);
-              const resolvedSlots = getResolvedSlots(dentist.id);
-              const slotOverrides = getDentistSlotOverrides(overrides, dentist.id);
+          <div className="max-w-6xl mx-auto">
+            {selectedEmployee && (
+              <div className="text-center mb-8">
+                <div className="h-20 w-20 mx-auto rounded-full flex items-center justify-center text-white font-bold text-3xl shadow-lg mb-3"
+                  style={{ backgroundColor: selectedEmployee.color }}>
+                  {selectedEmployee.name.charAt(0)}
+                </div>
+                <h2 className="text-3xl font-bold" style={{ color: "#4A4238" }}>{selectedEmployee.name}</h2>
+                <p className="text-sm mt-1" style={{ color: "rgba(74,66,56,0.55)" }}>
+                  {selectedEmployee.specialty ?? selectedEmployee.role}{selectedEmployee.email ? ` · ${selectedEmployee.email}` : ""}
+                </p>
+              </div>
+            )}
 
-              const tempForDentist = tempAssignments.find(
-                (ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`
-              );
-              const tempName = tempForDentist ? temps.find((t) => t.id === tempForDentist.tempId)?.name : null;
+            <div className="grid gap-5 lg:grid-cols-3">
 
-              return (
-                <div key={dentist.id} className="rounded-lg bg-slate-50 px-3 py-2">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="flex items-center gap-2 font-medium text-sm">
-                      <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: dentist.color }} />
-                      {dentist.name}
+            {(missingOrExpiredCertCount > 0 || pendingPolicies.length > 0 || checkinDue || checkinUpcoming) && (
+              <div className="lg:col-span-3 flex flex-wrap gap-3">
+                {missingOrExpiredCertCount > 0 && (
+                  <a href="#certifications-card" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
+                    <span style={{ fontSize: 18 }}>📄</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#A32D2D", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
+                      {missingOrExpiredCertCount} certification{missingOrExpiredCertCount !== 1 ? "s" : ""} need{missingOrExpiredCertCount === 1 ? "s" : ""} attention
                     </span>
-                    <div className="flex items-center gap-1">
-                      <span className="mr-1 text-xs text-slate-400">Assistants</span>
-                      {[0, 1, 2, 3].map((n) => (
-                        <button key={n} onClick={() => onAssistantCountChange?.(dentist.id, n)}
-                          className="rounded px-2 py-0.5 text-xs font-semibold transition"
-                          style={count === n ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
-                          {n}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {count === 0 && !tempName && (
-                    <p className="pl-4 text-xs text-slate-400">No assistant needed today</p>
-                  )}
-
-                  <div className="space-y-1.5">
-                    {resolvedSlots.map((resolvedAssistant, slotIndex) => {
-                      const isOverridden = slotIndex in slotOverrides;
-                      const isSwapping = swapping?.dentistId === dentist.id && swapping?.slotIndex === slotIndex;
-                      return (
-                        <div key={slotIndex} className="flex items-center justify-between pl-4">
-                          {count > 1 && <span className="w-14 flex-shrink-0 text-xs text-slate-400">#{slotIndex + 1}</span>}
-                          <div className="ml-auto flex items-center gap-2">
-                            {isSwapping ? (
-                              <div className="flex items-center gap-1">
-                                <select className="rounded border border-slate-200 px-2 py-1 text-xs"
-                                  defaultValue={resolvedAssistant?.id ?? ""}
-                                  onChange={(e) => handleOverride(dentist.id, slotIndex, e.target.value)}>
-                                  <option value="">No Assistant</option>
-                                  {getAvailableAssistantsFor(dentist.id, slotIndex).map((a) => {
-                                    const conflict = getCurrentAssignmentFor(a.id, dentist.id, slotIndex);
-                                    return (
-                                      <option key={a.id} value={a.id}>
-                                        {a.name}{conflict ? ` (swap with ${conflict.dentist.name})` : ""}
-                                      </option>
-                                    );
-                                  })}
-                                </select>
-                                <button onClick={() => setSwapping(null)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
-                              </div>
-                            ) : (
-                              <>
-                                <span className={`text-sm flex items-center gap-1.5 ${resolvedAssistant ? "text-slate-600" : "text-amber-500"}`}>
-                                  {resolvedAssistant ? (
-                                    <>
-                                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: resolvedAssistant.color }} />
-                                      {resolvedAssistant.name}
-                                      {isOverridden && (
-                                        <button onClick={() => handleClearOverride(dentist.id, slotIndex)} className="text-xs text-cyan-500 ml-1 hover:text-red-400">
-                                          (manual ✕)
-                                        </button>
-                                      )}
-                                    </>
-                                  ) : "No Assistant"}
-                                </span>
-                                <button onClick={() => setSwapping({ dentistId: dentist.id, slotIndex })}
-                                  className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
-                                  swap
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    <div className="flex items-center justify-between pl-4">
-                      {tempName ? (
-                        <>
-                          <span className="text-sm flex items-center gap-1.5 text-slate-600">
-                            <span className="h-2 w-2 rounded-full bg-teal-400" />
-                            {tempName} <span className="text-xs text-teal-500">(temp)</span>
-                          </span>
-                          <button onClick={() => {
-                            const ta = tempAssignments.find((t) => t.role === "Assistant" && t.notes === `dentist:${dentist.id}`);
-                            if (ta) handleRemoveTemp(ta.id);
-                          }} className="text-xs text-red-400 hover:text-red-600 rounded px-1.5 py-0.5 transition">
-                            remove
-                          </button>
-                        </>
-                      ) : (
-                        <button onClick={() => { setAssigningRole("Assistant"); setSelectedDentistId(dentist.id); setSelectedTempId(""); }}
-                          className="rounded px-1.5 py-0.5 text-xs text-teal-400 hover:bg-teal-50 hover:text-teal-600 transition">
-                          + temp
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section className="mb-4 rounded-xl border p-4">
-        <h3 className="mb-3 font-semibold text-slate-700">Front Desk</h3>
-        {assignments.frontDesk.length === 0 && !(tempsByRole["Front Desk"]?.length) ? (
-          <p className="text-sm text-slate-400">None available</p>
-        ) : (
-          <div className="space-y-1">
-            {assignments.frontDesk.map((e) => (
-              <div key={e.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: e.color }} />
-                {e.name}
-              </div>
-            ))}
-            {(tempsByRole["Front Desk"] ?? []).map(({ assignment, temp }) => (
-              <div key={assignment.id} className="flex items-center justify-between rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
-                <span className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-teal-400" />
-                  {temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
-                </span>
-                <button onClick={() => handleRemoveTemp(assignment.id)} className="text-xs text-red-400 hover:text-red-600">Remove</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="mb-4 rounded-xl border p-4">
-        <h3 className="mb-3 font-semibold text-slate-700">Hygienist/Assisted Hygiene</h3>
-        {hygSlotCount === 0 && !(tempsByRole["Hygienist"]?.length) ? (
-          <p className="text-sm text-slate-400">None needed today</p>
-        ) : (
-          <div className="space-y-2">
-            {Array.from({ length: hygSlotCount }, (_, slotIndex) => {
-              const resolved = getHygienist(slotIndex);
-              const isOverridden = slotIndex in hygOverrides;
-              const tempFiller = hygSlotTemps[slotIndex];
-              return (
-                <div key={slotIndex} className={`rounded-lg px-3 py-2 ${tempFiller ? "bg-teal-50 border border-teal-100" : "bg-slate-50"}`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-400">Hygienist {hygSlotCount > 1 ? slotIndex + 1 : ""}</span>
-                    <div className="flex items-center gap-2">
-                      {hygSwapping === slotIndex ? (
-                        <div className="flex items-center gap-1">
-                          <select className="rounded border border-slate-200 px-2 py-1 text-xs"
-                            defaultValue={resolved?.id ?? ""}
-                            onChange={(e) => handleHygOverride(slotIndex, e.target.value)}>
-                            <option value="">No Hygienist</option>
-                            {getAvailableHygienistsFor(slotIndex).map((h) => {
-                              const currentlyAtSlot = getCurrentHygSlotFor(h.id, slotIndex);
-                              return (
-                                <option key={h.id} value={h.id}>
-                                  {h.name}{currentlyAtSlot !== null && hygSlotCount > 1 ? ` (swap with #${currentlyAtSlot + 1})` : ""}
-                                </option>
-                              );
-                            })}
-                          </select>
-                          <button onClick={() => setHygSwapping(null)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
-                        </div>
-                      ) : tempFiller ? (
-                        <>
-                          <span className="text-sm flex items-center gap-1.5 text-slate-600">
-                            <span className="h-2 w-2 rounded-full bg-teal-400" />
-                            {tempFiller.temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
-                          </span>
-                          <button onClick={() => handleRemoveTemp(tempFiller.assignment.id)}
-                            className="rounded px-1.5 py-0.5 text-xs text-red-400 hover:text-red-600 transition">
-                            remove
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <span className={`text-sm flex items-center gap-1.5 ${resolved ? "text-slate-600" : "text-amber-500"}`}>
-                            {resolved ? (
-                              <>
-                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: resolved.color }} />
-                                {resolved.name}
-                                {isOverridden && (
-                                  <button onClick={() => handleClearHygOverride(slotIndex)} className="text-xs text-cyan-500 ml-1 hover:text-red-400">
-                                    (manual ✕)
-                                  </button>
-                                )}
-                              </>
-                            ) : "No Hygienist"}
-                          </span>
-                          <button onClick={() => setHygSwapping(slotIndex)}
-                            className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
-                            swap
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {overflowHygTemps.map(({ assignment, temp }) => (
-              <div key={assignment.id} className="flex items-center justify-between rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
-                <span className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-teal-400" />
-                  {temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
-                </span>
-                <button onClick={() => handleRemoveTemp(assignment.id)} className="text-xs text-red-400 hover:text-red-600">Remove</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="mb-4 rounded-xl border p-4">
-        <h3 className="mb-3 font-semibold text-slate-700">Floater</h3>
-        {resolvedFloater || floaterSwapping ? (
-          <div className="rounded-lg bg-slate-50 px-3 py-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-400">Extra assistant for the day</span>
-              <div className="flex items-center gap-2">
-                {floaterSwapping ? (
-                  <div className="flex items-center gap-1">
-                    <select className="rounded border border-slate-200 px-2 py-1 text-xs"
-                      defaultValue={resolvedFloater?.id ?? ""}
-                      onChange={(e) => handleFloaterChange(e.target.value)}>
-                      <option value="">No Floater</option>
-                      {getAvailableAssistantsForFloater().map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
-                    </select>
-                    <button onClick={() => setFloaterSwapping(false)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
-                  </div>
-                ) : (
-                  <>
-                    <span className="text-sm flex items-center gap-1.5 text-slate-600">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: resolvedFloater?.color }} />
-                      {resolvedFloater?.name}
+                  </a>
+                )}
+                {pendingPolicies.length > 0 && (
+                  <a href="/handbook" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
+                    <span style={{ fontSize: 18 }}>✍️</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#A32D2D", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
+                      {pendingPolicies.length} signature{pendingPolicies.length !== 1 ? "s" : ""} needed
                     </span>
-                    <button onClick={() => setFloaterSwapping(true)}
-                      className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">
-                      swap
-                    </button>
-                    <button onClick={handleRemoveFloater}
-                      className="rounded px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-50 hover:text-red-600 transition">
-                      remove
-                    </button>
-                  </>
+                  </a>
+                )}
+                {checkinDue && (
+                  <a href="/checkins" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
+                    <span style={{ fontSize: 18 }}>🤝</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#A32D2D", fontVariant: "small-caps", letterSpacing: "0.03em" }}>check-in due</span>
+                  </a>
+                )}
+                {checkinUpcoming && (
+                  <span className="flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white" style={{ background: "#378ADD", boxShadow: "0 4px 14px rgba(55,138,221,0.4)" }}>
+                    <span style={{ fontSize: 16 }}>📅</span>
+                    Check-in {new Date(checkinUpcoming.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </span>
                 )}
               </div>
+            )}
+
+            {showPtoCountdown && (
+              <div className="rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
+                <span className="text-lg">🕐</span>
+                <p className="text-xs text-slate-700 leading-snug">
+                  <strong>PTO eligible in {ptoDaysLeft}d</strong><br />
+                  {new Date(ptoEligibilityDate! + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </p>
+              </div>
+            )}
+
+            {selectedEmployee?.growthBonusEligible && showBonusCountdown && (
+              <div className="rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #e0e7ff, #c7d2fe)" }}>
+                <span className="text-lg">⏳</span>
+                <p className="text-xs text-slate-700 leading-snug">
+                  <strong>Bonus eligible in {bonusDaysLeft}d</strong><br />
+                  {new Date(bonusEligibilityDate! + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </p>
+              </div>
+            )}
+
+            {selectedEmployee?.growthBonusEligible && !showBonusCountdown && (
+              <div className="lg:col-span-3 rounded-2xl p-6" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)", boxShadow: bonusUnlocked ? "0 8px 24px rgba(16,185,129,0.2)" : "0 8px 24px rgba(245,158,11,0.2)" }}>
+                <div className="text-center mb-4">
+                  <p className="text-sm font-semibold" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
+                    {QUARTER_LABELS[currentQuarter]} {bonusYear} bonus progress{bonusUnlocked ? " — unlocked!" : ""}
+                  </p>
+                  <p className="text-4xl font-bold mt-1" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>{bonusProgressPct}%</p>
+                  <p className="text-sm mt-1" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
+                    ${formatMoney(currentQuarterData?.netProductionCurrent ?? 0)} of ${formatMoney(requiredProduction)} goal
+                  </p>
+                </div>
+
+                <div className="w-full h-2.5 rounded-full bg-white overflow-hidden mb-5">
+                  <div className="h-full rounded-full transition-all" style={{ width: `${bonusProgressPct}%`, backgroundColor: bonusUnlocked ? "#10b981" : "#f59e0b" }} />
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 mb-5">
+                  <div className="rounded-xl bg-white/70 p-3">
+                    <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Received this year</p>
+                    <p className="text-xl font-bold" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>${formatMoney(bonusReceivedThisYear)}</p>
+                  </div>
+                  {bonusBeingPaced ? (
+                    <div className="rounded-xl bg-white/70 p-3">
+                      <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Payout timing</p>
+                      <p className="text-xs mt-1 leading-snug text-slate-600">Paid out gradually — nothing earned is reduced</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl bg-white/70 p-3">
+                      <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Payout timing</p>
+                      <p className="text-xs mt-1 leading-snug text-slate-600">Paid in full once unlocked</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-4 gap-2">
+                  {([1, 2, 3, 4] as const).map((q) => {
+                    const result = q <= currentQuarter ? bonusForQuarter(q) : null;
+                    const isPast = q < currentQuarter;
+                    const isCurrent = q === currentQuarter;
+                    const unlocked = result?.calc.eligible;
+                    return (
+                      <div key={q} className="text-center rounded-xl py-3 px-1" style={{ background: unlocked ? "#EAF3DE" : isCurrent ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.4)", opacity: !isPast && !isCurrent ? 0.5 : 1 }}>
+                        <div className="text-xs mb-1" style={{ color: "rgba(74,66,56,0.5)" }}>{QUARTER_LABELS[q]}</div>
+                        {unlocked ? (
+                          <>
+                            <div style={{ color: "#3B6D11", fontSize: 16 }}>✓</div>
+                            <div className="text-xs font-semibold mt-0.5" style={{ color: "#3B6D11" }}>${formatMoney(result!.myBonus)}</div>
+                          </>
+                        ) : isPast ? (
+                          <div className="text-xs text-slate-400 mt-2">Not met</div>
+                        ) : isCurrent ? (
+                          <>
+                            <div style={{ fontSize: 16 }}>⏳</div>
+                            <div className="text-xs text-slate-500 mt-0.5">In progress</div>
+                          </>
+                        ) : (
+                          <div className="text-xs text-slate-400 mt-2">—</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {selectedEmployee?.pvBonusEligible && (
+              <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
+                <div className="p-4 pb-2">
+                  <h2 className="font-bold text-slate-700">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
+                </div>
+                <div className="overflow-x-auto">
+                  {(() => {
+                    const percent = selectedEmployee.netProductionBonusPercent ?? 30;
+                    const allYears = Array.from(new Set([...pvAllQuarters.map((q) => q.year), bonusYear]));
+                    const fullQuarterSet: PvBonusQuarter[] = [];
+                    for (const y of allYears) {
+                      for (const q of [1, 2, 3, 4] as const) {
+                        const existing = pvAllQuarters.find((row) => row.year === y && row.quarter === q);
+                        fullQuarterSet.push(existing ?? { employeeId: selectedEmployee.id, year: y, quarter: q, totalIncome: 0, notes: "" });
+                      }
+                    }
+                    const calcs = computePvQuarterCalcs(fullQuarterSet, pvPayrollEntries, pvPayments, percent).filter((c) => c.year === bonusYear);
+                    return (
+                      <table className="w-full text-sm border-collapse min-w-[800px]">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                            <th className="px-5 py-2 font-medium">Quarter</th>
+                            <th className="px-2 py-2 font-medium">Total Income</th>
+                            <th className="px-2 py-2 font-medium">{percent}%</th>
+                            <th className="px-2 py-2 font-medium">Gusto Payroll</th>
+                            <th className="px-2 py-2 font-medium">Bonus</th>
+                            <th className="px-2 py-2 font-medium">Bonus Paid</th>
+                            <th className="px-2 py-2 font-medium">Date Paid</th>
+                            <th className="px-5 py-2 font-medium">Balance</th>
+                            <th className="px-2 py-2 font-medium"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {calcs.map((c) => {
+                            const key = `${c.year}-${c.quarter}`;
+                            const isOpen = expandedPvQuarter === key;
+                            const { start, end } = getPvQuarterDateRange(c.year, c.quarter);
+                            const quarterEntries = pvPayrollEntries.filter((e) => e.payPeriodStart >= start && e.payPeriodStart <= end);
+                            return (
+                              <Fragment key={key}>
+                                <tr className="border-b border-slate-50 last:border-0">
+                                  <td className="px-5 py-2 font-medium text-slate-700 whitespace-nowrap">{QUARTER_LABELS[c.quarter]}</td>
+                                  <td className="px-2 py-2 text-slate-500">${formatMoney(c.totalIncome)}</td>
+                                  <td className="px-2 py-2 text-slate-500">${formatMoney(c.thirtyPercent)}</td>
+                                  <td className="px-2 py-2 text-slate-500">${formatMoney(c.gustoPayroll)}</td>
+                                  <td className="px-2 py-2 font-semibold text-slate-700">${formatMoney(c.bonus)}</td>
+                                  <td className="px-2 py-2 text-slate-500">${formatMoney(c.bonusPaid)}</td>
+                                  <td className="px-2 py-2 text-slate-500 text-xs whitespace-nowrap">
+                                    {c.datesPaid.length > 0
+                                      ? c.datesPaid.length === 1
+                                        ? new Date(c.datesPaid[0] + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                                        : `${c.datesPaid.length} payments`
+                                      : "—"}
+                                  </td>
+                                  <td className={`px-5 py-2 font-semibold whitespace-nowrap ${c.balance > 0 ? "text-amber-600" : c.balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(c.balance)}</td>
+                                  <td className="px-2 py-2">
+                                    {quarterEntries.length > 0 && (
+                                      <button onClick={() => setExpandedPvQuarter(isOpen ? null : key)} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
+                                        {isOpen ? "Hide" : "Details"}
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                                {isOpen && (
+                                  <tr className="bg-slate-50/60 border-b border-slate-100">
+                                    <td colSpan={9} className="px-5 py-3">
+                                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Gusto Payroll Pay Periods</p>
+                                      <div className="space-y-1">
+                                        {quarterEntries.map((e) => (
+                                          <div key={e.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-3 py-1.5">
+                                            <span className="text-slate-600">
+                                              {new Date(e.payPeriodStart + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {new Date(e.payPeriodEnd + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                            </span>
+                                            <span className="font-medium text-slate-700">${formatMoney(e.amount)}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {isHygienist && (
+              <div className="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
+                <h2 className="font-bold text-slate-700 mb-2">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
+                <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
+                  <span className="text-slate-500">Earned ${formatMoney(hygieneEarned)} · Paid ${formatMoney(hygienePaid)}</span>
+                  {hygieneBalance > 0 ? (
+                    <span className="text-amber-600 font-semibold">Bonus: ${formatMoney(hygieneBalance)}</span>
+                  ) : hygieneEarned > 0 ? (
+                    <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
+                  ) : (
+                    <span className="text-slate-400">Not started</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(55,138,221,0.12)", borderTop: "4px solid #378ADD" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#185FA5" }}>📅 Upcoming Shifts</h2>
+              {shifts.length === 0 ? (
+                <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No upcoming shifts scheduled.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                  {shifts.map((s, i) => (
+                    <div key={i} className="flex items-center justify-between rounded-xl px-3 py-2 text-sm" style={{ background: "#E6F1FB" }}>
+                      <div>
+                        <span className="font-medium" style={{ color: "#0C447C" }}>
+                          {new Date(s.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                        </span>
+                        {s.detail && <span className="ml-2 text-xs" style={{ color: "#185FA5" }}>{s.detail}</span>}
+                      </div>
+                      <span className="text-xs font-semibold" style={{ color: "#185FA5" }}>{ROLE_ICONS[s.role]} {s.role}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(127,119,221,0.14)", borderTop: "4px solid #7F77DD" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#3C3489" }}>📝 Leave Requests</h2>
+              <div className="text-center mb-3">
+                <a href="/leave" className="inline-block rounded-full px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#534AB7" }}>
+                  + Submit Leave Request
+                </a>
+              </div>
+              {leaveRequests.length === 0 ? (
+                <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No leave requests on file.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                  {[...leaveRequests].sort((a, b) => a.startDate.localeCompare(b.startDate)).map((req) => (
+                    <div key={req.id} className="rounded-xl px-3 py-2" style={{ background: "#EEEDFE" }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium" style={{ color: "#3C3489" }}>
+                          {new Date(req.startDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          {req.startDate !== req.endDate && ` – ${new Date(req.endDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+                        </span>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${LEAVE_STATUS_STYLES[req.status]}`}>
+                          {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
+                        </span>
+                      </div>
+                      <div className="text-xs mt-0.5" style={{ color: "#534AB7" }}>{REASON_LABELS[req.reason] ?? req.reason} · {req.totalDays} day{req.totalDays !== 1 ? "s" : ""}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(216,90,48,0.14)", borderTop: "4px solid #D85A30" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#993C1D" }}>📌 Events</h2>
+              {events.length === 0 ? (
+                <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No upcoming events.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                  {events.map((ev) => (
+                    <div key={ev.id} className="rounded-xl px-3 py-2" style={{ background: ev.mandatory ? "#FCEBEB" : "#FAECE7" }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium" style={{ color: ev.mandatory ? "#A32D2D" : "#993C1D" }}>{ev.title}</span>
+                        {ev.mandatory && <span className="rounded-full text-xs font-semibold px-2 py-0.5 flex-shrink-0" style={{ background: "#F7C1C1", color: "#791F1F" }}>Mandatory</span>}
+                      </div>
+                      <div className="text-xs mt-0.5" style={{ color: "rgba(74,66,56,0.5)" }}>
+                        {new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                        {ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : " · All Day"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="lg:col-span-3 grid gap-5 lg:grid-cols-2">
+            <div id="certifications-card" className={`rounded-2xl bg-white p-5 ${selectedEmployee && getApplicableRoles(selectedEmployee).length > 0 ? "" : "lg:col-span-2"}`} style={{ boxShadow: "0 8px 24px rgba(29,158,117,0.14)", borderTop: "4px solid #1D9E75" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#0F6E56" }}>📋 Certificates</h2>
+
+              {selectedEmployee && (
+                <RequiredCertsSection
+                  employee={selectedEmployee} certs={certs} requiredTypes={requiredTypesForCerts}
+                  ceEntries={ceEntriesForCerts}
+                  onAddCertForTitle={openForRequiredTitle}
+                  refreshAll={refreshCertsData}
+                  bare
+                  filter="certificates"
+                />
+              )}
+
+              <div className="flex items-center justify-between mt-4 mb-3">
+                <h3 className="text-sm font-semibold" style={{ color: "rgba(74,66,56,0.6)" }}>All documents on file</h3>
+                {!showCertForm && (
+                  <button onClick={openNewCert} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#0F6E56" }}>
+                    + Add Certification
+                  </button>
+                )}
+              </div>
+
+              {showCertForm && (
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 mb-3 space-y-2">
+                  {certError && <p className="text-xs text-red-500">{certError}</p>}
+                  {!useCustomTitle ? (
+                    <select
+                      value={titleOptions.includes(certForm.title) ? certForm.title : ""}
+                      onChange={(e) => {
+                        if (e.target.value === "__new__") { setUseCustomTitle(true); setCertForm((f) => ({ ...f, title: "" })); }
+                        else setCertForm((f) => ({ ...f, title: e.target.value }));
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none">
+                      <option value="">Select a document name...</option>
+                      {titleOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                      <option value="__new__">+ Add new document name...</option>
+                    </select>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input type="text" value={certForm.title} onChange={(e) => setCertForm((f) => ({ ...f, title: e.target.value }))}
+                        placeholder="e.g. CPR Certification" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                      {titleOptions.length > 0 && (
+                        <button type="button" onClick={() => { setUseCustomTitle(false); setCertForm((f) => ({ ...f, title: "" })); }}
+                          className="flex-shrink-0 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-500 hover:bg-white">
+                          Choose existing
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {(() => {
+                    const matchingType = requiredTypesForCerts.find((t) => t.title === certForm.title.trim());
+                    const isCompletionMode = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "completion";
+                    const isNeverExpires = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "none";
+                    if (isNeverExpires) {
+                      return <p className="text-xs -mt-1" style={{ color: "rgba(74,66,56,0.5)" }}>This certificate never expires — no date needed, just the file.</p>;
+                    }
+                    return (
+                      <>
+                        <input type="date" value={certForm.expirationDate} onChange={(e) => setCertForm((f) => ({ ...f, expirationDate: e.target.value }))}
+                          className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                        {isCompletionMode ? (
+                          certForm.expirationDate ? (
+                            <p className="text-xs text-slate-400 -mt-1">Completion date → expires {new Date(addMonthsToDate(certForm.expirationDate, matchingType!.frequencyMonths) + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>
+                          ) : (
+                            <p className="text-xs text-slate-400 -mt-1">Enter the completion date — expiration will be calculated automatically.</p>
+                          )
+                        ) : (
+                          <p className="text-xs text-slate-400 -mt-1">Leave date blank if this never expires.</p>
+                        )}
+                      </>
+                    );
+                  })()}
+                  <input type="number" onFocus={(e) => e.target.select()} value={certForm.ceHours} onChange={(e) => setCertForm((f) => ({ ...f, ceHours: e.target.value }))}
+                    placeholder="CE credits earned (optional)" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  <input type="file" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" />
+                  {editingCertId && <p className="text-xs text-slate-400">Leave file blank to keep the existing one.</p>}
+                  <div className="flex gap-2">
+                    <button onClick={handleSaveCert} disabled={certSaving}
+                      className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                      {certSaving ? "Saving…" : editingCertId ? "Save Changes" : "Upload"}
+                    </button>
+                    <button onClick={closeCertForm} className="rounded-lg border border-slate-200 px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {certs.length === 0 ? (
+                <p className="text-sm text-slate-400">No certifications on file.</p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {certs.map((cert) => {
+                    const badge = certBadge(cert);
+                    return (
+                      <div key={cert.id} className="rounded-xl bg-slate-50 px-3 py-2 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-slate-700 truncate">{cert.title}</div>
+                          <div className="text-xs text-slate-400">
+                            {cert.expirationDate
+                              ? new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                              : "No expiration"}
+                          </div>
+                          <button onClick={() => startEditCert(cert)} className="text-xs text-cyan-600 hover:underline mt-0.5">Edit</button>
+                          <button onClick={() => handleDeleteCert(cert.id)} className="text-xs text-red-400 hover:underline mt-0.5 ml-2">Delete</button>
+                          {cert.fileUrl && (
+                            <a href={cert.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-600 hover:underline mt-0.5 ml-2 inline-block">View file →</a>
+                          )}
+                        </div>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold flex-shrink-0 ${badge.className}`}>{badge.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {selectedEmployee && getApplicableRoles(selectedEmployee).length > 0 && (
+              <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(127,119,221,0.14)", borderTop: "4px solid #7F77DD" }}>
+                <h2 className="font-bold text-center mb-3" style={{ color: "#3C3489" }}>🎓 CE Courses</h2>
+                <RequiredCertsSection
+                  employee={selectedEmployee} certs={certs} requiredTypes={requiredTypesForCerts}
+                  ceEntries={ceEntriesForCerts}
+                  onAddCertForTitle={openForRequiredTitle}
+                  refreshAll={refreshCertsData}
+                  bare
+                  filter="ce"
+                />
+              </div>
+            )}
+            </div>
+
+            {selectedEmployee?.hoBonusEligible && (
+              <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
+                <div className="p-4 pb-2">
+                  <h2 className="font-bold text-slate-700">💰 {bonusYear} Compensation — 40% of Production, paid the following month</h2>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse min-w-[600px]">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                        <th className="px-5 py-2 font-medium">Month</th>
+                        <th className="px-2 py-2 font-medium">Production</th>
+                        <th className="px-2 py-2 font-medium">40%</th>
+                        <th className="px-2 py-2 font-medium">Paid</th>
+                        <th className="px-5 py-2 font-medium">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hoMonths.map((m) => {
+                        const owed = m.production * 0.4;
+                        const balance = owed - m.paid;
+                        return (
+                          <tr key={`${m.year}-${m.month}`} className="border-b border-slate-50 last:border-0">
+                            <td className="px-5 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
+                            <td className="px-2 py-2 text-slate-500">${formatMoney(m.production)}</td>
+                            <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
+                            <td className="px-2 py-2 text-slate-500">${formatMoney(m.paid)}</td>
+                            <td className={`px-5 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
-        ) : (
-          <button onClick={() => setFloaterSwapping(true)}
-            className="rounded-lg border border-dashed px-3 py-2 text-sm text-slate-400 hover:border-slate-300 hover:text-slate-600 transition w-full text-left">
-            + Add Floater for the day
-          </button>
+          </div>
         )}
-      </section>
-    </div>
+      </div>
+    </main>
+  );
+}
+
+export default function StaffDashboardPage() {
+  return (
+    <AppIdentityGate>
+      {(identity, logout) => <DashboardPageBody identity={identity} logout={logout} />}
+    </AppIdentityGate>
   );
 }
