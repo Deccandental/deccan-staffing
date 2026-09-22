@@ -216,6 +216,7 @@ function LeaveManagePageBody() {
             </div>
           ) : (
             <div className="rounded-2xl bg-white shadow overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-left">
@@ -244,7 +245,7 @@ function LeaveManagePageBody() {
                         Status {sortArrow("status")}
                       </button>
                     </th>
-                    <th className="px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Manage</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide sticky right-0 bg-white shadow-[-4px_0_6px_-4px_rgba(0,0,0,0.1)]">Manage</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -284,7 +285,7 @@ function LeaveManagePageBody() {
                             {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
                           </span>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 sticky right-0 bg-white shadow-[-4px_0_6px_-4px_rgba(0,0,0,0.1)]">
                           <button onClick={() => setExpandedId(expandedId === req.id ? null : req.id)} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
                             {expandedId === req.id ? "Hide" : "Manage"}
                           </button>
@@ -293,6 +294,7 @@ function LeaveManagePageBody() {
                       {expandedId === req.id && (
                         <tr key={`${req.id}-detail`} className="border-b border-gray-100 bg-gray-50/60">
                           <td colSpan={6} className="px-4 py-4">
+                            <div className="sticky left-0 w-[calc(100vw-3rem)] max-w-2xl">
                             <div className="text-xs text-gray-400 mb-3">{req.employeeEmail} · Submitted {new Date(req.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
 
                             {editing === req.id ? (
@@ -389,6 +391,7 @@ function LeaveManagePageBody() {
                                 <span className="font-medium">Note:</span> {req.reviewNote}
                               </div>
                             )}
+                            </div>
                           </td>
                         </tr>
                       )}
@@ -396,6 +399,7 @@ function LeaveManagePageBody() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>
