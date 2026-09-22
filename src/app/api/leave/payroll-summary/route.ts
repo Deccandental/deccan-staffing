@@ -40,15 +40,14 @@ async function loadApprovedOverlapping(start: string, end: string): Promise<Leav
 function renderSection(title: string, subtitle: string, rows: LeaveRow[]): string {
   const body = rows.length === 0
     ? `<p style="color:#888;font-style:italic;margin:8px 0 0">No approved leave requests.</p>`
-    : `<table style="width:100%;border-collapse:collapse;margin:8px 0 0">
+    : `<div style="margin:8px 0 0">
         ${rows.map((r) => `
-          <tr>
-            <td style="padding:6px 8px;border-bottom:1px solid #eee;font-weight:bold">${r.employee_name}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #eee">${dateRangeLabel(r.start_date, r.end_date)}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#888">${REASON_LABELS[r.reason] ?? r.reason}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#888">${r.total_days} day${r.total_days !== 1 ? "s" : ""}</td>
-          </tr>`).join("")}
-      </table>`;
+          <div style="padding:7px 0;border-bottom:1px solid #eee;font-size:14px">
+            <span style="font-weight:bold;color:#333">${dateRangeLabel(r.start_date, r.end_date)}</span>
+            <span style="color:#333"> — ${r.employee_name}</span>
+            <span style="color:#888"> · ${REASON_LABELS[r.reason] ?? r.reason} · ${r.total_days} day${r.total_days !== 1 ? "s" : ""}</span>
+          </div>`).join("")}
+      </div>`;
   return `
     <div style="margin-bottom:24px">
       <h2 style="font-size:15px;margin:0 0 2px;color:#333">${title}</h2>
