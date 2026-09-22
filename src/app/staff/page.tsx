@@ -266,20 +266,21 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                   </div>
                   {isSuperAdmin ? (
                     <div>
-                      <label className="block text-sm font-medium text-gray-500 mb-1">Leave Request PIN</label>
+                      <label className="block text-sm font-medium text-gray-500 mb-1">{editing ? "Set New Leave Request PIN" : "Leave Request PIN"}</label>
                       <div className="flex gap-2">
                         <input value={form.pin ?? ""} onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
                           inputMode="numeric" maxLength={4}
-                          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm tracking-widest font-bold focus:outline-none" placeholder="4-digit PIN" />
+                          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm tracking-widest font-bold focus:outline-none" placeholder={editing ? "Leave blank to keep current PIN" : "4-digit PIN"} />
                         <button type="button" onClick={() => setForm((f) => ({ ...f, pin: String(Math.floor(1000 + Math.random() * 9000)) }))}
                           className="flex-shrink-0 rounded-xl border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-500 hover:bg-gray-50">
                           Random
                         </button>
                       </div>
-                      {form.pin && staff.some((e) => e.pin === form.pin && e.id !== editing?.id) && (
-                        <p className="text-xs text-red-500 mt-1">⚠ Another staff member already has this PIN.</p>
-                      )}
-                      <p className="text-xs text-gray-400 mt-1">Used to log in on the Leave Request page. Leave blank to disable self-service login for this person.</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {editing
+                          ? "Used to log in on the Leave Request page. For their security, the current PIN isn't shown here — leave this blank to keep it unchanged, or enter a new one to replace it."
+                          : "Used to log in on the Leave Request page. Leave blank to disable self-service login for this person."}
+                      </p>
                     </div>
                   ) : (
                     <div>
