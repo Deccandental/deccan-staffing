@@ -4,7 +4,6 @@ import { useState, useEffect, ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
-import { SUPER_PASSCODE } from "@/lib/passcodes";
 
 export type StaffIdentity =
   | { mode: "staff"; employeeId: number; employeeName: string; employeeEmail: string }
@@ -40,18 +39,26 @@ export default function StaffLoginGate({ children }: Props) {
     try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(id)); } catch {}
   }
 
-  function handleLogin() {
-    if (code === SUPER_PASSCODE) {
+  async function handleLogin() {
+    let res: Response;
+    try {
+      res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+    } catch {
+      setError(true);
+      setCode("");
+      return;
+    }
+    const result = await res.json();
+    if (result.isSuper) {
       persist({ mode: "manager" });
       return;
     }
-    const managerMatch = staff.find((e) => e.pin && e.pin === code && e.canManageLeave && !e.archived);
-    if (managerMatch) {
-      persist({ mode: "manager" });
-      return;
-    }
-    const match = staff.find((e) => e.pin && e.pin === code && !e.archived);
-    if (match) {
+    if (result.ok && result.employee) {
+      const match = result.employee;
+      if (match.canManageLeave) {
+        persist({ mode: "manager" });
+        return;
+      }
       persist({ mode: "staff", employeeId: match.id, employeeName: match.name, employeeEmail: match.email ?? "" });
     } else {
       setError(true);
