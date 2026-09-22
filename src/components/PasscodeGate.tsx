@@ -2,7 +2,7 @@
 
 import { useState, useEffect, ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import { PasscodeGroup, SUPER_PASSCODE, SESSION_KEYS, PERMISSION_FIELDS } from "@/lib/passcodes";
+import { PasscodeGroup, SESSION_KEYS, PERMISSION_FIELDS } from "@/lib/passcodes";
 import { loadStaff } from "@/lib/staffStore";
 import { Employee } from "@/types/employee";
 
@@ -44,8 +44,17 @@ export default function PasscodeGate({
     setChecked(true);
   }, [group]);
 
-  function handlePasscode() {
-    if (passcode === SUPER_PASSCODE) {
+  async function handlePasscode() {
+    let res: Response;
+    try {
+      res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: passcode }) });
+    } catch {
+      setPasscodeError(true);
+      setPasscode("");
+      return;
+    }
+    const result = await res.json();
+    if (result.isSuper) {
       setUnlockedVia("super");
       setPasscodeError(false);
       try { sessionStorage.setItem(SESSION_KEYS[group], "super"); } catch {}
@@ -53,8 +62,7 @@ export default function PasscodeGate({
     }
 
     const field = PERMISSION_FIELDS[group];
-    const match = staff.find((e) => e.pin && e.pin === passcode && e[field]);
-    if (match) {
+    if (result.ok && result.employee && result.employee[field]) {
       setUnlockedVia("staff");
       setPasscodeError(false);
       try { sessionStorage.setItem(SESSION_KEYS[group], "staff"); } catch {}
