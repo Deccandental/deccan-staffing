@@ -10,7 +10,7 @@ import {
   Certification, NewCertInput, loadCertificationsForEmployee,
   createCertification, updateCertification, deleteCertification, uploadCertFile,
 } from "@/lib/certsStore";
-import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
+import { StaffEvent, loadUpcomingEvents, EventRsvp, loadRsvpsForEvents, setRsvp } from "@/lib/eventsStore";
 import { UpcomingShift, loadUpcomingShiftsForEmployee } from "@/lib/staffSchedule";
 import { PayrollEntry, loadPayrollEntriesInRange } from "@/lib/payrollStore";
 import {
@@ -107,6 +107,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [pvPayrollEntries, setPvPayrollEntries] = useState<PvBonusPayrollEntry[]>([]);
   const [pvPayments, setPvPayments] = useState<PvBonusPayment[]>([]);
   const [expandedPvQuarter, setExpandedPvQuarter] = useState<string | null>(null);
+  const [rsvps, setRsvps] = useState<EventRsvp[]>([]);
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({ name: "", email: "" });
   const [profileSaving, setProfileSaving] = useState(false);
@@ -158,7 +159,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
       setShifts(shiftData);
       setLeaveRequests(leaveData.filter((r) => r.employeeId === selectedId));
       setCerts(certData);
-      setEvents(eventData.filter((ev) => ev.inviteAll || ev.invitedStaffIds.includes(selectedId)));
+      const myEvents = eventData.filter((ev) => ev.inviteAll || ev.invitedStaffIds.includes(selectedId));
+      setEvents(myEvents);
+      loadRsvpsForEvents(myEvents.filter((ev) => ev.rsvpEnabled).map((ev) => ev.id)).then((r) => { if (!cancelled) setRsvps(r); });
       setRequiredTypesForCerts(requiredTypes);
       setCeEntriesForCerts(ceEntries);
       setTitleOptions(Array.from(new Set(requiredTypes.map((t: any) => t.title))).sort((a: any, b: any) => a.localeCompare(b)) as string[]);
@@ -302,6 +305,13 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     setCertForm(EMPTY_CERT_FORM);
     setCertFile(null);
     setCertError("");
+  }
+
+  async function handleRsvp(eventId: string, attending: boolean) {
+    if (selectedId == null) return;
+    const result = await setRsvp(eventId, selectedId, attending);
+    if (!result.ok) return;
+    setRsvps(await loadRsvpsForEvents(events.filter((e) => e.rsvpEnabled).map((e) => e.id)));
   }
 
   async function handleSaveProfile() {
@@ -768,6 +778,33 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                         {new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                         {ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : " · All Day"}
                       </div>
+                      {/* RSVP only appears on events where it was switched
+                          on, and only when you're viewing your own dashboard
+                          (a manager browsing someone else shouldn't answer
+                          for them). */}
+                      {ev.rsvpEnabled && identity.employeeId === selectedId && (() => {
+                        const mine = rsvps.find((r) => r.eventId === ev.id && r.employeeId === selectedId);
+                        return (
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <span className="text-xs font-semibold" style={{ color: "rgba(74,66,56,0.6)" }}>Attending?</span>
+                            <button onClick={() => handleRsvp(ev.id, true)}
+                              className="rounded-full px-3 py-0.5 text-xs font-semibold transition"
+                              style={mine?.attending === true
+                                ? { background: "#3B6D11", color: "white" }
+                                : { background: "white", color: "#3B6D11", border: "1px solid #3B6D11" }}>
+                              Yes
+                            </button>
+                            <button onClick={() => handleRsvp(ev.id, false)}
+                              className="rounded-full px-3 py-0.5 text-xs font-semibold transition"
+                              style={mine?.attending === false
+                                ? { background: "#A32D2D", color: "white" }
+                                : { background: "white", color: "#A32D2D", border: "1px solid #A32D2D" }}>
+                              No
+                            </button>
+                            {mine == null && <span className="text-xs" style={{ color: "rgba(74,66,56,0.4)" }}>no reply yet</span>}
+                          </div>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
