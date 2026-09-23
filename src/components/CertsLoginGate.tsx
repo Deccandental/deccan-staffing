@@ -4,6 +4,7 @@ import { useState, useEffect, ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
+import { storeSessionToken, clearSessionToken, hasSessionToken } from "@/lib/secureData";
 
 export type CertsIdentity =
   | { mode: "staff"; employeeId: number; employeeName: string; employeeEmail: string }
@@ -27,7 +28,11 @@ export default function CertsLoginGate({ children }: Props) {
     loadStaff().then((s) => { setStaff(s); setStaffLoaded(true); });
     try {
       const saved = sessionStorage.getItem(SESSION_KEY);
-      if (saved) setIdentity(JSON.parse(saved));
+      // Only trust a stored session if its token is still present —
+      // otherwise the UI would look logged in while every data request
+      // silently failed for lack of a token.
+      if (saved && hasSessionToken()) setIdentity(JSON.parse(saved));
+      else if (saved) sessionStorage.removeItem(SESSION_KEY);
     } catch {
       // sessionStorage unavailable — fall back to re-prompting
     }
@@ -49,6 +54,7 @@ export default function CertsLoginGate({ children }: Props) {
       return;
     }
     const result = await res.json();
+    if (result.token) storeSessionToken(result.token);
     if (result.isSuper) {
       persist({ mode: "manager" });
       return;
@@ -68,6 +74,7 @@ export default function CertsLoginGate({ children }: Props) {
 
   function logout() {
     setIdentity(null);
+    clearSessionToken();
     try { sessionStorage.removeItem(SESSION_KEY); } catch {}
   }
 
