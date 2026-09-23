@@ -773,6 +773,13 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-medium" style={{ color: ev.mandatory ? "#A32D2D" : "#993C1D" }}>{ev.title}</span>
                         {ev.mandatory && <span className="rounded-full text-xs font-semibold px-2 py-0.5 flex-shrink-0" style={{ background: "#F7C1C1", color: "#791F1F" }}>Mandatory</span>}
+                        {/* Attendance count is visible to everyone who can
+                            see the event, not just the person replying. */}
+                        {ev.rsvpEnabled && (
+                          <span className="rounded-full text-xs font-semibold px-2 py-0.5 flex-shrink-0" style={{ background: "#DDEFC8", color: "#3B6D11" }}>
+                            {rsvps.filter((r) => r.eventId === ev.id && r.attending).length} attending
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs mt-0.5" style={{ color: "rgba(74,66,56,0.5)" }}>
                         {new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
