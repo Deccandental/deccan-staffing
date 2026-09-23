@@ -23,8 +23,15 @@ export function clearSessionToken() {
   try { sessionStorage.removeItem(TOKEN_KEY); } catch {}
 }
 
-function getSessionToken(): string {
+export function getSessionToken(): string {
   try { return sessionStorage.getItem(TOKEN_KEY) ?? ""; } catch { return ""; }
+}
+
+// A stored identity without a matching token is a stale login from before
+// tokens existed (or an expired one) — the UI would look logged in while
+// every data request silently failed. Gates use this to force a re-login.
+export function hasSessionToken(): boolean {
+  return getSessionToken() !== "";
 }
 
 interface Filter { column: string; op: string; value: unknown }
@@ -49,6 +56,14 @@ async function execute(spec: RequestSpec): Promise<{ data: any; error: { message
       body: JSON.stringify(spec),
     });
     const json = await res.json();
+    if (res.status === 401) {
+      // Session is missing or expired. Clear it so the next render shows the
+      // login prompt, rather than leaving the user staring at blank numbers
+      // with no explanation.
+      clearSessionToken();
+      if (typeof window !== "undefined") window.location.reload();
+      return { data: null, error: { message: "Session expired — please log in again." } };
+    }
     if (!res.ok) return { data: null, error: { message: json.error ?? "Request failed." } };
     return { data: json.data, error: null };
   } catch (err: any) {
