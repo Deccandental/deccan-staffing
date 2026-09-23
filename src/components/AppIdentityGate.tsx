@@ -4,7 +4,7 @@ import { useState, useEffect, ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
-import { storeSessionToken, clearSessionToken } from "@/lib/secureData";
+import { storeSessionToken, clearSessionToken, hasSessionToken } from "@/lib/secureData";
 
 export interface AppIdentity {
   mode: "super" | "staff";
@@ -38,7 +38,11 @@ export default function AppIdentityGate({ children }: Props) {
     loadStaff().then((s) => { setStaff(s); setStaffLoaded(true); });
     try {
       const saved = sessionStorage.getItem(IDENTITY_SESSION_KEY);
-      if (saved) setIdentity(JSON.parse(saved));
+      // Only trust a stored session if its token is still present —
+      // otherwise the UI would look logged in while every data request
+      // silently failed for lack of a token.
+      if (saved && hasSessionToken()) setIdentity(JSON.parse(saved));
+      else if (saved) sessionStorage.removeItem(IDENTITY_SESSION_KEY);
     } catch {
       // sessionStorage unavailable — fall back to re-prompting
     }
