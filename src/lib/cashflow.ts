@@ -54,7 +54,7 @@ function fromCashAccountRow(row: any): CashAccount {
 export async function loadCashAccounts(): Promise<CashAccount[]> {
   const { data, error } = await supabase.from("cash_accounts").select("*").order("sort_order");
   if (error) { console.error("loadCashAccounts error:", error); return []; }
-  const accounts = (data ?? []).map(fromCashAccountRow);
+  const accounts: CashAccount[] = (data ?? []).map(fromCashAccountRow);
   const { data: latestEntries, error: entriesError } = await supabase
     .from("bank_statement_entries").select("*").order("month", { ascending: false });
   if (entriesError) { console.error("loadCashAccounts (statement entries) error:", entriesError); return accounts; }
@@ -150,7 +150,7 @@ function fromCreditCardRow(row: any): CreditCard {
 export async function loadCreditCards(): Promise<CreditCard[]> {
   const { data, error } = await supabase.from("credit_cards").select("*").order("sort_order");
   if (error) { console.error("loadCreditCards error:", error); return []; }
-  const cards = (data ?? []).map(fromCreditCardRow);
+  const cards: CreditCard[] = (data ?? []).map(fromCreditCardRow);
   // Derive "current" statement balance from the most recent entry in the
   // history table, rather than trusting a separately-maintained field —
   // this is the only way to guarantee it can never drift out of sync with
