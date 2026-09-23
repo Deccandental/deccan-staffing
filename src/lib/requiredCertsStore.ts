@@ -216,6 +216,12 @@ export interface RequiredCertStatus {
   satisfied: boolean; // true for license/standalone if not expired; true for ce_hours if any entry falls in the window; true for total_ce_hours/one_time_ce if target reached
   missingLicense: boolean; // ce_hours/total_ce_hours only: true if the role's license has no expiration date on file yet, so the window can't be computed
   targetHours: number | null;
+  // one_time_ce only: total hours ever logged for this requirement, at any
+  // date. `satisfied` is driven by this, while `totalHoursInWindow` says how
+  // many of those hours also fall inside the current renewal window and so
+  // still earn CE credit. A course taken years ago satisfies the requirement
+  // permanently but contributes nothing to the current renewal.
+  everCompletedHours?: number;
 }
 
 export function addMonths(dateStr: string, months: number): string {
@@ -262,11 +268,30 @@ export function computeRequiredCertStatuses(
       return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration, satisfied: type.targetHours != null && totalHours >= type.targetHours, missingLicense: false, targetHours: type.targetHours };
     }
     if (type.kind === "one_time_ce") {
-      // Never expires, never resets — just checks whether enough hours have
-      // ever been logged against this specific requirement, all-time.
+      // Two separate questions for this kind, which are easy to conflate:
+      //   1. Has the course ever been taken? That's the actual requirement —
+      //      it never expires and never needs retaking.
+      //   2. Was it taken inside the CURRENT license renewal window? Only
+      //      then do its hours also count toward CE credit for this renewal.
+      // Most people take this early in their career, so (1) is satisfied
+      // while (2) is not — that's normal and not a problem to flag.
       const entries = ceEntries.filter((e) => e.requiredCertTypeId === type.id);
       const totalHours = entries.reduce((sum, e) => sum + e.hours, 0);
-      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart: null, windowEnd: null, satisfied: type.targetHours != null && totalHours >= type.targetHours, missingLicense: false, targetHours: type.targetHours };
+      const satisfied = type.targetHours != null && totalHours >= type.targetHours;
+
+      // Work out the current renewal window from the role's license, so we
+      // can report whether any of those hours also earn CE credit now.
+      let windowStart: string | null = null;
+      let windowEnd: string | null = null;
+      let hoursInWindow = 0;
+      if (licenseExpiration) {
+        windowEnd = licenseExpiration;
+        windowStart = addMonths(licenseExpiration, -(type.frequencyMonths || 24));
+        hoursInWindow = entries
+          .filter((e) => e.dateCompleted >= windowStart! && e.dateCompleted <= windowEnd!)
+          .reduce((sum, e) => sum + e.hours, 0);
+      }
+      return { type, expirationDate: null, totalHoursInWindow: hoursInWindow, windowStart, windowEnd, satisfied, missingLicense: false, targetHours: type.targetHours, everCompletedHours: totalHours };
     }
     // license or standalone: driven by a matching certification record.
     const cert = certsByTitle.get(type.title);
