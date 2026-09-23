@@ -19,6 +19,7 @@ function fromRow(row: any): StaffEvent {
     remind3Weeks: row.remind_3_weeks ?? false,
     remindersSent: row.reminders_sent ?? {},
     announced: row.announced ?? false,
+  rsvpEnabled: row.rsvp_enabled ?? false,
     createdAt: row.created_at,
   };
 }
