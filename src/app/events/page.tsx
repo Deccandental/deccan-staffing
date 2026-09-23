@@ -8,17 +8,19 @@ import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
 import {
   StaffEvent, NewEventInput, loadUpcomingEvents, createEvent, updateEvent, deleteEvent,
+  EventRsvp, loadRsvpsForEvents,
 } from "@/lib/eventsStore";
 
 const EMPTY_FORM: NewEventInput = {
   date: "", time: "", endTime: "", title: "", description: "",
-  mandatory: false, inviteAll: true, invitedStaffIds: [],
+  mandatory: false, rsvpEnabled: false, inviteAll: true, invitedStaffIds: [],
   remind1Day: true, remind1Week: true, remind3Weeks: false,
 };
 
 function EventsPageBody() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [events, setEvents] = useState<StaffEvent[]>([]);
+  const [rsvps, setRsvps] = useState<EventRsvp[]>([]);
   const [form, setForm] = useState<NewEventInput>(EMPTY_FORM);
   const [allDay, setAllDay] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -34,6 +36,8 @@ function EventsPageBody() {
     const [s, e] = await Promise.all([loadStaff(), loadUpcomingEvents(todayStr)]);
     setStaff(s);
     setEvents(e);
+    // Only fetch RSVPs for events that actually ask for them.
+    setRsvps(await loadRsvpsForEvents(e.filter((ev) => ev.rsvpEnabled).map((ev) => ev.id)));
   }
 
   function toggleInvitee(id: number) {
@@ -48,7 +52,7 @@ function EventsPageBody() {
   function startEdit(ev: StaffEvent) {
     setForm({
       date: ev.date, time: ev.time, endTime: ev.endTime, title: ev.title, description: ev.description,
-      mandatory: ev.mandatory, inviteAll: ev.inviteAll, invitedStaffIds: ev.invitedStaffIds,
+      mandatory: ev.mandatory, rsvpEnabled: ev.rsvpEnabled, inviteAll: ev.inviteAll, invitedStaffIds: ev.invitedStaffIds,
       remind1Day: ev.remind1Day, remind1Week: ev.remind1Week, remind3Weeks: ev.remind3Weeks,
     });
     setEditingId(ev.id);
@@ -174,9 +178,15 @@ function EventsPageBody() {
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-orange-400" />
             </div>
 
-            <label className="flex items-center gap-2 mb-4 cursor-pointer">
+            <label className="flex items-center gap-2 mb-2 cursor-pointer">
               <input type="checkbox" checked={form.mandatory} onChange={(e) => setForm((f) => ({ ...f, mandatory: e.target.checked }))} />
               <span className="text-sm font-medium text-slate-700">Mandatory attendance</span>
+            </label>
+
+            <label className="flex items-center gap-2 mb-4 cursor-pointer">
+              <input type="checkbox" checked={form.rsvpEnabled ?? false} onChange={(e) => setForm((f) => ({ ...f, rsvpEnabled: e.target.checked }))} />
+              <span className="text-sm font-medium text-slate-700">Ask staff to RSVP</span>
+              <span className="text-xs text-slate-400">— they'll see Yes / No buttons on their dashboard</span>
             </label>
 
             <div className="mb-4 rounded-xl border border-slate-200 p-4">
@@ -245,6 +255,16 @@ function EventsPageBody() {
                       <span className="font-bold text-slate-700">{ev.title}</span>
                       {ev.mandatory && <span className="rounded-full bg-red-100 text-red-600 text-xs font-semibold px-2 py-0.5">Mandatory</span>}
                       {ev.announced && <span className="rounded-full bg-cyan-100 text-cyan-600 text-xs font-semibold px-2 py-0.5">Announced</span>}
+                      {ev.rsvpEnabled && (() => {
+                        const mine = rsvps.filter((r) => r.eventId === ev.id);
+                        const yes = mine.filter((r) => r.attending).length;
+                        const no = mine.length - yes;
+                        return (
+                          <span className="rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold px-2 py-0.5">
+                            RSVP: {yes} yes{no > 0 ? `, ${no} no` : ""}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <div className="text-sm text-slate-500 mt-0.5">
                       {dateLabel}{ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : " · All Day"}
