@@ -19,7 +19,11 @@
 
 export type PasscodeGroup = "admin" | "leaveManage" | "events" | "payroll";
 
-export const SUPER_PASSCODE = "2503";
+// The master passcode itself is never defined here anymore — it used to be
+// a hardcoded string in this file, which is bundled into every browser's
+// JavaScript and readable by anyone who opens dev tools. It now lives only
+// as the server-side SUPER_PASSCODE environment variable, checked inside
+// /api/auth/login, and is never sent to the client in any form.
 
 export const SESSION_KEYS: Record<PasscodeGroup, string> = {
   admin: "dd_admin_unlocked",
