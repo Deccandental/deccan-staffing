@@ -4,6 +4,7 @@ import { useState, useEffect, ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { PasscodeGroup, SESSION_KEYS, PERMISSION_FIELDS } from "@/lib/passcodes";
 import { loadStaff } from "@/lib/staffStore";
+import { storeSessionToken, clearSessionToken, hasSessionToken } from "@/lib/secureData";
 import { Employee } from "@/types/employee";
 
 export type UnlockedVia = "super" | "staff";
@@ -37,7 +38,11 @@ export default function PasscodeGate({
     loadStaff().then((s) => { setStaff(s); setStaffLoaded(true); });
     try {
       const stored = sessionStorage.getItem(SESSION_KEYS[group]);
-      if (stored === "super" || stored === "staff") setUnlockedVia(stored);
+      // Only trust a stored unlock if its token is still present — otherwise
+      // the page would appear unlocked while every data request silently
+      // failed for lack of a token.
+      if ((stored === "super" || stored === "staff") && hasSessionToken()) setUnlockedVia(stored);
+      else if (stored) sessionStorage.removeItem(SESSION_KEYS[group]);
     } catch {
       // sessionStorage unavailable (e.g. private browsing edge cases) — fall back to re-prompting
     }
@@ -54,6 +59,7 @@ export default function PasscodeGate({
       return;
     }
     const result = await res.json();
+    if (result.token) storeSessionToken(result.token);
     if (result.isSuper) {
       setUnlockedVia("super");
       setPasscodeError(false);
