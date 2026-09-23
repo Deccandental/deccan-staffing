@@ -185,8 +185,22 @@ export function RequiredCertsSection({
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-sm" style={{ color: "#4A4238" }}>{type.title}</span>
                     <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold" style={status.satisfied ? { background: "#EAF3DE", color: "#3B6D11" } : { background: "#FCEBEB", color: "#A32D2D" }}>
-                      {status.satisfied ? "✓ Complete" : `${status.totalHoursInWindow} of ${status.targetHours} hrs`}
+                      {status.satisfied ? "✓ Completed (one-time)" : `${status.everCompletedHours ?? 0} of ${status.targetHours} hrs`}
                     </span>
+                    {/* Whether it ALSO counts toward the current renewal is a
+                        separate question — most people took this years ago,
+                        which is perfectly fine but earns no CE credit now. */}
+                    {status.satisfied && (
+                      status.totalHoursInWindow > 0 ? (
+                        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium" style={{ background: "#E6F1FB", color: "#185FA5" }}>
+                          +{status.totalHoursInWindow} hrs CE credit this renewal
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium" style={{ background: "#F1F0EE", color: "rgba(74,66,56,0.6)" }}>
+                          No CE credit this renewal
+                        </span>
+                      )
+                    )}
                   </div>
                   <button onClick={() => { setLoggingTypeId(loggingTypeId === type.id ? null : type.id); setCeError(null); }} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
                     {loggingTypeId === type.id ? "Cancel" : status.satisfied ? "Add more" : "+ Log hours"}
