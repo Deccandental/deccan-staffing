@@ -1,11 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { verifySessionToken } from "@/lib/session";
 
 // TEMPORARY DIAGNOSTIC — safe to delete once the data-loading issue is
-// resolved. Reports whether the required environment variables are present
-// and whether the service-role client can actually reach the database.
-// Deliberately reports only presence/length, never any secret's value.
-export async function GET() {
+// resolved. Reports environment-variable presence, table row counts, and
+// (when called with a token) whether that specific token verifies.
+// Reports only presence/length of secrets, never their values.
+export async function GET(req: NextRequest) {
   const env = {
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY
       ? `present (${process.env.SUPABASE_SERVICE_ROLE_KEY.length} chars)`
@@ -17,9 +18,6 @@ export async function GET() {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ? "present" : "MISSING",
   };
 
-  // Try reading a couple of the financial tables with the service-role key.
-  // If these come back with counts, the data is definitely still there and
-  // the service key works — narrowing the problem to the session/token layer.
   const tables = ["pv_bonus_quarters", "weekly_cash_reviews", "payroll_entries", "ho_bonus_months"];
   const results: Record<string, string> = {};
   for (const t of tables) {
@@ -31,5 +29,30 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({ env, tables: results });
+  // If the browser sent its stored session token, report whether it
+  // verifies here. This distinguishes "no token stored" from "token stored
+  // but rejected", which are very different problems.
+  const token = req.headers.get("x-session-token");
+  let tokenCheck: string;
+  if (!token) {
+    tokenCheck = "no token sent with this request";
+  } else {
+    const session = verifySessionToken(token);
+    tokenCheck = session
+      ? `VALID - mode=${session.mode}, canManagePayroll=${session.canManagePayroll}, employeeId=${session.employeeId ?? "n/a"}`
+      : "INVALID - token present but failed verification";
+  }
+
+  // Also exercise the exact query shape the app uses, through the same
+  // service-role client the secure-data route uses.
+  let sampleQuery: string;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("pv_bonus_quarters").select("*").order("year").order("quarter");
+    sampleQuery = error ? `ERROR: ${error.message}` : `returned ${data?.length ?? 0} rows`;
+  } catch (err: any) {
+    sampleQuery = `EXCEPTION: ${err?.message ?? "unknown"}`;
+  }
+
+  return NextResponse.json({ env, tables: results, tokenCheck, sampleQuery });
 }
