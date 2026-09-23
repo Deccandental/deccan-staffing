@@ -108,6 +108,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [pvPayments, setPvPayments] = useState<PvBonusPayment[]>([]);
   const [expandedPvQuarter, setExpandedPvQuarter] = useState<string | null>(null);
   const [rsvps, setRsvps] = useState<EventRsvp[]>([]);
+  const [showOtherDocs, setShowOtherDocs] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({ name: "", email: "" });
   const [profileSaving, setProfileSaving] = useState(false);
@@ -224,6 +225,17 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const pendingRsvpCount = identity.employeeId === selectedId
     ? events.filter((ev) => ev.rsvpEnabled && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId)).length
     : 0;
+
+  // Titles already covered by the requirement lists above, so they aren't
+  // repeated in the documents list below.
+  const requiredTitles = new Set(
+    selectedEmployee
+      ? requiredTypesForCerts
+          .filter((t) => getApplicableRoles(selectedEmployee).includes(t.appliesToRole))
+          .map((t) => t.title)
+      : []
+  );
+  const otherCerts = certs.filter((c) => !requiredTitles.has(c.title));
 
   const missingOrExpiredCertCount = selectedEmployee ? (() => {
     const roles = getApplicableRoles(selectedEmployee);
@@ -863,7 +875,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
 
               <div className="flex items-center justify-between mt-4 mb-3">
-                <h3 className="text-sm font-semibold" style={{ color: "rgba(74,66,56,0.6)" }}>All documents on file</h3>
+                <button onClick={() => setShowOtherDocs((s) => !s)} className="text-sm font-semibold flex items-center gap-1.5 hover:underline" style={{ color: "rgba(74,66,56,0.6)" }}>
+                  <span style={{ fontSize: 10 }}>{showOtherDocs ? "\u25bc" : "\u25b6"}</span>
+                  Other documents on file ({otherCerts.length})
+                </button>
                 {!showCertForm && (
                   <button onClick={openNewCert} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#0F6E56" }}>
                     + Add Certification
@@ -938,11 +953,11 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 </div>
               )}
 
-              {certs.length === 0 ? (
-                <p className="text-sm text-slate-400">No certifications on file.</p>
+              {!showOtherDocs ? null : otherCerts.length === 0 ? (
+                <p className="text-sm text-slate-400">Everything on file is already listed as a requirement above.</p>
               ) : (
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {certs.map((cert) => {
+                  {otherCerts.map((cert) => {
                     const badge = certBadge(cert);
                     return (
                       <div key={cert.id} className="rounded-xl bg-slate-50 px-3 py-2 flex items-center justify-between gap-2">
