@@ -135,3 +135,20 @@ export async function setDentistPrefs(dentistId: number, assistantIds: number[])
   const { error } = await supabase.from("dentist_prefs").upsert({ dentist_id: dentistId, assistant_ids: assistantIds });
   if (error) console.error("setDentistPrefs error:", error);
 }
+
+// Lets a staff member update only their own display name and email from
+// their dashboard. Deliberately narrow: it touches just these two columns,
+// so it can never alter permissions, PIN, bonus eligibility or pay fields —
+// unlike updateEmployee(), which writes the whole record and is admin-only.
+export async function updateOwnProfile(
+  employeeId: number, updates: { name: string; email: string }
+): Promise<{ ok: boolean; error?: string }> {
+  const name = updates.name.trim();
+  if (!name) return { ok: false, error: "Name can't be empty." };
+  const { error } = await supabase
+    .from("staff")
+    .update({ name, email: updates.email.trim() })
+    .eq("id", employeeId);
+  if (error) { console.error("updateOwnProfile error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
