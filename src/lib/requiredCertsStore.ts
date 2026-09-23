@@ -237,7 +237,19 @@ export function computeRequiredCertStatuses(
   ceEntries: CeCourseEntry[],
   today: string
 ): RequiredCertStatus[] {
-  const relevant = types.filter((t) => role.includes(t.appliesToRole));
+  // Requirements are stored one row per role, so someone with two roles
+  // (a Dentist who is also a Specialist, say) matches two rows for every
+  // shared requirement — Malpractice Insurance, BLS/CPR and so on. The
+  // requirement itself is the same thing, so keep only the first of each
+  // title rather than listing it twice.
+  const seenTitles = new Set<string>();
+  const relevant = types
+    .filter((t) => role.includes(t.appliesToRole))
+    .filter((t) => {
+      if (seenTitles.has(t.title)) return false;
+      seenTitles.add(t.title);
+      return true;
+    });
   const certsByTitle = new Map(allCerts.map((c) => [c.title, c]));
   // For ce_hours/total_ce_hours items, find this role's license expiration to anchor the window.
   const licenseType = types.find((t) => t.kind === "license" && role.includes(t.appliesToRole));
