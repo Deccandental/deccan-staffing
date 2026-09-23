@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { createSessionToken } from "@/lib/session";
 
 // Centralizes what used to be six separate client-side comparisons against
 // a full list of staff PINs (and a hardcoded master passcode) shipped to
@@ -36,22 +37,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false });
   }
 
-  return NextResponse.json({
-    ok: true,
-    isSuper,
-    employee: data
+  const employee = data
+    ? {
+        id: data.id,
+        name: data.name,
+        email: data.email ?? "",
+        canAdmin: !!data.can_admin,
+        canManageLeave: !!data.can_manage_leave,
+        canManageEvents: !!data.can_manage_events,
+        canManageCerts: !!data.can_manage_certs,
+        canManagePayroll: !!data.can_manage_payroll,
+        exemptFromPolicySigning: !!data.exempt_from_policy_signing,
+        exemptFromCheckin: !!data.exempt_from_checkin,
+      }
+    : null;
+
+  // The token is what later privileged requests present to prove this login
+  // happened. Super sessions get every permission; staff sessions carry
+  // exactly the flags on their own record.
+  const token = createSessionToken(
+    isSuper
       ? {
-          id: data.id,
-          name: data.name,
-          email: data.email ?? "",
-          canAdmin: !!data.can_admin,
-          canManageLeave: !!data.can_manage_leave,
-          canManageEvents: !!data.can_manage_events,
-          canManageCerts: !!data.can_manage_certs,
-          canManagePayroll: !!data.can_manage_payroll,
-          exemptFromPolicySigning: !!data.exempt_from_policy_signing,
-          exemptFromCheckin: !!data.exempt_from_checkin,
+          mode: "super",
+          canAdmin: true, canManageLeave: true, canManageEvents: true,
+          canManageCerts: true, canManagePayroll: true,
         }
-      : null,
-  });
+      : {
+          mode: "staff",
+          employeeId: employee!.id,
+          employeeName: employee!.name,
+          canAdmin: employee!.canAdmin,
+          canManageLeave: employee!.canManageLeave,
+          canManageEvents: employee!.canManageEvents,
+          canManageCerts: employee!.canManageCerts,
+          canManagePayroll: employee!.canManagePayroll,
+        }
+  );
+
+  return NextResponse.json({ ok: true, isSuper, employee, token });
 }
