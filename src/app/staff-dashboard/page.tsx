@@ -218,6 +218,13 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
   const selectedEmployee = staff.find((e) => e.id === selectedId);
 
+  // Events asking for an RSVP that this person hasn't answered yet. Only
+  // counted when viewing your own dashboard — a manager looking at someone
+  // else's shouldn't be prompted to answer on their behalf.
+  const pendingRsvpCount = identity.employeeId === selectedId
+    ? events.filter((ev) => ev.rsvpEnabled && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId)).length
+    : 0;
+
   const missingOrExpiredCertCount = selectedEmployee ? (() => {
     const roles = getApplicableRoles(selectedEmployee);
     if (roles.length === 0) return 0;
@@ -487,7 +494,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
             <div className="grid gap-5 lg:grid-cols-3">
 
-            {(missingOrExpiredCertCount > 0 || pendingPolicies.length > 0 || checkinDue || checkinUpcoming) && (
+            {(missingOrExpiredCertCount > 0 || pendingPolicies.length > 0 || pendingRsvpCount > 0 || checkinDue || checkinUpcoming) && (
               <div className="lg:col-span-3 flex flex-wrap gap-3">
                 {missingOrExpiredCertCount > 0 && (
                   <a href="#certifications-card" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
@@ -496,6 +503,18 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       {missingOrExpiredCertCount} certification{missingOrExpiredCertCount !== 1 ? "s" : ""} need{missingOrExpiredCertCount === 1 ? "s" : ""} attention
                     </span>
                   </a>
+                )}
+                {pendingRsvpCount > 0 && (
+                  <button onClick={() => {
+                    const first = events.find((ev) => ev.rsvpEnabled && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId));
+                    const el = first ? document.getElementById(`event-${first.id}`) : document.getElementById("events-card");
+                    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }} className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FAEEDA", border: "1.5px solid #D9891A" }}>
+                    <span style={{ fontSize: 18 }}>📌</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#854F0B", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
+                      {pendingRsvpCount} event{pendingRsvpCount !== 1 ? "s" : ""} awaiting your rsvp
+                    </span>
+                  </button>
                 )}
                 {pendingPolicies.length > 0 && (
                   <a href="/handbook" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
@@ -762,14 +781,24 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
-            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(216,90,48,0.14)", borderTop: "4px solid #D85A30" }}>
+            <div id="events-card" className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(216,90,48,0.14)", borderTop: "4px solid #D85A30" }}>
               <h2 className="font-bold text-center mb-3" style={{ color: "#993C1D" }}>📌 Events</h2>
               {events.length === 0 ? (
                 <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No upcoming events.</p>
               ) : (
                 <div className="space-y-1.5 max-h-80 overflow-y-auto">
-                  {events.map((ev) => (
-                    <div key={ev.id} className="rounded-xl px-3 py-2" style={{ background: ev.mandatory ? "#FCEBEB" : "#FAECE7" }}>
+                  {[...events].sort((a, b) => {
+                    const needsA = a.rsvpEnabled && identity.employeeId === selectedId && !rsvps.some((r) => r.eventId === a.id && r.employeeId === selectedId);
+                    const needsB = b.rsvpEnabled && identity.employeeId === selectedId && !rsvps.some((r) => r.eventId === b.id && r.employeeId === selectedId);
+                    if (needsA !== needsB) return needsA ? -1 : 1;
+                    return a.date.localeCompare(b.date);
+                  }).map((ev) => (
+                    <div key={ev.id} id={`event-${ev.id}`} className="rounded-xl px-3 py-2"
+                      style={ev.rsvpEnabled && identity.employeeId === selectedId && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId)
+                        // Awaiting your reply — outlined so it reads as needing
+                        // action, matching the amber alert pill above.
+                        ? { background: "#FAEEDA", border: "1.5px solid #D9891A" }
+                        : { background: ev.mandatory ? "#FCEBEB" : "#FAECE7" }}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-medium" style={{ color: ev.mandatory ? "#A32D2D" : "#993C1D" }}>{ev.title}</span>
                         {ev.mandatory && <span className="rounded-full text-xs font-semibold px-2 py-0.5 flex-shrink-0" style={{ background: "#F7C1C1", color: "#791F1F" }}>Mandatory</span>}
