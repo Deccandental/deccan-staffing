@@ -15,6 +15,7 @@ export interface StaffEvent {
   remind3Weeks: boolean;
   remindersSent: Record<string, boolean>;
   announced: boolean;
+  rsvpEnabled: boolean;
   createdAt: string;
 }
 
@@ -30,6 +31,7 @@ export interface NewEventInput {
   remind1Day: boolean;
   remind1Week: boolean;
   remind3Weeks: boolean;
+  rsvpEnabled?: boolean;
 }
 
 function fromRow(row: any): StaffEvent {
@@ -48,6 +50,7 @@ function fromRow(row: any): StaffEvent {
     remind3Weeks: row.remind_3_weeks ?? false,
     remindersSent: row.reminders_sent ?? {},
     announced: row.announced ?? false,
+    rsvpEnabled: row.rsvp_enabled ?? false,
     createdAt: row.created_at,
   };
 }
@@ -94,6 +97,7 @@ export async function createEvent(input: NewEventInput): Promise<StaffEvent | nu
       remind_1_day: input.remind1Day,
       remind_1_week: input.remind1Week,
       remind_3_weeks: input.remind3Weeks,
+      rsvp_enabled: input.rsvpEnabled ?? false,
     })
     .select()
     .single();
@@ -121,6 +125,7 @@ export async function updateEvent(id: string, input: NewEventInput): Promise<Sta
     remind_1_day: input.remind1Day,
     remind_1_week: input.remind1Week,
     remind_3_weeks: input.remind3Weeks,
+    rsvp_enabled: input.rsvpEnabled ?? false,
   };
   if (dateChanged) update.reminders_sent = {};
 
@@ -137,4 +142,39 @@ export async function deleteEvent(id: string): Promise<void> {
 export async function markAnnounced(id: string): Promise<void> {
   const { error } = await supabase.from("events").update({ announced: true }).eq("id", id);
   if (error) console.error("markAnnounced error:", error);
+}
+
+// ---------------- Event RSVPs ----------------
+// Only relevant for events with rsvpEnabled set. One row per person per
+// event; answering again updates the existing row rather than adding a
+// second one (enforced by a unique constraint on event_id + employee_id).
+
+export interface EventRsvp {
+  id: string;
+  eventId: string;
+  employeeId: number;
+  attending: boolean;
+  respondedAt: string;
+}
+
+function fromRsvpRow(row: any): EventRsvp {
+  return {
+    id: row.id, eventId: row.event_id, employeeId: row.employee_id,
+    attending: row.attending, respondedAt: row.responded_at,
+  };
+}
+
+export async function loadRsvpsForEvents(eventIds: string[]): Promise<EventRsvp[]> {
+  if (eventIds.length === 0) return [];
+  const { data, error } = await supabase.from("event_rsvps").select("*").in("event_id", eventIds);
+  if (error) { console.error("loadRsvpsForEvents error:", error); return []; }
+  return (data ?? []).map(fromRsvpRow);
+}
+
+export async function setRsvp(eventId: string, employeeId: number, attending: boolean): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("event_rsvps").upsert({
+    event_id: eventId, employee_id: employeeId, attending, responded_at: new Date().toISOString(),
+  }, { onConflict: "event_id,employee_id" });
+  if (error) { console.error("setRsvp error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
 }
