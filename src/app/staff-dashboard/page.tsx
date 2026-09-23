@@ -3,7 +3,7 @@
 import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Employee } from "@/types/employee";
-import { loadStaff } from "@/lib/staffStore";
+import { loadStaff, updateOwnProfile } from "@/lib/staffStore";
 import { LeaveRequest } from "@/types/leave";
 import { loadLeaveRequests } from "@/lib/leaveStore";
 import {
@@ -107,6 +107,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [pvPayrollEntries, setPvPayrollEntries] = useState<PvBonusPayrollEntry[]>([]);
   const [pvPayments, setPvPayments] = useState<PvBonusPayment[]>([]);
   const [expandedPvQuarter, setExpandedPvQuarter] = useState<string | null>(null);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState({ name: "", email: "" });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [hygieneEntries, setHygieneEntries] = useState<HygieneBonusEntry[]>([]);
   const [hoMonths, setHoMonths] = useState<HoBonusMonth[]>([]);
   const [loading, setLoading] = useState(false);
@@ -300,6 +304,17 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     setCertError("");
   }
 
+  async function handleSaveProfile() {
+    if (selectedEmployee == null) return;
+    setProfileSaving(true);
+    const result = await updateOwnProfile(selectedEmployee.id, profileForm);
+    setProfileSaving(false);
+    if (!result.ok) { setProfileError(result.error ?? "Couldn't save. Please try again."); return; }
+    setProfileError(null);
+    setEditingProfile(false);
+    setStaff(await loadStaff());
+  }
+
   async function refreshCertsData() {
     if (selectedId == null) return;
     const [freshCerts, freshTypes, freshCe] = await Promise.all([
@@ -416,10 +431,47 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   style={{ backgroundColor: selectedEmployee.color }}>
                   {selectedEmployee.name.charAt(0)}
                 </div>
-                <h2 className="text-3xl font-bold" style={{ color: "#4A4238" }}>{selectedEmployee.name}</h2>
-                <p className="text-sm mt-1" style={{ color: "rgba(74,66,56,0.55)" }}>
-                  {selectedEmployee.specialty ?? selectedEmployee.role}{selectedEmployee.email ? ` · ${selectedEmployee.email}` : ""}
-                </p>
+                {editingProfile ? (
+                  <div className="max-w-sm mx-auto space-y-2">
+                    <input value={profileForm.name} onChange={(e) => setProfileForm((f) => ({ ...f, name: e.target.value }))}
+                      placeholder="Your name"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-center text-lg font-semibold focus:outline-none" />
+                    <input value={profileForm.email} onChange={(e) => setProfileForm((f) => ({ ...f, email: e.target.value }))}
+                      placeholder="your.email@mydeccandental.com" type="email"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-center text-sm focus:outline-none" />
+                    {profileError && <p className="text-xs text-red-600">{profileError}</p>}
+                    <div className="flex items-center justify-center gap-2">
+                      <button onClick={handleSaveProfile} disabled={profileSaving}
+                        className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                        style={{ backgroundColor: "#e8622a" }}>
+                        {profileSaving ? "Saving…" : "Save"}
+                      </button>
+                      <button onClick={() => { setEditingProfile(false); setProfileError(null); }}
+                        className="text-sm text-slate-400 hover:underline">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <h2 className="text-3xl font-bold" style={{ color: "#4A4238" }}>{selectedEmployee.name}</h2>
+                    <p className="text-sm mt-1" style={{ color: "rgba(74,66,56,0.55)" }}>
+                      {selectedEmployee.specialty ?? selectedEmployee.role}{selectedEmployee.email ? ` · ${selectedEmployee.email}` : ""}
+                    </p>
+                    {/* Only offered when you're looking at your own profile —
+                        a manager browsing someone else's dashboard shouldn't
+                        be editing their details from here. */}
+                    {identity.employeeId === selectedEmployee.id && (
+                      <button
+                        onClick={() => {
+                          setProfileForm({ name: selectedEmployee.name, email: selectedEmployee.email ?? "" });
+                          setProfileError(null);
+                          setEditingProfile(true);
+                        }}
+                        className="text-xs font-semibold mt-1 hover:underline" style={{ color: "#e8622a" }}>
+                        Edit my name or email
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             )}
 
