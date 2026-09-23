@@ -29,6 +29,9 @@ export async function GET(req: NextRequest) {
     supabase.from("events").select("*"),
     loadAllSlots(),
   ]);
+  // RSVP answers so far, so the digest can nudge only the people who
+  // haven't replied yet rather than pestering everyone.
+  const { data: rsvpRows } = await supabase.from("event_rsvps").select("event_id, employee_id");
   const today = new Date().toISOString().slice(0, 10);
 
   const docRequirements: { docTitle: string; requirementId: string; cycleLabel: string; signedIds: Set<number>; restrictedToEmployeeId: number | null }[] = [];
@@ -68,6 +71,14 @@ export async function GET(req: NextRequest) {
       const remaining = daysUntil(ev.date);
       if (remaining >= 0 && remaining <= 21) {
         items.push(`<strong>${ev.mandatory ? "Mandatory event" : "Event"}:</strong> ${ev.title} on ${new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })}`);
+        // Only nudge if this event asks for an RSVP and this person hasn't
+        // answered yet — someone who already replied needs no reminder.
+        if (ev.rsvp_enabled) {
+          const answered = (rsvpRows ?? []).some((r) => r.event_id === ev.id && r.employee_id === emp.id);
+          if (!answered) {
+            items.push(`<strong>RSVP needed:</strong> let us know if you're attending ${ev.title} — answer on your Staff Dashboard`);
+          }
+        }
       }
     }
 
