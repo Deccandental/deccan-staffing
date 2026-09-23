@@ -1,667 +1,150 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import AppIdentityGate from "@/components/AppIdentityGate";
-import AccessDenied from "@/components/AccessDenied";
-import { Employee, EmployeeRole, DentistSpecialty } from "@/types/employee";
-import {
-  loadStaff, addEmployee, updateEmployee, removeEmployee, setEmployeeArchived,
-  loadPrefs, setDentistPrefs, DentistPrefs,
-} from "@/lib/staffStore";
-import { supabase } from "@/lib/supabase";
+import { Employee } from "@/types/employee";
+import { loadStaff } from "@/lib/staffStore";
+import { storeSessionToken, clearSessionToken } from "@/lib/secureData";
 
-const ROLES: EmployeeRole[] = ["Dentist", "RDA", "Assistant", "Front Desk", "Hygienist"];
+export interface AppIdentity {
+  mode: "super" | "staff";
+  employeeId?: number;
+  employeeName?: string;
+  employeeEmail?: string;
+  exemptFromPolicySigning?: boolean;
+  exemptFromCheckin?: boolean;
+  canAdmin: boolean;
+  canManageLeave: boolean;
+  canManageEvents: boolean;
+  canManageCerts: boolean;
+  canManagePayroll: boolean;
+}
 
-const SPECIALTIES: DentistSpecialty[] = [
-  "General Dentist", "Prosthodontist", "Periodontist", "Endodontist"
-];
+export const IDENTITY_SESSION_KEY = "dd_identity";
 
-const ALL_SKILLS = ["Dentist", "RDA", "Assistant", "Front Desk", "Hygienist"];
-const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday"] as const;
-const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
-const COLORS = ["#2563eb","#7c3aed","#ea580c","#16a34a","#0284c7","#0891b2","#dc2626","#db2777","#9333ea","#059669","#d97706","#0f766e"];
+interface Props {
+  children: (identity: AppIdentity, logout: () => void) => ReactNode;
+}
 
-const EMPTY_EMP: Omit<Employee, "id"> = {
-  name: "",
-  role: "Assistant",
-  color: "#2563eb",
-  skills: ["Assistant"],
-  email: "",
-  pin: "",
-  canAdmin: false,
-  canManageLeave: false,
-  canManageEvents: false,
-  canManageCerts: false,
-  canManagePayroll: false,
-  ptoBalanceHours: 0,
-  sickBalanceHours: 0,
-  excludeFromPayroll: false,
-  growthBonusEligible: false,
-  growthBonusMultiplier: 1,
-  pvBonusEligible: false,
-  netProductionBonusPercent: 30,
-  hoBonusEligible: false,
-  exemptFromPolicySigning: false,
-  exemptFromCheckin: false,
-  employmentType: "full_time",
-  defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
-};
-
-const ROLE_COLORS: Record<string, string> = {
-  Dentist: "bg-blue-100 text-blue-700",
-  RDA: "bg-purple-100 text-purple-700",
-  Assistant: "bg-pink-100 text-pink-700",
-  "Front Desk": "bg-sky-100 text-sky-700",
-  Hygienist: "bg-emerald-100 text-emerald-700",
-};
-
-function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
+export default function AppIdentityGate({ children }: Props) {
+  const [checked, setChecked] = useState(false);
+  const [identity, setIdentity] = useState<AppIdentity | null>(null);
   const [staff, setStaff] = useState<Employee[]>([]);
-  const [prefs, setPrefs] = useState<DentistPrefs>({});
-  const [editing, setEditing] = useState<Employee | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState<Omit<Employee, "id">>(EMPTY_EMP);
-  const [activeTab, setActiveTab] = useState<"staff" | "prefs">("staff");
-  const [viewFilter, setViewFilter] = useState<"active" | "archived">("active");
-  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
-  const [confirmConvert, setConfirmConvert] = useState<number | null>(null);
-  const [converting, setConverting] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [staffLoaded, setStaffLoaded] = useState(false);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState(false);
 
-  useEffect(() => { refresh(); }, []);
-
-  async function refresh() {
-    setLoading(true);
-    const [s, p] = await Promise.all([loadStaff(), loadPrefs()]);
-    setStaff(s);
-    setPrefs(p);
-    setLoading(false);
-  }
-
-  async function handleSave() {
-    if (!form.name.trim()) return;
-    if (editing) {
-      const result = await updateEmployee({ ...form, id: editing.id });
-      if (!result.ok) { alert(`Failed to save: ${result.error ?? "unknown error"}`); return; }
-    } else {
-      const created = await addEmployee(form);
-      if (!created) { alert("Failed to create employee — please try again."); return; }
+  useEffect(() => {
+    loadStaff().then((s) => { setStaff(s); setStaffLoaded(true); });
+    try {
+      const saved = sessionStorage.getItem(IDENTITY_SESSION_KEY);
+      if (saved) setIdentity(JSON.parse(saved));
+    } catch {
+      // sessionStorage unavailable — fall back to re-prompting
     }
-    setEditing(null);
-    setAdding(false);
-    setForm(EMPTY_EMP);
-    await refresh();
+    setChecked(true);
+  }, []);
+
+  // Re-sync a staff identity against the freshly-loaded staff record —
+  // sessionStorage only holds a snapshot from login time, so without this,
+  // a later change to someone's email or permissions wouldn't take effect
+  // until they manually logged out and back in.
+  useEffect(() => {
+    if (!staffLoaded || !identity || identity.mode !== "staff" || identity.employeeId == null) return;
+    const match = staff.find((e) => e.id === identity.employeeId && !e.archived);
+    if (!match) return;
+    const fresh: AppIdentity = {
+      mode: "staff",
+      employeeId: match.id, employeeName: match.name, employeeEmail: match.email ?? "", exemptFromPolicySigning: !!match.exemptFromPolicySigning, exemptFromCheckin: !!match.exemptFromCheckin,
+      canAdmin: !!match.canAdmin, canManageLeave: !!match.canManageLeave, canManageEvents: !!match.canManageEvents,
+      canManageCerts: !!match.canManageCerts, canManagePayroll: !!match.canManagePayroll,
+    };
+    if (JSON.stringify(fresh) !== JSON.stringify(identity)) persist(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staffLoaded, staff, identity?.employeeId]);
+
+  function persist(id: AppIdentity) {
+    setIdentity(id);
+    try { sessionStorage.setItem(IDENTITY_SESSION_KEY, JSON.stringify(id)); } catch {}
   }
 
-  function handleEdit(emp: Employee) {
-    setEditing(emp);
-    setAdding(false);
-    setForm({
-      name: emp.name, role: emp.role, specialty: emp.specialty,
-      color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin ?? "",
-      canAdmin: emp.canAdmin ?? false, canManageLeave: emp.canManageLeave ?? false, canManageEvents: emp.canManageEvents ?? false,
-      canManageCerts: emp.canManageCerts ?? false, archived: emp.archived ?? false,
-      canManagePayroll: emp.canManagePayroll ?? false, ptoBalanceHours: emp.ptoBalanceHours ?? 0,
-      sickBalanceHours: emp.sickBalanceHours ?? 0, excludeFromPayroll: emp.excludeFromPayroll ?? false,
-      remoteDays: emp.remoteDays ? { ...emp.remoteDays } : undefined,
-      hireDate: emp.hireDate ?? "", growthBonusEligible: emp.growthBonusEligible ?? false,
-      growthBonusMultiplier: emp.growthBonusMultiplier ?? 1,
-      pvBonusEligible: emp.pvBonusEligible ?? false,
-      netProductionBonusPercent: emp.netProductionBonusPercent ?? 30,
-      hoBonusEligible: emp.hoBonusEligible ?? false,
-      exemptFromPolicySigning: emp.exemptFromPolicySigning ?? false,
-      exemptFromCheckin: emp.exemptFromCheckin ?? false,
-      employmentType: emp.employmentType ?? "full_time",
-      defaultSchedule: { ...emp.defaultSchedule }
-    });
-  }
-
-  async function handleDelete(id: number) {
-    await removeEmployee(id);
-    setConfirmDelete(null);
-    await refresh();
-  }
-
-  async function handleArchiveToggle(emp: Employee) {
-    await setEmployeeArchived(emp.id, !emp.archived);
-    await refresh();
-  }
-
-  async function handleConvertToTemp(emp: Employee) {
-    setConverting(true);
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const validTempRoles = ["Dentist", "RDA", "Assistant", "Front Desk", "Hygienist"];
-    const tempRole = validTempRoles.includes(emp.role) ? emp.role : "Other";
-    const { error } = await supabase.from("temps").insert({
-      id: tempId, name: emp.name, phone: "", email: emp.email ?? "",
-      role: tempRole, skills: emp.skills, rating: 0,
-      notes: `Converted from staff on ${new Date().toLocaleDateString()}`,
-    });
-    if (error) {
-      console.error("convert to temp error:", error);
-      alert("Something went wrong converting this person to a temp. They were not changed.");
-      setConverting(false);
+  async function handleLogin() {
+    let res: Response;
+    try {
+      res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+    } catch {
+      setError(true);
+      setCode("");
       return;
     }
-    await setEmployeeArchived(emp.id, true);
-    setConfirmConvert(null);
-    setConverting(false);
-    await refresh();
+    const result = await res.json();
+    if (result.token) storeSessionToken(result.token);
+    if (result.isSuper) {
+      persist({
+        mode: "super",
+        canAdmin: true, canManageLeave: true, canManageEvents: true, canManageCerts: true, canManagePayroll: true,
+      });
+      return;
+    }
+    if (result.ok && result.employee) {
+      const match = result.employee;
+      persist({
+        mode: "staff",
+        employeeId: match.id, employeeName: match.name, employeeEmail: match.email ?? "", exemptFromPolicySigning: !!match.exemptFromPolicySigning, exemptFromCheckin: !!match.exemptFromCheckin,
+        canAdmin: !!match.canAdmin, canManageLeave: !!match.canManageLeave, canManageEvents: !!match.canManageEvents,
+        canManageCerts: !!match.canManageCerts, canManagePayroll: !!match.canManagePayroll,
+      });
+    } else {
+      setError(true);
+      setCode("");
+    }
   }
 
-  function toggleSkill(skill: string) {
-    setForm((f) => ({
-      ...f,
-      skills: f.skills.includes(skill) ? f.skills.filter((s) => s !== skill) : [...f.skills, skill],
-    }));
+  function logout() {
+    setIdentity(null);
+    clearSessionToken();
+    try { sessionStorage.removeItem(IDENTITY_SESSION_KEY); } catch {}
   }
 
-  function toggleDay(day: typeof DAYS[number]) {
-    setForm((f) => ({ ...f, defaultSchedule: { ...f.defaultSchedule, [day]: !f.defaultSchedule[day] } }));
-  }
+  // Avoid a flash of the lock screen while we check sessionStorage/staff on mount
+  if (!checked || !staffLoaded) return null;
 
-  function toggleRemoteDay(day: typeof DAYS[number]) {
-    setForm((f) => {
-      const current = f.remoteDays ?? { monday: false, tuesday: false, wednesday: false, thursday: false, friday: false };
-      return { ...f, remoteDays: { ...current, [day]: !current[day] } };
-    });
-  }
-
-  async function movePref(dentistId: number, assistantId: number, dir: -1 | 1) {
-    const current = prefs[dentistId] ?? [];
-    const idx = current.indexOf(assistantId);
-    if (idx === -1) return;
-    const next = [...current];
-    const swap = idx + dir;
-    if (swap < 0 || swap >= next.length) return;
-    [next[idx], next[swap]] = [next[swap], next[idx]];
-    await setDentistPrefs(dentistId, next);
-    await refresh();
-  }
-
-  async function initPrefs(dentistId: number) {
-    const assistants = staff.filter((e) => e.skills.includes("Assistant") || e.skills.includes("RDA"));
-    const current = prefs[dentistId] ?? [];
-    const missing = assistants.filter((a) => !current.includes(a.id)).map((a) => a.id);
-    const full = [...current.filter((id) => staff.find((e) => e.id === id)), ...missing];
-    await setDentistPrefs(dentistId, full);
-    await refresh();
-  }
-
-  const dentists = staff.filter((e) => e.role === "Dentist" && !e.archived);
-  const assistants = staff.filter((e) => (e.skills.includes("Assistant") || e.skills.includes("RDA")) && !e.archived);
-  const visibleStaff = staff.filter((e) => (viewFilter === "active" ? !e.archived : e.archived));
-  const activeCount = staff.filter((e) => !e.archived).length;
-  const archivedCount = staff.filter((e) => e.archived).length;
-
-  if (loading) {
+  if (!identity) {
     return (
       <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
         <Sidebar />
-        <div className="lg:ml-64 pt-24 lg:pt-0 flex items-center justify-center min-h-screen">
-          <p className="text-gray-400">Loading staff...</p>
+        <div className="pt-16 lg:pt-0 lg:ml-64 flex items-center justify-center min-h-screen px-4">
+          <div className="rounded-2xl bg-white p-6 sm:p-10 shadow-lg w-full max-w-sm text-center">
+            <div className="text-5xl mb-4">🔐</div>
+            <h1 className="text-2xl font-bold mb-1" style={{ color: "#5a5a5a" }}>Who's this?</h1>
+            <p className="text-gray-400 text-sm mb-8">Enter your personal PIN, or the manager passcode. One login works everywhere in the app.</p>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+              placeholder="Enter PIN or passcode"
+              maxLength={6}
+              className={`w-full rounded-xl border px-4 py-3 text-center text-xl tracking-widest font-bold focus:outline-none mb-3 ${
+                error ? "border-red-300 bg-red-50" : "border-gray-200"
+              }`}
+              style={{ fontSize: 24 }}
+            />
+            {error && <p className="text-red-500 text-sm mb-3">Not recognized.</p>}
+            <button
+              onClick={handleLogin}
+              className="w-full rounded-xl py-3 font-semibold text-white hover:opacity-90"
+              style={{ backgroundColor: "#e8622a" }}
+            >
+              Continue
+            </button>
+          </div>
         </div>
       </main>
     );
   }
 
-  return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
-      <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold" style={{ color: "#5a5a5a" }}>Staff Management</h1>
-            <p className="mt-1 text-gray-400">{activeCount} team members{archivedCount > 0 ? ` · ${archivedCount} archived` : ""}</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setActiveTab("staff")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
-              style={activeTab === "staff" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
-              Staff Directory
-            </button>
-            <button onClick={() => setActiveTab("prefs")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
-              style={activeTab === "prefs" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
-              Dentist Preferences
-            </button>
-          </div>
-        </div>
-
-        {activeTab === "staff" && (
-          <div className="space-y-4">
-            {!adding && !editing && (
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <button onClick={() => { setAdding(true); setEditing(null); setForm(EMPTY_EMP); }}
-                  className="rounded-xl px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition"
-                  style={{ backgroundColor: "#e8622a" }}>
-                  + Add Employee
-                </button>
-                <div className="flex gap-2">
-                  <button onClick={() => setViewFilter("active")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
-                    style={viewFilter === "active" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
-                    Active ({activeCount})
-                  </button>
-                  <button onClick={() => setViewFilter("archived")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
-                    style={viewFilter === "archived" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
-                    Archived ({archivedCount})
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {(adding || editing) && (
-              <div className="rounded-2xl bg-white p-6 shadow space-y-5">
-                <h2 className="text-xl font-bold" style={{ color: "#5a5a5a" }}>{editing ? "Edit Employee" : "Add Employee"}</h2>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-500 mb-1">Name</label>
-                    <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="Full name" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-500 mb-1">Email Address</label>
-                    <input type="email" value={form.email ?? ""} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" placeholder="staff@mydeccandental.com" />
-                  </div>
-                  {isSuperAdmin ? (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500 mb-1">{editing ? "Set New Leave Request PIN" : "Leave Request PIN"}</label>
-                      <div className="flex gap-2">
-                        <input value={form.pin ?? ""} onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
-                          inputMode="numeric" maxLength={4}
-                          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm tracking-widest font-bold focus:outline-none" placeholder={editing ? "Leave blank to keep current PIN" : "4-digit PIN"} />
-                        <button type="button" onClick={() => setForm((f) => ({ ...f, pin: String(Math.floor(1000 + Math.random() * 9000)) }))}
-                          className="flex-shrink-0 rounded-xl border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-500 hover:bg-gray-50">
-                          Random
-                        </button>
-                      </div>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {editing
-                          ? "Used to log in on the Leave Request page. For their security, the current PIN isn't shown here — leave this blank to keep it unchanged, or enter a new one to replace it."
-                          : "Used to log in on the Leave Request page. Leave blank to disable self-service login for this person."}
-                      </p>
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500 mb-1">Leave Request PIN</label>
-                      <p className="text-xs text-gray-400 rounded-xl border border-gray-200 px-3 py-2.5">🔒 Only the super passcode can view or change PINs.</p>
-                    </div>
-                  )}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-500 mb-1">Primary Role</label>
-                    <select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as EmployeeRole, specialty: undefined }))}
-                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none">
-                      {ROLES.map((r) => <option key={r}>{r}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                {isSuperAdmin ? (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-500 mb-2">Access granted (using their PIN)</label>
-                    <div className="flex flex-wrap gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={form.canAdmin ?? false} onChange={(e) => setForm((f) => ({ ...f, canAdmin: e.target.checked }))} />
-                        <span className="text-sm text-gray-600">Admin (Schedule Builder, Availability, Staff, Temp Staff, Holidays)</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={form.canManageLeave ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageLeave: e.target.checked }))} />
-                        <span className="text-sm text-gray-600">Leave Management</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={form.canManageEvents ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageEvents: e.target.checked }))} />
-                        <span className="text-sm text-gray-600">Events</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={form.canManageCerts ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageCerts: e.target.checked }))} />
-                        <span className="text-sm text-gray-600">Certifications (all staff + business licenses)</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={form.canManagePayroll ?? false} onChange={(e) => setForm((f) => ({ ...f, canManagePayroll: e.target.checked }))} />
-                        <span className="text-sm text-gray-600">Payroll Dashboard</span>
-                      </label>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">Their PIN unlocks these areas, in addition to the shared super passcode.</p>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-gray-200 px-3 py-2.5">
-                    <p className="text-xs text-gray-400">🔒 Only the super passcode can view or change access permissions.</p>
-                  </div>
-                )}
-
-                <div>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={form.excludeFromPayroll ?? false} onChange={(e) => setForm((f) => ({ ...f, excludeFromPayroll: e.target.checked }))} />
-                    <span className="text-sm font-medium text-gray-700">Exclude from Payroll Dashboard (e.g. a practice owner not paid through this system)</span>
-                  </label>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2 rounded-xl bg-slate-50 p-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-500 mb-1">Hire Date</label>
-                    <input type="date" value={form.hireDate ?? ""} onChange={(e) => setForm((f) => ({ ...f, hireDate: e.target.value }))}
-                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" />
-                    <p className="text-xs text-gray-400 mt-1">Used for the Growth Bonus's 5-month new-hire grace period.</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-500 mb-1">Employment Type</label>
-                    <div className="flex rounded-xl border border-gray-200 overflow-hidden w-fit">
-                      <button type="button" onClick={() => setForm((f) => ({ ...f, employmentType: "full_time" }))}
-                        className="px-3 py-1.5 text-sm font-medium transition"
-                        style={(form.employmentType ?? "full_time") === "full_time" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
-                        Full-Time
-                      </button>
-                      <button type="button" onClick={() => setForm((f) => ({ ...f, employmentType: "part_time" }))}
-                        className="px-3 py-1.5 text-sm font-medium transition"
-                        style={form.employmentType === "part_time" ? { backgroundColor: "#e8622a", color: "white" } : { color: "#6b7280" }}>
-                        Part-Time
-                      </button>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">Part-time staff are excluded from full-time-only timelines like PTO eligibility.</p>
-                  </div>
-                  <div>
-                    <label className="flex items-center gap-2 cursor-pointer mb-1">
-                      <input type="checkbox" checked={form.growthBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, growthBonusEligible: e.target.checked }))} />
-                      <span className="text-sm font-medium text-gray-700">Eligible for Growth Bonus</span>
-                    </label>
-                    {form.growthBonusEligible && (
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs text-gray-500">Point multiplier</label>
-                        <input type="number" onFocus={(e) => e.target.select()} step="0.1" value={form.growthBonusMultiplier ?? 1}
-                          onChange={(e) => setForm((f) => ({ ...f, growthBonusMultiplier: Number(e.target.value) }))}
-                          className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none" />
-                      </div>
-                    )}
-                    <p className="text-xs text-gray-400 mt-1">Owner, contractors (e.g. Dr. Ho), and temps stay unchecked — they're not part of this program.</p>
-                    <label className="flex items-center gap-2 cursor-pointer mt-3">
-                      <input type="checkbox" checked={form.pvBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, pvBonusEligible: e.target.checked }))} />
-                      <span className="text-sm font-medium text-gray-700">Eligible for Net Production Based Bonus</span>
-                    </label>
-                    {form.pvBonusEligible && (
-                      <div className="flex items-center gap-2 mt-1">
-                        <label className="text-xs text-gray-500">Percentage of net production</label>
-                        <input type="number" onFocus={(e) => e.target.select()} step="1" value={form.netProductionBonusPercent ?? 30}
-                          onChange={(e) => setForm((f) => ({ ...f, netProductionBonusPercent: Number(e.target.value) }))}
-                          className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none" />
-                        <span className="text-xs text-gray-500">%</span>
-                      </div>
-                    )}
-                    <label className="flex items-center gap-2 cursor-pointer mt-3">
-                      <input type="checkbox" checked={form.hoBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, hoBonusEligible: e.target.checked }))} />
-                      <span className="text-sm font-medium text-gray-700">Eligible for Dr. Ho-style Compensation (monthly, paid the following month)</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer mt-3">
-                      <input type="checkbox" checked={form.exemptFromPolicySigning ?? false} onChange={(e) => setForm((f) => ({ ...f, exemptFromPolicySigning: e.target.checked }))} />
-                      <span className="text-sm font-medium text-gray-700">Exempt from Handbook / Arbitration signing (e.g. independent contractors)</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer mt-3">
-                      <input type="checkbox" checked={form.exemptFromCheckin ?? false} onChange={(e) => setForm((f) => ({ ...f, exemptFromCheckin: e.target.checked }))} />
-                      <span className="text-sm font-medium text-gray-700">Exempt from 6-month check-ins (e.g. the person conducting them)</span>
-                    </label>
-                  </div>
-                </div>
-
-                {form.role === "Dentist" && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-500 mb-1">Specialty</label>
-                    <select value={form.specialty ?? "General Dentist"}
-                      onChange={(e) => setForm((f) => ({ ...f, specialty: e.target.value as DentistSpecialty }))}
-                      className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none">
-                      {SPECIALTIES.map((s) => <option key={s}>{s}</option>)}
-                    </select>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-2">Skills</label>
-                  <div className="flex flex-wrap gap-2">
-                    {ALL_SKILLS.map((s) => (
-                      <button key={s} onClick={() => toggleSkill(s)} className="rounded-full border px-3 py-1 text-xs font-medium transition"
-                        style={form.skills.includes(s) ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-2">Default Schedule</label>
-                  <div className="flex gap-2">
-                    {DAYS.map((day, i) => (
-                      <button key={day} onClick={() => toggleDay(day)}
-                        className="flex-1 rounded-lg py-2 text-xs font-semibold transition"
-                        style={form.defaultSchedule[day] ? { backgroundColor: "#e8622a", color: "white" } : { background: "#f1f5f9", color: "#9ca3af" }}>
-                        {DAY_LABELS[i]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-2">Remote Days</label>
-                  <div className="flex gap-2">
-                    {DAYS.map((day, i) => (
-                      <button key={day} onClick={() => toggleRemoteDay(day)}
-                        className="flex-1 rounded-lg py-2 text-xs font-semibold transition"
-                        style={form.remoteDays?.[day] ? { backgroundColor: "#0d9488", color: "white" } : { background: "#f1f5f9", color: "#9ca3af" }}>
-                        {DAY_LABELS[i]}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1">Works remotely on these days — even if the office itself is closed (e.g. a normally-closed Tuesday). Shows automatically on Availability without needing to be marked each week.</p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-2">Color</label>
-                  <div className="flex flex-wrap gap-2">
-                    {COLORS.map((c) => (
-                      <button key={c} onClick={() => setForm((f) => ({ ...f, color: c }))}
-                        className="h-8 w-8 rounded-full transition"
-                        style={{ backgroundColor: c, outline: form.color === c ? `3px solid ${c}` : "none", outlineOffset: "2px" }} />
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button onClick={handleSave} className="rounded-xl px-5 py-2 text-sm font-semibold text-white hover:opacity-90 transition"
-                    style={{ backgroundColor: "#e8622a" }}>
-                    {editing ? "Save Changes" : "Add Employee"}
-                  </button>
-                  <button onClick={() => { setEditing(null); setAdding(false); }}
-                    className="rounded-xl border border-gray-200 px-5 py-2 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition">
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {visibleStaff.map((emp) => (
-                <div key={emp.id} className="rounded-2xl bg-white p-5 shadow" style={emp.archived ? { opacity: 0.6 } : undefined}>
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full flex items-center justify-center text-white font-bold"
-                        style={{ backgroundColor: emp.color }}>
-                        {emp.name.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="font-semibold flex items-center gap-1.5" style={{ color: "#5a5a5a" }}>
-                          {emp.name}
-                          {emp.archived && <span className="rounded-full bg-slate-100 text-slate-500 text-xs font-medium px-2 py-0.5">Archived</span>}
-                        </div>
-                        {emp.email && <div className="text-xs text-gray-400">{emp.email}</div>}
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {emp.role === "Dentist" ? (
-                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role]}`}>
-                              {emp.specialty ?? "Dentist"}
-                            </span>
-                          ) : (
-                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${ROLE_COLORS[emp.role] ?? "bg-slate-100 text-slate-600"}`}>
-                              {emp.role}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <div className="flex gap-1">
-                        <button onClick={() => handleEdit(emp)}
-                          className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition">
-                          Edit
-                        </button>
-                        {confirmDelete === emp.id ? (
-                          <div className="flex gap-1">
-                            <button onClick={() => handleDelete(emp.id)}
-                              className="rounded-lg px-2 py-1 text-xs bg-red-100 text-red-600 hover:bg-red-200 transition">
-                              Confirm
-                            </button>
-                            <button onClick={() => setConfirmDelete(null)}
-                              className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 transition">
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <button onClick={() => setConfirmDelete(emp.id)}
-                            className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-red-50 hover:text-red-500 transition">
-                            Remove
-                          </button>
-                        )}
-                      </div>
-                      <button onClick={() => handleArchiveToggle(emp)}
-                        className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition">
-                        {emp.archived ? "Restore" : "Archive"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {emp.skills.length > 1 && (
-                    <div className="mb-3 flex flex-wrap gap-1">
-                      {emp.skills.map((s) => (
-                        <span key={s} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{s}</span>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="flex gap-1 mb-3">
-                    {DAYS.map((day, i) => {
-                      const works = emp.defaultSchedule[day];
-                      return (
-                        <div key={day} className="flex-1 rounded py-1 text-center text-xs font-semibold"
-                          style={works ? { backgroundColor: emp.color, color: "white" } : { background: "#f1f5f9", color: "#cbd5e1" }}>
-                          {DAY_LABELS[i]}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {!emp.archived && (
-                    confirmConvert === emp.id ? (
-                      <div className="flex items-center justify-between rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
-                        <span className="text-xs text-amber-700">Convert to temp and archive this person?</span>
-                        <div className="flex gap-1 flex-shrink-0">
-                          <button onClick={() => handleConvertToTemp(emp)} disabled={converting}
-                            className="rounded-lg px-2 py-1 text-xs bg-amber-100 text-amber-700 hover:bg-amber-200 transition disabled:opacity-50">
-                            {converting ? "Converting…" : "Confirm"}
-                          </button>
-                          <button onClick={() => setConfirmConvert(null)}
-                            className="rounded-lg px-2 py-1 text-xs text-amber-600 hover:bg-amber-100 transition">
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button onClick={() => setConfirmConvert(emp.id)}
-                        className="text-xs text-slate-400 hover:text-slate-600 underline">
-                        Convert to temp →
-                      </button>
-                    )
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {activeTab === "prefs" && (
-          <div className="space-y-6">
-            <p className="text-gray-400 text-sm">Set the preferred assistant/RDA order for each dentist. Use ↑↓ to reorder.</p>
-            {dentists.map((dentist) => {
-              const prefIds = prefs[dentist.id];
-              if (!prefIds) {
-                return (
-                  <div key={dentist.id} className="rounded-2xl bg-white p-6 shadow">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-3">
-                        <div className="h-9 w-9 rounded-full flex items-center justify-center text-white font-bold text-sm"
-                          style={{ backgroundColor: dentist.color }}>
-                          {dentist.name.charAt(0)}
-                        </div>
-                        <div>
-                          <span className="font-semibold" style={{ color: "#5a5a5a" }}>{dentist.name}</span>
-                          {dentist.specialty && <span className="ml-2 text-xs text-gray-400">{dentist.specialty}</span>}
-                        </div>
-                      </div>
-                      <button onClick={() => initPrefs(dentist.id)}
-                        className="rounded-lg px-3 py-1.5 text-sm font-medium transition"
-                        style={{ backgroundColor: "#fff0eb", color: "#e8622a" }}>
-                        Set Preferences
-                      </button>
-                    </div>
-                    <p className="text-sm text-gray-400">No preferences set — click to configure.</p>
-                  </div>
-                );
-              }
-
-              const orderedAssistants = prefIds.map((id) => assistants.find((a) => a.id === id)).filter(Boolean) as Employee[];
-
-              return (
-                <div key={dentist.id} className="rounded-2xl bg-white p-6 shadow">
-                  <div className="flex items-center gap-3 mb-5">
-                    <div className="h-9 w-9 rounded-full flex items-center justify-center text-white font-bold text-sm"
-                      style={{ backgroundColor: dentist.color }}>
-                      {dentist.name.charAt(0)}
-                    </div>
-                    <div>
-                      <span className="font-semibold" style={{ color: "#5a5a5a" }}>{dentist.name}</span>
-                      {dentist.specialty && <span className="ml-2 text-xs text-gray-400">{dentist.specialty}</span>}
-                    </div>
-                    <span className="text-xs text-gray-300 ml-1">— Assistant/RDA priority order</span>
-                  </div>
-                  <div className="space-y-2">
-                    {orderedAssistants.map((asst, idx) => (
-                      <div key={asst.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                        <span className="w-6 text-center text-sm font-bold text-gray-300">{idx + 1}</span>
-                        <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: asst.color }} />
-                        <span className="flex-1 text-sm font-medium" style={{ color: "#5a5a5a" }}>{asst.name}</span>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full mr-2 ${ROLE_COLORS[asst.role] ?? "bg-gray-100 text-gray-500"}`}>
-                          {asst.role}
-                        </span>
-                        <div className="flex gap-1">
-                          <button onClick={() => movePref(dentist.id, asst.id, -1)} disabled={idx === 0}
-                            className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-200 disabled:opacity-30 transition">↑</button>
-                          <button onClick={() => movePref(dentist.id, asst.id, 1)} disabled={idx === orderedAssistants.length - 1}
-                            className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-200 disabled:opacity-30 transition">↓</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </main>
-  );
-}
-
-export default function StaffPage() {
-  return (
-    <AppIdentityGate>
-      {(identity, logout) => identity.canAdmin
-        ? <StaffPageBody isSuperAdmin={identity.mode === "super"} />
-        : <AccessDenied logout={logout} />}
-    </AppIdentityGate>
-  );
+  return <>{children(identity, logout)}</>;
 }
