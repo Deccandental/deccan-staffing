@@ -168,12 +168,17 @@ export interface CeCourseEntry {
   courseName: string;
   hours: number;
   dateCompleted: string;
+  // The course completion certificate. Optional, so a course can still be
+  // logged straight away and the certificate attached later.
+  fileUrl?: string | null;
+  fileName?: string | null;
 }
 
 function fromCeRow(row: any): CeCourseEntry {
   return {
     id: row.id, employeeId: row.employee_id, requiredCertTypeId: row.required_cert_type_id,
     courseName: row.course_name, hours: row.hours, dateCompleted: row.date_completed,
+    fileUrl: row.file_url ?? null, fileName: row.file_name ?? null,
   };
 }
 
@@ -193,6 +198,7 @@ export async function addCeCourseEntry(input: Omit<CeCourseEntry, "id">): Promis
   const { error } = await supabase.from("ce_course_entries").insert({
     employee_id: input.employeeId, required_cert_type_id: input.requiredCertTypeId,
     course_name: input.courseName, hours: input.hours, date_completed: input.dateCompleted,
+    file_url: input.fileUrl ?? null, file_name: input.fileName ?? null,
   });
   if (error) { console.error("addCeCourseEntry error:", error); return { ok: false, error: error.message }; }
   return { ok: true };
