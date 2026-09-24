@@ -88,6 +88,14 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const isManager = identity.canAdmin;
   const [staff, setStaff] = useState<Employee[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(identity.mode === "staff" ? (identity.employeeId ?? null) : null);
+  // Compensation is visible on your OWN dashboard always, but on someone
+  // else's only to people with payroll permission. Plain canAdmin lets a
+  // manager view other dashboards (schedules, certs, leave) without that
+  // also exposing everyone's bonus figures.
+  const canSeeThisPersonsPay =
+    identity.mode === "super" ||
+    identity.canManagePayroll ||
+    (identity.employeeId != null && identity.employeeId === selectedId);
   const [shifts, setShifts] = useState<UpcomingShift[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [certs, setCerts] = useState<Certification[]>([]);
@@ -222,9 +230,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   // Events asking for an RSVP that this person hasn't answered yet. Only
   // counted when viewing your own dashboard — a manager looking at someone
   // else's shouldn't be prompted to answer on their behalf.
-  const pendingRsvpCount = identity.employeeId === selectedId
-    ? events.filter((ev) => ev.rsvpEnabled && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId)).length
-    : 0;
+  const pendingRsvpCount = selectedId == null ? 0
+    : events.filter((ev) => ev.rsvpEnabled && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId)).length;
+  const viewingOwnDashboard = identity.employeeId != null && identity.employeeId === selectedId;
 
   // Titles already covered by the requirement lists above, so they aren't
   // repeated in the documents list below.
@@ -524,7 +532,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   }} className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FAEEDA", border: "1.5px solid #D9891A" }}>
                     <span style={{ fontSize: 18 }}>📌</span>
                     <span style={{ fontSize: 17, fontWeight: 700, color: "#854F0B", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
-                      {pendingRsvpCount} event{pendingRsvpCount !== 1 ? "s" : ""} awaiting your rsvp
+                      {pendingRsvpCount} event{pendingRsvpCount !== 1 ? "s" : ""} awaiting {viewingOwnDashboard ? "your" : "their"} rsvp
                     </span>
                   </button>
                 )}
@@ -561,7 +569,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
-            {selectedEmployee?.growthBonusEligible && showBonusCountdown && (
+            {canSeeThisPersonsPay && selectedEmployee?.growthBonusEligible && showBonusCountdown && (
               <div className="rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #e0e7ff, #c7d2fe)" }}>
                 <span className="text-lg">⏳</span>
                 <p className="text-xs text-slate-700 leading-snug">
@@ -571,7 +579,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
-            {selectedEmployee?.growthBonusEligible && !showBonusCountdown && (
+            {canSeeThisPersonsPay && selectedEmployee?.growthBonusEligible && !showBonusCountdown && (
               <div className="lg:col-span-3 rounded-2xl p-6" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)", boxShadow: bonusUnlocked ? "0 8px 24px rgba(16,185,129,0.2)" : "0 8px 24px rgba(245,158,11,0.2)" }}>
                 <div className="text-center mb-4">
                   <p className="text-sm font-semibold" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
@@ -636,7 +644,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
-            {selectedEmployee?.pvBonusEligible && (
+            {canSeeThisPersonsPay && selectedEmployee?.pvBonusEligible && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
                 <div className="p-4 pb-2">
                   <h2 className="font-bold text-slate-700">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
@@ -727,7 +735,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
-            {isHygienist && (
+            {canSeeThisPersonsPay && isHygienist && (
               <div className="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
                 <h2 className="font-bold text-slate-700 mb-2">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
                 <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
@@ -800,13 +808,13 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               ) : (
                 <div className="space-y-1.5 max-h-80 overflow-y-auto">
                   {[...events].sort((a, b) => {
-                    const needsA = a.rsvpEnabled && identity.employeeId === selectedId && !rsvps.some((r) => r.eventId === a.id && r.employeeId === selectedId);
-                    const needsB = b.rsvpEnabled && identity.employeeId === selectedId && !rsvps.some((r) => r.eventId === b.id && r.employeeId === selectedId);
+                    const needsA = a.rsvpEnabled && !rsvps.some((r) => r.eventId === a.id && r.employeeId === selectedId);
+                    const needsB = b.rsvpEnabled && !rsvps.some((r) => r.eventId === b.id && r.employeeId === selectedId);
                     if (needsA !== needsB) return needsA ? -1 : 1;
                     return a.date.localeCompare(b.date);
                   }).map((ev) => (
                     <div key={ev.id} id={`event-${ev.id}`} className="rounded-xl px-3 py-2"
-                      style={ev.rsvpEnabled && identity.employeeId === selectedId && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId)
+                      style={ev.rsvpEnabled && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId)
                         // Awaiting your reply — outlined so it reads as needing
                         // action, matching the amber alert pill above.
                         ? { background: "#FAEEDA", border: "1.5px solid #D9891A" }
@@ -997,7 +1005,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
             </div>
 
-            {selectedEmployee?.hoBonusEligible && (
+            {canSeeThisPersonsPay && selectedEmployee?.hoBonusEligible && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
                 <div className="p-4 pb-2">
                   <h2 className="font-bold text-slate-700">💰 {bonusYear} Compensation — 40% of Production, paid the following month</h2>
