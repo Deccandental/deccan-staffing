@@ -1144,6 +1144,15 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
             <label className="block text-sm text-slate-800 font-semibold mb-1">90+ days</label>
             <input type="number" onFocus={(e) => e.target.select()} value={ar90plus} onChange={(e) => setAr90plus(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
           </div>
+          <div className="sm:col-span-4">
+            <label className="block text-sm text-slate-800 font-semibold mb-1">Total A/R <span className="text-slate-400 font-normal">(auto: the four buckets added up)</span></label>
+            <div className="w-full rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 text-sm font-semibold text-slate-700">
+              {(() => {
+                const t = (ar0to30 ? Number(ar0to30) : 0) + (ar31to60 ? Number(ar31to60) : 0) + (ar61to90 ? Number(ar61to90) : 0) + (ar90plus ? Number(ar90plus) : 0);
+                return t > 0 ? `$${formatMoney(t)}` : "—";
+              })()}
+            </div>
+          </div>
         </div>
         {(() => {
           const rawTotal = (ar0to30 ? Number(ar0to30) : 0) + (ar31to60 ? Number(ar31to60) : 0) + (ar61to90 ? Number(ar61to90) : 0) + (ar90plus ? Number(ar90plus) : 0);
@@ -1152,10 +1161,16 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
           const insNum = arInsuranceEstimate ? Number(arInsuranceEstimate) : 0;
           const patientEstimate = trueAr - insNum;
           return (
-            <div className="grid gap-3 sm:grid-cols-3 mb-4">
+            <div className="grid gap-3 sm:grid-cols-4 mb-4">
               <div>
                 <label className="block text-sm text-slate-800 font-semibold mb-1">W/O Estimate <span className="text-slate-400 font-normal">(write-offs)</span></label>
                 <input type="number" onFocus={(e) => e.target.select()} value={arWoEstimate} onChange={(e) => setArWoEstimate(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-800 font-semibold mb-1">True A/R <span className="text-slate-400 font-normal">(auto: Total − W/O)</span></label>
+                <div className="w-full rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 text-sm font-semibold text-slate-700">
+                  {rawTotal > 0 ? `$${formatMoney(trueAr)}` : "—"}
+                </div>
               </div>
               <div>
                 <label className="block text-sm text-slate-800 font-semibold mb-1">Insurance Estimate</label>
