@@ -8,7 +8,7 @@ import { getWeekday } from "@/lib/dateUtils";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { loadSchedule, saveDaySchedule, MonthSchedule, AssistantOverrides } from "@/lib/scheduleStore";
-import { resolveDentistAssistants, getDentistSlotOverrides } from "@/lib/assistantSlots";
+import { resolveDentistAssistants, getDentistSlotOverrides, isOnApprovedLeave } from "@/lib/assistantSlots";
 import { loadHolidays, Holiday } from "@/lib/holidays";
 import { loadLeaveRequests } from "@/lib/leaveStore";
 import { LeaveRequest } from "@/types/leave";
@@ -560,6 +560,7 @@ export default function ScheduleBuilder() {
                 onHygienistOverrideChange={handleHygienistOverrideChange}
                 onTempAssignmentsChange={handleTempAssignmentsChange}
                 frontDeskRequired={frontDeskRequired}
+                leaveRequests={leaveRequests}
               />
             </div>
           ) : (
@@ -644,13 +645,25 @@ export default function ScheduleBuilder() {
                   }).filter(Boolean) as Employee[] : [];
 
                   const status = dayStatuses[day.date];
+                  const onLeaveToday = [
+                    ...(resolvedDentists?.flatMap(({ dentist, assistants }) => [dentist, ...assistants]) ?? []),
+                    ...resolvedHygienists,
+                  ].filter((p) => isOnApprovedLeave(p.id, day.date, leaveRequests));
+                  const hasLeaveConflict = onLeaveToday.length > 0;
                   const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
                   return (
-                    <tr key={day.date} className="border-b hover:bg-slate-50 cursor-pointer" onClick={() => { handleSelectDate(day.date); setView("build"); }}>
+                    <tr key={day.date} className="border-b hover:bg-slate-50 cursor-pointer"
+                      style={hasLeaveConflict ? { background: "#FAEEDA" } : undefined}
+                      onClick={() => { handleSelectDate(day.date); setView("build"); }}>
                       <td className="p-4 font-medium">
                         {dateLabel}
                         {day.isTuesday && <span className="ml-2 rounded-full bg-blue-100 text-blue-600 text-xs px-1.5 py-0.5">Tue</span>}
                         {day.isHoliday && <span className="ml-2 rounded-full bg-red-100 text-red-600 text-xs px-1.5 py-0.5">{day.holidayName}</span>}
+                        {hasLeaveConflict && (
+                          <div className="mt-1 text-xs font-semibold" style={{ color: "#854F0B" }}>
+                            ⚠️ {onLeaveToday.map((p) => p.name).join(", ")} on approved leave
+                          </div>
+                        )}
                       </td>
                       <td className="p-4">
                         {resolvedDentists?.map(({ dentist, assistants }) => (
