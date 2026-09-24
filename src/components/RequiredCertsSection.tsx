@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Employee } from "@/types/employee";
-import { Certification, NewCertInput, createCertification, updateCertification } from "@/lib/certsStore";
+import { Certification, NewCertInput, createCertification, updateCertification, uploadCertFile } from "@/lib/certsStore";
 import {
   RequiredCertType, RequiredCertRole, CeCourseEntry,
   addCeCourseEntry, deleteCeCourseEntry, computeRequiredCertStatuses, addMonths,
@@ -42,6 +42,8 @@ export function RequiredCertsSection({
   const [ceCourseName, setCeCourseName] = useState("");
   const [ceHours, setCeHours] = useState("");
   const [ceDate, setCeDate] = useState(new Date().toISOString().slice(0, 10));
+  const [ceFile, setCeFile] = useState<File | null>(null);
+  const [ceUploading, setCeUploading] = useState(false);
   const [ceError, setCeError] = useState<string | null>(null);
   const [expandedTypeId, setExpandedTypeId] = useState<string | null>(null);
   const [completingTypeId, setCompletingTypeId] = useState<string | null>(null);
@@ -63,11 +65,24 @@ export function RequiredCertsSection({
   async function handleLogCe(typeId: string) {
     const hours = Number(ceHours);
     if (!ceCourseName.trim() || !ceDate || isNaN(hours) || hours <= 0) { setCeError("Please enter a course name, hours, and date."); return; }
-    const result = await addCeCourseEntry({ employeeId: employee.id, requiredCertTypeId: typeId, courseName: ceCourseName.trim(), hours, dateCompleted: ceDate });
+    // Upload the completion certificate first, so a failed upload doesn't
+    // leave a logged course pointing at a file that never arrived.
+    let fileUrl: string | null = null;
+    let fileName: string | null = null;
+    if (ceFile) {
+      setCeUploading(true);
+      const upload = await uploadCertFile(ceFile);
+      setCeUploading(false);
+      if ("error" in upload) { setCeError(upload.error); return; }
+      fileUrl = upload.url;
+      fileName = upload.name;
+    }
+    const result = await addCeCourseEntry({ employeeId: employee.id, requiredCertTypeId: typeId, courseName: ceCourseName.trim(), hours, dateCompleted: ceDate, fileUrl, fileName });
     if (!result.ok) { setCeError(result.error ?? "Failed to save."); return; }
     setCeError(null);
     setCeCourseName("");
     setCeHours("");
+    setCeFile(null);
     setLoggingTypeId(null);
     await refreshAll();
   }
@@ -138,7 +153,14 @@ export function RequiredCertsSection({
                     <input type="text" value={ceCourseName} onChange={(e) => setCeCourseName(e.target.value)} placeholder="Course name" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
                     <input type="number" onFocus={(e) => e.target.select()} value={ceHours} onChange={(e) => setCeHours(e.target.value)} placeholder="Hours" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                     <input type="date" value={ceDate} onChange={(e) => setCeDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                    <button onClick={() => handleLogCe(type.id)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white sm:col-span-4 justify-self-start" style={{ backgroundColor: "#e8622a" }}>Save Course</button>
+                    <div className="sm:col-span-4">
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Completion certificate</label>
+                      <input type="file" accept="image/*,application/pdf" onChange={(e) => setCeFile(e.target.files?.[0] ?? null)}
+                        className="w-full text-xs text-slate-500 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-slate-600" />
+                    </div>
+                    <button onClick={() => handleLogCe(type.id)} disabled={ceUploading} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white sm:col-span-4 justify-self-start disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                      {ceUploading ? "Uploading…" : "Save Course"}
+                    </button>
                     {ceError && <p className="text-xs text-red-600 sm:col-span-4">{ceError}</p>}
                   </div>
                 )}
@@ -146,7 +168,12 @@ export function RequiredCertsSection({
                   <div className="mt-2 space-y-1">
                     {myEntries.map((e) => (
                       <div key={e.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-3 py-1.5">
-                        <span style={{ color: "rgba(74,66,56,0.7)" }}>{e.courseName} — {e.hours} hrs — {new Date(e.dateCompleted + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                        <span style={{ color: "rgba(74,66,56,0.7)" }}>
+                          {e.courseName} — {e.hours} hrs — {new Date(e.dateCompleted + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          {e.fileUrl && (
+                            <a href={e.fileUrl} target="_blank" rel="noopener noreferrer" className="ml-2 text-xs font-semibold hover:underline" style={{ color: "#185FA5" }}>View file →</a>
+                          )}
+                        </span>
                         <button onClick={() => handleDeleteCe(e.id)} className="text-red-400 hover:underline">Delete</button>
                       </div>
                     ))}
