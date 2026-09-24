@@ -31,6 +31,25 @@ export async function createSlot(date: string, time: string): Promise<{ ok: bool
   return { ok: true };
 }
 
+// Records a check-in that already happened — an impromptu one, or any
+// conversation held without booking a slot first. Creating a slot and then
+// claiming it doesn't work for past dates, because open slots are only
+// listed from today onwards, so a past slot is never claimable. This
+// writes the finished record in one step instead.
+export async function logPastCheckin(
+  date: string, time: string, employeeId: number, employeeName: string, notes: string
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("checkin_slots").insert({
+    date, time,
+    claimed_by_employee_id: employeeId,
+    claimed_by_name: employeeName,
+    notes,
+    completed: true,
+  });
+  if (error) { console.error("logPastCheckin error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
 export async function claimSlot(slotId: string, employeeId: number, employeeName: string, notes: string): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("checkin_slots")
     .update({ claimed_by_employee_id: employeeId, claimed_by_name: employeeName, notes })
