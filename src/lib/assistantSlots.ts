@@ -82,3 +82,25 @@ export function resolveFloater(
   if (floaterAssistantId == null) return null;
   return staff.find((e) => e.id === floaterAssistantId) ?? null;
 }
+
+/**
+ * Whether someone has full-day approved leave covering a given date.
+ *
+ * Manual slot overrides deliberately bypass the assignment engine's
+ * availability checks — "put this person here" should mean what it says.
+ * But that also means an override can silently outlive an approval made
+ * afterwards, so callers use this to decide what to do about it: the
+ * schedule builder flags the clash for whoever manages the rota, while
+ * staff-facing views hide the person entirely rather than show a shift
+ * they aren't actually working.
+ */
+export function isOnApprovedLeave(
+  employeeId: number,
+  date: string,
+  leaveRequests: { employeeId: number; status: string; isPartialDay?: boolean; startDate: string; endDate: string }[]
+): boolean {
+  return leaveRequests.some((r) =>
+    r.employeeId === employeeId && r.status === "approved" && !r.isPartialDay &&
+    r.startDate <= date && r.endDate >= date
+  );
+}
