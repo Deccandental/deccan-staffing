@@ -7,6 +7,7 @@ import { Employee } from "@/types/employee";
 import { LeaveReason, LeaveRequest } from "@/types/leave";
 import { addLeaveRequest, loadLeaveRequests, cancelLeaveRequest, deleteLeaveRequest, countBusinessDays, validateNoticePeriod, isPaidLeaveReason, computeDefaultPaidHours } from "@/lib/leaveStore";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
+import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
@@ -41,6 +42,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
   const isManager = identity.canManageLeave;
   const [staff, setStaff] = useState<Employee[]>([]);
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
+  const [leaveEvents, setLeaveEvents] = useState<StaffEvent[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
   const [view, setView] = useState<"request" | "my" | "calendar" | "all">("request");
   const [submitted, setSubmitted] = useState(false);
@@ -84,9 +86,11 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
   }, [view]);
 
   async function refresh() {
-    const [r, o] = await Promise.all([loadLeaveRequests(), getOverrides()]);
+    const todayStr = new Date().toISOString().split("T")[0];
+    const [r, o, ev] = await Promise.all([loadLeaveRequests(), getOverrides(), loadUpcomingEvents(todayStr)]);
     setRequests(r);
     setOverrides(o);
+    setLeaveEvents(ev);
   }
 
   const selectedEmployee = staff.find((e) => e.id === Number(form.employeeId));
@@ -116,20 +120,74 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
     return `${selectedEmployee.name} isn't yet eligible for PTO — eligibility begins in ${daysLeft} day${daysLeft === 1 ? "" : "s"} (${dateLabel}). This request may not be approved.`;
   }, [selectedEmployee, form.reason]);
 
+  // Who can actually cover for this person. Roles alone are too blunt:
+  // a Prosthodontist who also does general dentistry overlaps with a
+  // General Dentist, and Front Desk is covered by assistants pulled from
+  // the back — so shared *skills* describe real coverage better than a
+  // matching job title.
   const conflictWarning = useMemo(() => {
     if (!selectedEmployee || !form.startDate || !form.endDate) return "";
+
+    const mySkills = new Set(selectedEmployee.skills ?? []);
+    const sharesCoverage = (other: Employee) => {
+      // Anyone sharing a skill with them can cover some of their work.
+      if ((other.skills ?? []).some((s) => mySkills.has(s))) return true;
+      // Fall back to role for anyone whose skills aren't filled in.
+      return other.role === selectedEmployee.role;
+    };
+
     const overlapping = requests.filter((r) => {
       if (r.status !== "approved" || r.employeeId === selectedEmployee.id) return false;
       if (!(r.startDate <= form.endDate && r.endDate >= form.startDate)) return false;
       const other = staff.find((e) => e.id === r.employeeId);
-      if (!other || other.role !== selectedEmployee.role) return false;
-      if (selectedEmployee.role === "Dentist" && other.specialty !== selectedEmployee.specialty) return false;
-      return true;
+      return !!other && !other.archived && sharesCoverage(other);
     });
-    if (overlapping.length === 0) return "";
-    const designation = selectedEmployee.role === "Dentist" && selectedEmployee.specialty ? selectedEmployee.specialty : selectedEmployee.role;
-    return `${overlapping.length} other ${designation}${overlapping.length !== 1 ? "s" : ""} already approved for leave during this period. This may cause understaffing — please reconsider your dates, or understand this request may not be approved.`;
+
+    const messages: string[] = [];
+
+    if (overlapping.length > 0) {
+      const names = overlapping
+        .map((r) => staff.find((e) => e.id === r.employeeId)?.name)
+        .filter(Boolean)
+        .join(", ");
+      messages.push(`${names} already approved for leave during this period — this may leave us short on coverage. Please reconsider your dates, or understand this request may not be approved.`);
+    }
+
+    // Front Desk absences are covered by pulling an assistant from the
+    // back, so a Front Desk request while assistants are already out is a
+    // second, separate squeeze worth flagging.
+    const coversFrontDesk = mySkills.has("Front Desk") || selectedEmployee.role === "Front Desk";
+    if (coversFrontDesk) {
+      const assistantsOut = requests.filter((r) => {
+        if (r.status !== "approved" || r.employeeId === selectedEmployee.id) return false;
+        if (!(r.startDate <= form.endDate && r.endDate >= form.startDate)) return false;
+        const other = staff.find((e) => e.id === r.employeeId);
+        if (!other || other.archived) return false;
+        return (other.skills ?? []).some((s) => s === "Assistant" || s === "RDA") || other.role === "Assistant" || other.role === "RDA";
+      });
+      if (assistantsOut.length > 0) {
+        const names = assistantsOut
+          .map((r) => staff.find((e) => e.id === r.employeeId)?.name)
+          .filter(Boolean)
+          .join(", ");
+        messages.push(`Front desk is normally covered by pulling an assistant from the back, but ${names} ${assistantsOut.length === 1 ? "is" : "are"} also off during this period — coverage may be tight.`);
+      }
+    }
+
+    return messages.join(" ");
   }, [selectedEmployee, form.startDate, form.endDate, requests, staff]);
+
+  // Practice events landing inside the requested dates — especially
+  // mandatory ones, which they'd be missing by taking this leave.
+  const eventConflictWarning = useMemo(() => {
+    if (!form.startDate || !form.endDate) return "";
+    const clashing = leaveEvents.filter((ev) => ev.date >= form.startDate && ev.date <= form.endDate);
+    if (clashing.length === 0) return "";
+    const describe = (ev: StaffEvent) =>
+      `${ev.title}${ev.mandatory ? " (mandatory)" : ""} on ${new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+    const anyMandatory = clashing.some((ev) => ev.mandatory);
+    return `This overlaps ${clashing.length === 1 ? "an event" : "events"} you're expected at: ${clashing.map(describe).join(", ")}.${anyMandatory ? " Attendance is mandatory — please check with management before requesting these dates." : ""}`;
+  }, [form.startDate, form.endDate, leaveEvents]);
 
   function handleDateChange(field: "startDate" | "endDate", value: string) {
     const updated = { ...form, [field]: value };
@@ -462,6 +520,9 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                 )}
                 {conflictWarning && (
                   <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">⚠️ {conflictWarning}</div>
+                )}
+                {eventConflictWarning && (
+                  <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">📌 {eventConflictWarning}</div>
                 )}
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Notes <span className="text-gray-300">(optional)</span></label>
