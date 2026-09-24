@@ -143,14 +143,19 @@ export function RequiredCertsSection({
                         {expandedTypeId === type.id ? "Hide" : "History"} ({myEntries.length})
                       </button>
                     )}
-                    <button onClick={() => { setLoggingTypeId(loggingTypeId === type.id ? null : type.id); setCeError(null); }} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
+                    <button onClick={() => {
+                      const opening = loggingTypeId !== type.id;
+                      setLoggingTypeId(opening ? type.id : null);
+                      if (opening) setCeCourseName(type.title);
+                      setCeError(null);
+                    }} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
                       {loggingTypeId === type.id ? "Cancel" : "+ Log a course"}
                     </button>
                   </div>
                 </div>
                 {loggingTypeId === type.id && (
                   <div className="mt-2 grid gap-2 sm:grid-cols-4">
-                    <input type="text" value={ceCourseName} onChange={(e) => setCeCourseName(e.target.value)} placeholder="Course name" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
+                    <input type="text" value={ceCourseName} onChange={(e) => setCeCourseName(e.target.value)} placeholder="Course name" title="Prefilled from the requirement — edit if the course had a different title" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
                     <input type="number" onFocus={(e) => e.target.select()} value={ceHours} onChange={(e) => setCeHours(e.target.value)} placeholder="Hours" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                     <input type="date" value={ceDate} onChange={(e) => setCeDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                     <div className="sm:col-span-4">
@@ -229,13 +234,18 @@ export function RequiredCertsSection({
                       )
                     )}
                   </div>
-                  <button onClick={() => { setLoggingTypeId(loggingTypeId === type.id ? null : type.id); setCeError(null); }} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
+                  <button onClick={() => {
+                      const opening = loggingTypeId !== type.id;
+                      setLoggingTypeId(opening ? type.id : null);
+                      if (opening) setCeCourseName(type.title);
+                      setCeError(null);
+                    }} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
                     {loggingTypeId === type.id ? "Cancel" : status.satisfied ? "Add more" : "+ Log hours"}
                   </button>
                 </div>
                 {loggingTypeId === type.id && (
                   <div className="mt-2 grid gap-2 sm:grid-cols-4">
-                    <input type="text" value={ceCourseName} onChange={(e) => setCeCourseName(e.target.value)} placeholder="Course name" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
+                    <input type="text" value={ceCourseName} onChange={(e) => setCeCourseName(e.target.value)} placeholder="Course name" title="Prefilled from the requirement — edit if the course had a different title" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
                     <input type="number" onFocus={(e) => e.target.select()} value={ceHours} onChange={(e) => setCeHours(e.target.value)} placeholder="Hours" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                     <input type="date" value={ceDate} onChange={(e) => setCeDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                     <button onClick={() => handleLogCe(type.id)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white sm:col-span-4 justify-self-start" style={{ backgroundColor: "#e8622a" }}>Save</button>
