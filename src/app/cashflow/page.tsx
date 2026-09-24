@@ -1187,12 +1187,18 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
                   <span style={{ fontSize: 32 }}>{style.icon}</span>
                   <div>
                     <div className="text-2xl font-bold" style={{ color: style.color }}>{style.label}</div>
-                    <div className="text-sm" style={{ color: style.color }}>True A/R: ${formatMoney(health.totalAr)}</div>
+                    <div className="text-sm" style={{ color: style.color }}>
+                      True A/R: ${formatMoney(health.totalAr)}
+                      {health.writeOffs > 0 && (
+                        <span className="opacity-75"> · ${formatMoney(health.rawTotal)} total less ${formatMoney(health.writeOffs)} write-offs</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
               <p className="text-sm font-medium" style={{ color: style.color }}>
                 {health.pctCurrent.toFixed(0)}% current (0–30) · {health.pctOver60.toFixed(0)}% over 60 days · {health.pctOver90.toFixed(0)}% over 90 days
+                {health.writeOffs > 0 && <span className="opacity-75"> — of collectable A/R, after write-offs</span>}
               </p>
               {health.arRatio != null && health.daysInAr != null ? (
                 <p className="text-sm font-medium mt-1" style={{ color: style.color }}>
