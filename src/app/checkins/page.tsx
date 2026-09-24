@@ -6,7 +6,7 @@ import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
 import {
-  CheckinSlot, loadAllSlots, createSlot, claimSlot, unclaimSlot,
+  CheckinSlot, loadAllSlots, createSlot, claimSlot, unclaimSlot, logPastCheckin,
   markSlotCompleted, updateSlotNotes, updateSlotDateTime, deleteSlot, computeCheckinStatus,
 } from "@/lib/checkinsStore";
 
@@ -37,6 +37,12 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
   const [slots, setSlots] = useState<CheckinSlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [newSlotDate, setNewSlotDate] = useState(todayStr());
+  const [pastEmployeeId, setPastEmployeeId] = useState("");
+  const [pastDate, setPastDate] = useState(todayStr());
+  const [pastTime, setPastTime] = useState("");
+  const [pastNotes, setPastNotes] = useState("");
+  const [pastError, setPastError] = useState("");
+  const [pastSaved, setPastSaved] = useState(false);
   const [newSlotTime, setNewSlotTime] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [claimingSlotId, setClaimingSlotId] = useState<string | null>(null);
@@ -62,6 +68,21 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
 
   const myStatus = identity.employeeId != null && !identity.exemptFromCheckin ? computeCheckinStatus(identity.employeeId, slots, today) : null;
   const openSlots = slots.filter((s) => !s.claimedByEmployeeId && s.date >= today).sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+
+  async function handleLogPast() {
+    setPastSaved(false);
+    const emp = staff.find((s) => s.id === Number(pastEmployeeId));
+    if (!emp || !pastDate || !pastTime) { setPastError("Please pick a staff member, date, and time."); return; }
+    const result = await logPastCheckin(pastDate, pastTime, emp.id, emp.name, pastNotes.trim());
+    if (!result.ok) { setPastError(result.error ?? "Couldn't save. Please try again."); return; }
+    setPastError("");
+    setPastSaved(true);
+    setPastEmployeeId("");
+    setPastTime("");
+    setPastNotes("");
+    setTimeout(() => setPastSaved(false), 4000);
+    await refresh();
+  }
 
   async function handleCreateSlot() {
     if (!newSlotDate || !newSlotTime.trim()) return;
@@ -193,6 +214,44 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
                     </div>
                   </div>
                   {createError && <p className="text-sm text-red-600 font-semibold mt-2">⚠️ {createError}</p>}
+                </div>
+
+                {/* A check-in that already happened can't be booked and then
+                    claimed — open slots only list from today onwards — so it
+                    gets recorded as finished in one step instead. */}
+                <div className="rounded-2xl bg-white shadow p-5">
+                  <h2 className="font-bold text-slate-700 mb-1">Log a Past Check-In</h2>
+                  <p className="text-sm text-slate-500 mb-3">For a check-in that already happened, including impromptu ones that were never booked.</p>
+                  <div className="grid gap-3 sm:grid-cols-4">
+                    <div>
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Staff member</label>
+                      <select value={pastEmployeeId} onChange={(e) => setPastEmployeeId(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                        <option value="">Select…</option>
+                        {staff.filter((s) => !s.archived && !s.exemptFromCheckin).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Date</label>
+                      <input type="date" value={pastDate} onChange={(e) => setPastDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Time</label>
+                      <select value={pastTime} onChange={(e) => setPastTime(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                        <option value="">Select…</option>
+                        {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex items-end">
+                      <button onClick={handleLogPast} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition w-full" style={{ backgroundColor: "#0F6E56" }}>Log as Completed</button>
+                    </div>
+                    <div className="sm:col-span-4">
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Notes (optional)</label>
+                      <textarea value={pastNotes} onChange={(e) => setPastNotes(e.target.value)} rows={2}
+                        className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none resize-none" />
+                    </div>
+                  </div>
+                  {pastError && <p className="text-sm text-red-600 font-semibold mt-2">⚠️ {pastError}</p>}
+                  {pastSaved && <p className="text-sm text-emerald-600 font-semibold mt-2">✓ Check-in recorded.</p>}
                 </div>
 
                 <div className="rounded-2xl bg-white shadow p-5">
