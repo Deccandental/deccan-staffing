@@ -46,6 +46,8 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
   const [newSlotTime, setNewSlotTime] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [claimingSlotId, setClaimingSlotId] = useState<string | null>(null);
+  const [claimForEmployeeId, setClaimForEmployeeId] = useState("");
+  const [claimError, setClaimError] = useState("");
   const [claimNotes, setClaimNotes] = useState("");
   const [notesDrafts, setNotesDrafts] = useState<Record<string, string>>({});
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
@@ -94,10 +96,22 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
   }
 
   async function handleClaim(slotId: string) {
-    if (identity.employeeId == null || !identity.employeeName) return;
-    await claimSlot(slotId, identity.employeeId, identity.employeeName, claimNotes);
+    // Admins can book a slot for someone else (they may be arranging it on
+    // that person's behalf); everyone else can only claim for themselves.
+    const chosen = isAdmin && claimForEmployeeId
+      ? staff.find((s) => s.id === Number(claimForEmployeeId))
+      : null;
+    const employeeId = chosen ? chosen.id : identity.employeeId;
+    const employeeName = chosen ? chosen.name : identity.employeeName;
+    if (employeeId == null || !employeeName) {
+      setClaimError(isAdmin ? "Please choose who this check-in is for." : "");
+      return;
+    }
+    await claimSlot(slotId, employeeId, employeeName, claimNotes);
     setClaimingSlotId(null);
     setClaimNotes("");
+    setClaimForEmployeeId("");
+    setClaimError("");
     await refresh();
   }
 
@@ -184,8 +198,22 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
                         )}
                       </div>
                       {claimingSlotId === slot.id && (
-                        <textarea value={claimNotes} onChange={(e) => setClaimNotes(e.target.value)} placeholder="Anything you'd like to discuss? (optional)"
-                          className="w-full mt-2 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" rows={2} />
+                        <>
+                          {isAdmin && (
+                            <select value={claimForEmployeeId} onChange={(e) => setClaimForEmployeeId(e.target.value)}
+                              className="w-full mt-2 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                              <option value="">Who is this check-in for?…</option>
+                              {identity.employeeId != null && identity.employeeName && (
+                                <option value={identity.employeeId}>{identity.employeeName} (me)</option>
+                              )}
+                              {staff.filter((s) => !s.archived && !s.exemptFromCheckin && s.id !== identity.employeeId)
+                                .map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                          )}
+                          <textarea value={claimNotes} onChange={(e) => setClaimNotes(e.target.value)} placeholder="Anything you'd like to discuss? (optional)"
+                            className="w-full mt-2 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" rows={2} />
+                          {claimError && <p className="text-xs text-red-600 font-semibold mt-1">⚠️ {claimError}</p>}
+                        </>
                       )}
                     </div>
                   ))}
