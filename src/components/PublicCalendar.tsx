@@ -5,9 +5,11 @@ import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
+import { loadLeaveRequests } from "@/lib/leaveStore";
+import { LeaveRequest } from "@/types/leave";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { loadSchedule, MonthSchedule } from "@/lib/scheduleStore";
-import { resolveDentistAssistants } from "@/lib/assistantSlots";
+import { resolveDentistAssistants, isOnApprovedLeave } from "@/lib/assistantSlots";
 import { StaffEvent, loadEventsForMonth } from "@/lib/eventsStore";
 import { loadHolidays, Holiday } from "@/lib/holidays";
 import { Employee } from "@/types/employee";
@@ -63,6 +65,7 @@ export default function PublicCalendar() {
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -76,11 +79,11 @@ export default function PublicCalendar() {
 
   useEffect(() => {
     async function load() {
-      const [s, o, p, ot, h, t] = await Promise.all([
-        loadStaff(), getOverrides(), loadPrefs(), getOpenTuesdays(), loadHolidays(), loadTemps()
+      const [s, o, p, ot, h, t, lr] = await Promise.all([
+        loadStaff(), getOverrides(), loadPrefs(), getOpenTuesdays(), loadHolidays(), loadTemps(), loadLeaveRequests()
       ]);
       setStaff(s); setOverrides(o); setPrefs(p);
-      setOpenTuesdays(ot); setHolidays(h); setTemps(t);
+      setOpenTuesdays(ot); setHolidays(h); setTemps(t); setLeaveRequests(lr);
     }
     load();
   }, []);
@@ -115,7 +118,7 @@ export default function PublicCalendar() {
       const assignments = buildDailyAssignments(
         staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday, frontDeskRequired, hygienistsRequired,
-        daySched.assistantCounts ?? {}, daySched.floaterAssistantId ?? null
+        daySched.assistantCounts ?? {}, daySched.floaterAssistantId ?? null, leaveRequests
       );
 
       const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);
@@ -126,7 +129,8 @@ export default function PublicCalendar() {
       const dentists: DentistInfo[] = assignments.dentists.map(({ dentist, assistants }) => {
         const tempForDentist = tempsForDay.find((ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`);
         if (tempForDentist) return { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: `${tempName(tempForDentist.tempId)} (temp)`, assistantIds: [] };
-        const resolved = resolveDentistAssistants(dentist.id, assistants, ac, ao, staff).filter(Boolean) as Employee[];
+        const resolved = (resolveDentistAssistants(dentist.id, assistants, ac, ao, staff).filter(Boolean) as Employee[])
+          .filter((a) => !isOnApprovedLeave(a.id, day.date, leaveRequests));
         return resolved.length > 0
           ? { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: resolved.map((a) => firstName(a.name)).join(", "), assistantIds: resolved.map((a) => a.id) }
           : { id: dentist.id, name: dentist.name, color: dentist.color, assistantName: "???", assistantIds: [] };
@@ -136,7 +140,7 @@ export default function PublicCalendar() {
       const resolvedHygienists = Array.from({ length: hygienistsRequired }, (_, i) => {
         if (i in ho) { const ovId = ho[i]; return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null; }
         return assignments.hygienists[i] ?? null;
-      }).filter(Boolean) as Employee[];
+      }).filter(Boolean).filter((h) => !isOnApprovedLeave((h as Employee).id, day.date, leaveRequests)) as Employee[];
 
       const frontDesk: PersonChip[] = [
         ...assignments.frontDesk.map((e) => ({ id: e.id, name: firstName(e.name) })),
