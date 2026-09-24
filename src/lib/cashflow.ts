@@ -924,3 +924,35 @@ export function computeAvgMonthlyProduction(history: DentalMonthlyEntry[], month
   const sum = withProduction.reduce((total, e) => total + (e.netProduction as number), 0);
   return sum / withProduction.length;
 }
+
+/**
+ * Fills in the current month's net production from the latest weekly
+ * review's projected total.
+ *
+ * Actual net production is only known once a month closes, so until then
+ * the projection is the best figure available — and it's already being
+ * maintained weekly on the Update Numbers tab. Without this, the current
+ * month showed whatever was typed into Trends at some earlier point and
+ * then silently went stale, which made the chart fall off a cliff at the
+ * right-hand edge and dragged the A/R Ratio down with it.
+ *
+ * Months that have already ended are left exactly as entered — those are
+ * real figures and must not be overwritten by a projection.
+ */
+export function withCurrentMonthProjection(
+  history: DentalMonthlyEntry[],
+  latestReview: WeeklyCashReview | null
+): DentalMonthlyEntry[] {
+  if (!latestReview?.projectedTotalProduction) return history;
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  // Only project for the month the review itself belongs to — an old
+  // review shouldn't be used to project a month it knows nothing about.
+  if (latestReview.reviewDate.slice(0, 7) !== currentMonth) return history;
+
+  const existing = history.find((e) => e.month === currentMonth);
+  const projected = latestReview.projectedTotalProduction;
+  if (existing) {
+    return history.map((e) => (e.month === currentMonth ? { ...e, netProduction: projected } : e));
+  }
+  return [...history, { id: `projected-${currentMonth}`, month: currentMonth, netProduction: projected, enteredAt: latestReview.reviewDate }];
+}
