@@ -1,6 +1,7 @@
 import { Employee } from "@/types/employee";
 import { loadStaff, loadPrefs } from "./staffStore";
 import { getOverrides } from "./overrides";
+import { loadLeaveRequests } from "./leaveStore";
 import { getOpenTuesdays } from "./openTuesdays";
 import { loadHolidays } from "./holidays";
 import { loadSchedule, MonthSchedule } from "./scheduleStore";
@@ -36,8 +37,8 @@ function localDateStr(d: Date): string {
  * schedule, in whatever role(s) they're assigned that day.
  */
 export async function loadUpcomingShiftsForEmployee(employeeId: number, daysAhead: number = 21): Promise<UpcomingShift[]> {
-  const [staff, prefs, overrides, openTuesdays, holidays] = await Promise.all([
-    loadStaff(), loadPrefs(), getOverrides(), getOpenTuesdays(), loadHolidays(),
+  const [staff, prefs, overrides, openTuesdays, holidays, leaveRequests] = await Promise.all([
+    loadStaff(), loadPrefs(), getOverrides(), getOpenTuesdays(), loadHolidays(), loadLeaveRequests(),
   ]);
 
   const today = new Date();
@@ -79,7 +80,8 @@ export async function loadUpcomingShiftsForEmployee(employeeId: number, daysAhea
           daySched.frontDeskRequired ?? 2,
           daySched.hygienistsRequired ?? 1,
           daySched.assistantCounts ?? {},
-          daySched.floaterAssistantId ?? null
+          daySched.floaterAssistantId ?? null,
+          leaveRequests
         );
         const ao = daySched.assistantOverrides ?? {};
         const ac = daySched.assistantCounts ?? {};
@@ -137,8 +139,8 @@ export async function loadUpcomingShiftsForEmployee(employeeId: number, daysAhea
  * actually scheduled during a given pay period.
  */
 export async function getScheduledEmployeeIdsInRange(startDate: string, endDate: string): Promise<Set<number>> {
-  const [staff, prefs, overrides, openTuesdays, holidays] = await Promise.all([
-    loadStaff(), loadPrefs(), getOverrides(), getOpenTuesdays(), loadHolidays(),
+  const [staff, prefs, overrides, openTuesdays, holidays, leaveRequests] = await Promise.all([
+    loadStaff(), loadPrefs(), getOverrides(), getOpenTuesdays(), loadHolidays(), loadLeaveRequests(),
   ]);
 
   const monthsNeeded = new Set<string>();
@@ -176,7 +178,8 @@ export async function getScheduledEmployeeIdsInRange(startDate: string, endDate:
           daySched.frontDeskRequired ?? 2,
           daySched.hygienistsRequired ?? 1,
           daySched.assistantCounts ?? {},
-          daySched.floaterAssistantId ?? null
+          daySched.floaterAssistantId ?? null,
+          leaveRequests
         );
         const ao = daySched.assistantOverrides ?? {};
         const ac = daySched.assistantCounts ?? {};
