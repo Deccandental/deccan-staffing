@@ -98,13 +98,18 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
   async function handleClaim(slotId: string) {
     // Admins can book a slot for someone else (they may be arranging it on
     // that person's behalf); everyone else can only claim for themselves.
-    const chosen = isAdmin && claimForEmployeeId
-      ? staff.find((s) => s.id === Number(claimForEmployeeId))
-      : null;
+    // An admin must say explicitly who the slot is for — falling back to
+    // themselves would quietly book the wrong person's check-in when the
+    // dropdown was simply missed.
+    if (isAdmin && !claimForEmployeeId) {
+      setClaimError("Please choose who this check-in is for.");
+      return;
+    }
+    const chosen = isAdmin ? staff.find((s) => s.id === Number(claimForEmployeeId)) : null;
     const employeeId = chosen ? chosen.id : identity.employeeId;
     const employeeName = chosen ? chosen.name : identity.employeeName;
     if (employeeId == null || !employeeName) {
-      setClaimError(isAdmin ? "Please choose who this check-in is for." : "");
+      setClaimError("Couldn't work out who to book this for.");
       return;
     }
     await claimSlot(slotId, employeeId, employeeName, claimNotes);
@@ -191,10 +196,10 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
                         {claimingSlotId === slot.id ? (
                           <div className="flex items-center gap-2">
                             <button onClick={() => handleClaim(slot.id)} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Confirm</button>
-                            <button onClick={() => { setClaimingSlotId(null); setClaimNotes(""); }} className="text-xs text-slate-400 hover:underline">Cancel</button>
+                            <button onClick={() => { setClaimingSlotId(null); setClaimNotes(""); setClaimForEmployeeId(""); setClaimError(""); }} className="text-xs text-slate-400 hover:underline">Cancel</button>
                           </div>
                         ) : (
-                          <button onClick={() => setClaimingSlotId(slot.id)} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Claim this slot</button>
+                          <button onClick={() => { setClaimingSlotId(slot.id); setClaimForEmployeeId(""); setClaimNotes(""); setClaimError(""); }} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Claim this slot</button>
                         )}
                       </div>
                       {claimingSlotId === slot.id && (
