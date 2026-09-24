@@ -21,6 +21,7 @@ function EventsPageBody() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [events, setEvents] = useState<StaffEvent[]>([]);
   const [rsvps, setRsvps] = useState<EventRsvp[]>([]);
+  const [openRsvpEventId, setOpenRsvpEventId] = useState<string | null>(null);
   const [form, setForm] = useState<NewEventInput>(EMPTY_FORM);
   const [allDay, setAllDay] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -260,12 +261,39 @@ function EventsPageBody() {
                         const yes = mine.filter((r) => r.attending).length;
                         const no = mine.length - yes;
                         return (
-                          <span className="rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold px-2 py-0.5">
-                            RSVP: {yes} yes{no > 0 ? `, ${no} no` : ""}
-                          </span>
+                          <button onClick={() => setOpenRsvpEventId(openRsvpEventId === ev.id ? null : ev.id)}
+                            className="rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold px-2 py-0.5 hover:bg-emerald-100 transition">
+                            RSVP: {yes} yes{no > 0 ? `, ${no} no` : ""} {openRsvpEventId === ev.id ? "\u25b2" : "\u25bc"}
+                          </button>
                         );
                       })()}
                     </div>
+
+                    {/* Full breakdown, including who hasn't answered yet —
+                        the count alone doesn't tell you who to chase. */}
+                    {ev.rsvpEnabled && openRsvpEventId === ev.id && (() => {
+                      const invited = staff.filter((s) => !s.archived && (ev.inviteAll || ev.invitedStaffIds.includes(s.id)));
+                      const answerFor = (id: number) => rsvps.find((r) => r.eventId === ev.id && r.employeeId === id);
+                      const yesList = invited.filter((s) => answerFor(s.id)?.attending === true);
+                      const noList = invited.filter((s) => answerFor(s.id)?.attending === false);
+                      const pendingList = invited.filter((s) => answerFor(s.id) == null);
+                      const group = (label: string, people: typeof invited, color: string) => (
+                        people.length === 0 ? null : (
+                          <div className="mb-1.5">
+                            <span className="text-xs font-semibold" style={{ color }}>{label} ({people.length}):</span>{" "}
+                            <span className="text-xs text-slate-600">{people.map((s) => s.name).join(", ")}</span>
+                          </div>
+                        )
+                      );
+                      return (
+                        <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 mt-2">
+                          {group("Attending", yesList, "#3B6D11")}
+                          {group("Not attending", noList, "#A32D2D")}
+                          {group("No reply yet", pendingList, "#854F0B")}
+                          {invited.length === 0 && <p className="text-xs text-slate-400">No one invited yet.</p>}
+                        </div>
+                      );
+                    })()}
                     <div className="text-sm text-slate-500 mt-0.5">
                       {dateLabel}{ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : " · All Day"}
                     </div>
