@@ -15,7 +15,7 @@ import {
   loadCreditCards, updateStatementBalance,
   loadCardCharges, addCardCharge, updateCardCharge, deleteCardCharge,
   loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview, deleteWeeklyReview,
-  ArAgingEntry, loadLatestArAging, loadArAgingHistory, saveArAgingEntry, deleteArAgingEntry, computeArHealth, computeAvgMonthlyProduction,
+  ArAgingEntry, loadLatestArAging, loadArAgingHistory, saveArAgingEntry, deleteArAgingEntry, computeArHealth, computeAvgMonthlyProduction, withCurrentMonthProjection,
   loadDentalMonthlyHistory, backfillDentalMonth, deleteDentalMonthlyEntry, DentalMonthlyEntry,
   loadDentalMonthlySummaries, saveDentalMonthlySummary, deleteDentalMonthlySummary, DentalMonthlySummary,
   buildOccurrences, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
@@ -938,8 +938,8 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
         setArInsuranceEstimate(String(latest.insuranceEstimate));
       }
     });
-    loadDentalMonthlyHistory().then((history) => {
-      setAvgMonthlyProduction(computeAvgMonthlyProduction(history));
+    Promise.all([loadDentalMonthlyHistory(), loadLatestWeeklyReview()]).then(([history, review]) => {
+      setAvgMonthlyProduction(computeAvgMonthlyProduction(withCurrentMonthProjection(history, review)));
     });
   }, []);
 
@@ -1407,16 +1407,17 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
   const [depthView, setDepthView] = useState<string | null>(null); // 'cardStatement' | 'dental' | 'ar' | null
 
   async function loadAll() {
-    const [statementHists, dentalHistory, bankHists, arHistory] = await Promise.all([
+    const [statementHists, dentalHistory, bankHists, arHistory, latestReviewForProjection] = await Promise.all([
       Promise.all(cards.map((c) => loadStatementHistoryForCard(c.id))),
       loadDentalMonthlyHistory(),
       Promise.all(cashAccounts.map((a) => loadStatementHistoryForAccount(a.id))),
       loadArAgingHistory(52),
+      loadLatestWeeklyReview(),
     ]);
     const stmtMap: Record<string, CardStatementEntry[]> = {};
     cards.forEach((c, i) => { stmtMap[c.id] = statementHists[i]; });
     setStatementHistories(stmtMap);
-    setDentalMonthlyHistory(dentalHistory);
+    setDentalMonthlyHistory(withCurrentMonthProjection(dentalHistory, latestReviewForProjection));
     setArAgingHistory(arHistory);
     const bankMap: Record<string, BankStatementEntry[]> = {};
     cashAccounts.forEach((a, i) => { bankMap[a.id] = bankHists[i]; });
@@ -1645,10 +1646,20 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
           <div className="mt-3 space-y-1 max-h-60 overflow-y-auto">
             {[...dentalMonthlyHistory].sort((a, b) => b.month.localeCompare(a.month)).map((e) => (
               <div key={e.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
-                <span className="text-slate-600">{new Date(e.month + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
+                <span className="text-slate-600">
+                  {new Date(e.month + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                  {e.month === new Date().toISOString().slice(0, 7) && (
+                    <span className="ml-2 rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: "#E6F1FB", color: "#185FA5" }}>
+                      projected — month still open
+                    </span>
+                  )}
+                </span>
                 <span className="flex items-center gap-2 text-xs text-slate-400">
                   <span>{e.netProduction != null ? `$${formatMoney(e.netProduction)}` : ""}</span>
-                  <button onClick={() => handleDeleteDentalEntry(e.id)} className="text-red-400 hover:underline">Delete</button>
+                  {/* A projected month has nothing stored to delete. */}
+                  {!e.id.startsWith("projected-") && (
+                    <button onClick={() => handleDeleteDentalEntry(e.id)} className="text-red-400 hover:underline">Delete</button>
+                  )}
                 </span>
               </div>
             ))}
