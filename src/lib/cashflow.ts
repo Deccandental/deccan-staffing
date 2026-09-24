@@ -865,7 +865,9 @@ export async function deleteArAgingEntry(id: string): Promise<void> {
 }
 
 export interface ArHealthResult {
-  totalAr: number;
+  totalAr: number; // True A/R — the 4 buckets less the write-off estimate
+  rawTotal: number; // the 4 buckets before write-offs
+  writeOffs: number;
   pctCurrent: number; // % in 0-30
   pctOver60: number; // % in 61-90 + 90+
   pctOver90: number; // % in 90+ alone
@@ -882,23 +884,44 @@ export function computeArHealth(
   avgMonthlyProduction?: number | null
 ): ArHealthResult {
   const rawTotal = entry.ar0to30 + entry.ar31to60 + entry.ar61to90 + entry.ar90plus;
-  const trueAr = Math.max(0, rawTotal - (entry.woEstimate ?? 0));
-  if (rawTotal <= 0) return { totalAr: 0, pctCurrent: 0, pctOver60: 0, pctOver90: 0, arRatio: null, daysInAr: null, status: "good", reasons: [] };
-  const pctCurrent = (entry.ar0to30 / rawTotal) * 100;
-  const pctOver60 = ((entry.ar61to90 + entry.ar90plus) / rawTotal) * 100;
-  const pctOver90 = (entry.ar90plus / rawTotal) * 100;
+  const writeOffs = entry.woEstimate ?? 0;
+  const trueAr = Math.max(0, rawTotal - writeOffs);
+  if (rawTotal <= 0) {
+    return { totalAr: 0, rawTotal: 0, writeOffs: 0, pctCurrent: 0, pctOver60: 0, pctOver90: 0, arRatio: null, daysInAr: null, status: "good", reasons: [] };
+  }
+
+  // Write-offs are entered as one figure rather than per bucket, so they're
+  // taken off the oldest balances first — that's where uncollectable money
+  // almost always sits. Measuring the aging percentages against what's left
+  // means they describe money still worth chasing, rather than counting
+  // balances already conceded as lost.
+  let remaining = writeOffs;
+  const net = (amount: number) => {
+    const applied = Math.min(remaining, amount);
+    remaining -= applied;
+    return amount - applied;
+  };
+  const adj90plus = net(entry.ar90plus);
+  const adj61to90 = net(entry.ar61to90);
+  const adj31to60 = net(entry.ar31to60);
+  const adj0to30 = net(entry.ar0to30);
+  const adjTotal = adj0to30 + adj31to60 + adj61to90 + adj90plus;
+
+  const pctCurrent = adjTotal > 0 ? (adj0to30 / adjTotal) * 100 : 0;
+  const pctOver60 = adjTotal > 0 ? ((adj61to90 + adj90plus) / adjTotal) * 100 : 0;
+  const pctOver90 = adjTotal > 0 ? (adj90plus / adjTotal) * 100 : 0;
   const arRatio = avgMonthlyProduction && avgMonthlyProduction > 0 ? trueAr / avgMonthlyProduction : null;
   const daysInAr = arRatio != null ? arRatio * 30 : null;
 
   const reasons: string[] = [];
-  if (pctCurrent < 70) reasons.push(`Only ${pctCurrent.toFixed(0)}% of A/R is current (0-30 days) — target is 70%+`);
-  if (pctOver60 > 10) reasons.push(`${pctOver60.toFixed(0)}% of A/R is over 60 days — target is under 10%`);
-  if (pctOver90 > 5) reasons.push(`${pctOver90.toFixed(0)}% of A/R is over 90 days — target is under 5%`);
+  if (pctCurrent < 70) reasons.push(`Only ${pctCurrent.toFixed(0)}% of collectable A/R is current (0-30 days) — target is 70%+`);
+  if (pctOver60 > 10) reasons.push(`${pctOver60.toFixed(0)}% of collectable A/R is over 60 days — target is under 10%`);
+  if (pctOver90 > 5) reasons.push(`${pctOver90.toFixed(0)}% of collectable A/R is over 90 days — target is under 5%`);
   if (arRatio != null && arRatio > 1.5) reasons.push(`A/R Ratio is ${arRatio.toFixed(2)} — target is around 1.0, concerning above 1.5`);
   if (daysInAr != null && daysInAr > 45) reasons.push(`Days in A/R is ${daysInAr.toFixed(0)} — industry average is around 45`);
 
   const status: ArHealthResult["status"] = reasons.length === 0 ? "good" : (pctOver90 > 5 || pctCurrent < 55 || (arRatio != null && arRatio > 2)) ? "poor" : "fair";
-  return { totalAr: trueAr, pctCurrent, pctOver60, pctOver90, arRatio, daysInAr, status, reasons };
+  return { totalAr: trueAr, rawTotal, writeOffs, pctCurrent, pctOver60, pctOver90, arRatio, daysInAr, status, reasons };
 }
 
 // Averages the most recent N months of logged Net Production (from the
