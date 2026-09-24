@@ -303,7 +303,8 @@ export default function ScheduleBuilder() {
       const dentistsStillShort = assignments.dentists.some(({ dentist, assistants }) => {
         const hasTemp = tempsForDay.some((ta) => ta.role === "Assistant" && ta.notes === `dentist:${dentist.id}`);
         if (hasTemp) return false;
-        return resolveDentistAssistants(dentist.id, assistants, ac, ao, staff).some((slot) => slot === null);
+        return resolveDentistAssistants(dentist.id, assistants, ac, ao, staff)
+          .some((slot) => slot === null || isOnApprovedLeave(slot.id, day.date, leaveRequests));
       });
 
       const ho = daySched.hygienistOverrides ?? {};
@@ -311,7 +312,7 @@ export default function ScheduleBuilder() {
       const resolvedHygienistsCount = Array.from({ length: hygienistsRequired }, (_, i) => {
         if (i in ho) { const ovId = ho[i]; return ovId != null ? staff.find((e) => e.id === ovId) ?? null : null; }
         return assignments.hygienists[i] ?? null;
-      }).filter(Boolean).length;
+      }).filter((h) => h != null && !isOnApprovedLeave(h.id, day.date, leaveRequests)).length;
       const tempHygienists = tempsForDay.filter((ta) => ta.role === "Hygienist").length;
       const hygienistsShort = hygienistsRequired > 0 && resolvedHygienistsCount + tempHygienists < hygienistsRequired;
 
