@@ -9,6 +9,7 @@ import { resolveDentistAssistants, resolveFloater, getDentistSlotOverrides, setD
 import { TempStaff } from "@/app/temps/page";
 import { TempAssignment, getTempAssignments, addTempAssignment, removeTempAssignment } from "@/lib/tempAssignments";
 import { supabase } from "@/lib/supabase";
+import { isOnApprovedLeave } from "@/lib/assistantSlots";
 
 interface Props {
   selectedDate: string;
@@ -24,6 +25,7 @@ interface Props {
   onFloaterChange?: (assistantId: number | null) => void;
   onTempAssignmentsChange?: (date: string, assignments: TempAssignment[]) => void;
   frontDeskRequired?: number;
+  leaveRequests?: { employeeId: number; status: string; isPartialDay?: boolean; startDate: string; endDate: string }[];
 }
 
 const EMPTY: DailyAssignmentsResult = { dentists: [], frontDesk: [], hygienists: [], warnings: [] };
@@ -50,6 +52,7 @@ export default function DailyAssignmentPanel({
   floaterAssistantId = null, onFloaterChange,
   onTempAssignmentsChange,
   frontDeskRequired = 2,
+  leaveRequests = [],
 }: Props) {
   const [overrides, setOverrides] = useState<AssistantOverrides>(assistantOverrides);
   const [hygOverrides, setHygOverrides] = useState<Record<number, number | null>>(hygienistOverrides);
@@ -552,6 +555,13 @@ export default function DailyAssignmentPanel({
                                         <button onClick={() => handleClearOverride(dentist.id, slotIndex)} className="text-xs text-cyan-500 ml-1 hover:text-red-400">
                                           (manual ✕)
                                         </button>
+                                      )}
+                                      {/* A manual pick bypasses availability, so it can
+                                          outlive a leave approval made afterwards. */}
+                                      {isOnApprovedLeave(resolvedAssistant.id, selectedDate, leaveRequests) && (
+                                        <span className="ml-1 rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: "#FAEEDA", color: "#854F0B" }}>
+                                          ⚠️ on approved leave
+                                        </span>
                                       )}
                                     </>
                                   ) : "No Assistant"}
