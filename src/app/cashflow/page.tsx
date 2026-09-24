@@ -1198,7 +1198,7 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
               </div>
               <p className="text-sm font-medium" style={{ color: style.color }}>
                 {health.pctCurrent.toFixed(0)}% current (0–30) · {health.pctOver60.toFixed(0)}% over 60 days · {health.pctOver90.toFixed(0)}% over 90 days
-                {health.writeOffs > 0 && <span className="opacity-75"> — of collectable A/R, after write-offs</span>}
+                {health.writeOffs > 0 && <span className="opacity-75"> — by age, on the full ${formatMoney(health.rawTotal)} balance</span>}
               </p>
               {health.arRatio != null && health.daysInAr != null ? (
                 <p className="text-sm font-medium mt-1" style={{ color: style.color }}>
