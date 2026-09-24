@@ -617,15 +617,23 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
   const reviewDaysStale = latestReview ? daysSinceDateStr(latestReview.reviewDate) : Infinity;
   const incomeStale = reviewDaysStale >= STALE_DAYS;
 
+  // Statement balances are excluded here — they only change when a monthly
+  // statement arrives, so measuring them against a 7-day rule reported the
+  // numbers as out of date almost permanently. They're checked separately
+  // against a full statement cycle below.
+  const STATEMENT_STALE_DAYS = 40;
   const balanceTimestamps = [
     ...cashAccounts.map((a) => latestBalances[a.name]?.checkedAt),
     ...cards.map((c) => latestBalances[c.name]?.checkedAt),
-    ...cards.map((c) => c.statementBalanceUpdatedAt ?? undefined),
   ].filter((t): t is string => !!t);
   const oldestBalanceTimestamp = balanceTimestamps.length > 0 ? balanceTimestamps.reduce((oldest, t) => (t < oldest ? t : oldest)) : null;
   const balanceDaysStale = oldestBalanceTimestamp ? (Date.now() - new Date(oldestBalanceTimestamp).getTime()) / 86400000 : Infinity;
   const anyBalanceMissing = cashAccounts.some((a) => !latestBalances[a.name]) || cards.some((c) => !latestBalances[c.name]);
   const balancesStale = balanceDaysStale >= STALE_DAYS || anyBalanceMissing;
+  const statementsStale = cards.some((c) =>
+    c.statementBalanceUpdatedAt != null &&
+    (Date.now() - new Date(c.statementBalanceUpdatedAt).getTime()) / 86400000 >= STATEMENT_STALE_DAYS
+  );
 
   const cardRecs = cards.map((card) => {
     const linkedAccount = cashAccounts.find((a) => a.id === card.linkedCashAccountId);
@@ -766,6 +774,7 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
           <p className="text-sm font-semibold text-amber-800">⚠️ Numbers need updating:</p>
           <ul className="text-sm text-amber-700 mt-1 list-disc list-inside">
             {balancesStale && <li>Account/card balances — {oldestBalanceTimestamp ? `oldest entry ${new Date(oldestBalanceTimestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "never entered"}</li>}
+            {statementsStale && <li>Credit card statement balances — last updated over a month ago</li>}
             {incomeStale && <li>Open Dental numbers — {latestReview ? `last entered ${new Date(latestReview.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "never entered"}</li>}
           </ul>
           <p className="text-xs text-amber-600 mt-1">Update these on the "Update Numbers" tab.</p>
@@ -1621,15 +1630,30 @@ export default function CashFlowPage() {
     setLoading(false);
   }
 
+  // Current balances move constantly, so a week without an update means the
+  // figures are genuinely out of date. Statement balances are a different
+  // animal — they only change when a statement arrives, roughly monthly —
+  // so holding them to the same 7-day rule flagged the tab red every week
+  // with nothing new to enter. They get their own, much longer window.
   const STALE_DAYS_TABS = 7;
-  const balanceTimestampsForTabs = [
+  const STATEMENT_STALE_DAYS = 40;
+  const currentBalanceTimestamps = [
     ...cashAccounts.map((a) => latestBalances[a.name]?.checkedAt),
     ...creditCards.map((c) => latestBalances[c.name]?.checkedAt),
-    ...creditCards.map((c) => c.statementBalanceUpdatedAt ?? undefined),
   ].filter((t): t is string => !!t);
-  const oldestBalanceTimestampForTabs = balanceTimestampsForTabs.length > 0 ? balanceTimestampsForTabs.reduce((oldest, t) => (t < oldest ? t : oldest)) : null;
-  const balancesStaleForTabs = (oldestBalanceTimestampForTabs ? (Date.now() - new Date(oldestBalanceTimestampForTabs).getTime()) / 86400000 >= STALE_DAYS_TABS : true)
+  const oldestCurrentBalance = currentBalanceTimestamps.length > 0
+    ? currentBalanceTimestamps.reduce((oldest, t) => (t < oldest ? t : oldest))
+    : null;
+  const currentBalancesStale = (oldestCurrentBalance ? (Date.now() - new Date(oldestCurrentBalance).getTime()) / 86400000 >= STALE_DAYS_TABS : true)
     || cashAccounts.some((a) => !latestBalances[a.name]) || creditCards.some((c) => !latestBalances[c.name]);
+  // Only flags a statement that has been entered at least once and has since
+  // aged past a full statement cycle. A card never given a statement balance
+  // isn't nagged about, since that may simply not be tracked.
+  const statementBalancesStale = creditCards.some((c) =>
+    c.statementBalanceUpdatedAt != null &&
+    (Date.now() - new Date(c.statementBalanceUpdatedAt).getTime()) / 86400000 >= STATEMENT_STALE_DAYS
+  );
+  const balancesStaleForTabs = currentBalancesStale || statementBalancesStale;
   const incomeStaleForTabs = latestReviewForTabs ? daysSinceDateStr(latestReviewForTabs.reviewDate) >= STALE_DAYS_TABS : true;
   const updateNumbersNeedsAttention = (balancesStaleForTabs || incomeStaleForTabs) && cashAccounts.length > 0;
 
