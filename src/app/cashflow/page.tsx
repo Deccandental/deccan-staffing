@@ -1163,11 +1163,11 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
           return (
             <div className="grid gap-3 sm:grid-cols-4 mb-4">
               <div>
-                <label className="block text-sm text-slate-800 font-semibold mb-1">W/O Estimate <span className="text-slate-400 font-normal">(write-offs)</span></label>
+                <label className="block text-sm text-slate-800 font-semibold mb-1 whitespace-nowrap">W/O Estimate</label>
                 <input type="number" onFocus={(e) => e.target.select()} value={arWoEstimate} onChange={(e) => setArWoEstimate(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
               </div>
               <div>
-                <label className="block text-sm text-slate-800 font-semibold mb-1">True A/R <span className="text-slate-400 font-normal">(auto: Total − W/O)</span></label>
+                <label className="block text-sm text-slate-800 font-semibold mb-1 whitespace-nowrap">True A/R <span className="text-slate-400 font-normal">(auto)</span></label>
                 <div className="w-full rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 text-sm font-semibold text-slate-700">
                   {rawTotal > 0 ? `$${formatMoney(trueAr)}` : "—"}
                 </div>
@@ -1177,7 +1177,7 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
                 <input type="number" onFocus={(e) => e.target.select()} value={arInsuranceEstimate} onChange={(e) => setArInsuranceEstimate(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
               </div>
               <div>
-                <label className="block text-sm text-slate-800 font-semibold mb-1">Patient Estimate <span className="text-slate-400 font-normal">(auto: True A/R − Insurance)</span></label>
+                <label className="block text-sm text-slate-800 font-semibold mb-1 whitespace-nowrap">Patient Estimate <span className="text-slate-400 font-normal">(auto)</span></label>
                 <div className="w-full rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 text-sm text-slate-600">
                   {rawTotal > 0 ? `$${formatMoney(patientEstimate)}` : "—"}
                 </div>
@@ -1249,6 +1249,70 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
 // ---------------- Lightweight SVG line chart (no external dependency) ----------------
 
 const CHART_COLORS = ["#e8622a", "#0369a1", "#059669", "#7c3aed", "#dc2626", "#0891b2"];
+
+// A/R is measured as a series of snapshots rather than a continuous value,
+// and a line chart of two nearby readings says almost nothing. Grouping the
+// readings into months and drawing each as its own bar makes both the
+// within-month movement and the month-to-month direction readable at a
+// glance, which is what actually matters when chasing balances down.
+function ArMonthlyBarChart({ entries, height = 240 }: { entries: ArAgingEntry[]; height?: number }) {
+  if (entries.length === 0) return <p className="text-sm text-slate-400">No A/R entries logged yet.</p>;
+
+  const sorted = [...entries].sort((a, b) => a.entryDate.localeCompare(b.entryDate));
+  const months: { key: string; label: string; rows: ArAgingEntry[] }[] = [];
+  for (const e of sorted) {
+    const key = e.entryDate.slice(0, 7);
+    let bucket = months.find((m) => m.key === key);
+    if (!bucket) {
+      bucket = {
+        key,
+        label: new Date(e.entryDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+        rows: [],
+      };
+      months.push(bucket);
+    }
+    bucket.rows.push(e);
+  }
+
+  const totalOf = (e: ArAgingEntry) => e.ar0to30 + e.ar31to60 + e.ar61to90 + e.ar90plus;
+  const maxValue = Math.max(...sorted.map(totalOf), 1);
+  const barArea = height - 34; // leave room for the month labels
+
+  return (
+    <div>
+      <div className="flex items-end gap-4 overflow-x-auto pb-1" style={{ height }}>
+        {months.map((m) => (
+          <div key={m.key} className="flex flex-col items-center flex-shrink-0">
+            <div className="flex items-end gap-1" style={{ height: barArea }}>
+              {m.rows.map((e) => {
+                const total = totalOf(e);
+                const over90 = e.ar90plus;
+                const totalH = (total / maxValue) * barArea;
+                const over90H = (over90 / maxValue) * barArea;
+                const dayLabel = new Date(e.entryDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                return (
+                  <div key={e.id} className="relative rounded-t" style={{ width: 22, height: totalH, background: "#F3C9B4" }}
+                    title={`${dayLabel}\nTotal: $${formatMoney(total)}\n90+ days: $${formatMoney(over90)}`}>
+                    {/* The 90+ portion sits at the base, so the part that
+                        needs chasing is visible inside the whole. */}
+                    <div className="absolute bottom-0 left-0 right-0 rounded-b" style={{ height: over90H, background: "#D85A30" }} />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-xs mt-1.5 whitespace-nowrap" style={{ color: "rgba(74,66,56,0.55)" }}>{m.label}</div>
+            <div className="text-[10px]" style={{ color: "rgba(74,66,56,0.35)" }}>{m.rows.length} {m.rows.length === 1 ? "reading" : "readings"}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-4 mt-2 text-xs" style={{ color: "rgba(74,66,56,0.6)" }}>
+        <span className="flex items-center gap-1.5"><span className="inline-block rounded" style={{ width: 10, height: 10, background: "#F3C9B4" }} /> Total A/R</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block rounded" style={{ width: 10, height: 10, background: "#D85A30" }} /> of which 90+ days</span>
+        <span className="opacity-75">Hover a bar for its date and figures.</span>
+      </div>
+    </div>
+  );
+}
 
 function TrendLineChart({ series, height = 220 }: { series: { label: string; color: string; points: { date: string; value: number }[] }[]; height?: number }) {
   const allDates = Array.from(new Set(series.flatMap((s) => s.points.map((p) => p.date)))).sort();
@@ -1597,7 +1661,7 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
           <h2 className="font-bold text-slate-700">Accounts Receivable Trend</h2>
           <button onClick={() => setDepthView(depthView === "ar" ? null : "ar")} className="text-xs text-orange-500 hover:underline">{depthView === "ar" ? "Standard view" : "In-depth view"}</button>
         </div>
-        <TrendLineChart series={arSeries} />
+        <ArMonthlyBarChart entries={arAgingHistory} />
         {depthView === "ar" && (
           <div className="mt-3 space-y-1 max-h-60 overflow-y-auto">
             {[...arAgingHistory].sort((a, b) => b.entryDate.localeCompare(a.entryDate)).map((e) => {
