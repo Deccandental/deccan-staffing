@@ -129,6 +129,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [editingCertId, setEditingCertId] = useState<string | null>(null);
   const [certForm, setCertForm] = useState<CertFormState>(EMPTY_CERT_FORM);
   const [useCustomTitle, setUseCustomTitle] = useState(false);
+  const [titleIsFixed, setTitleIsFixed] = useState(false);
   const [certFile, setCertFile] = useState<File | null>(null);
   const [certError, setCertError] = useState("");
   const [certSaving, setCertSaving] = useState(false);
@@ -304,6 +305,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     setCertFile(null);
     setCertError("");
     setUseCustomTitle(titleOptions.length === 0);
+    setTitleIsFixed(false);
     setShowCertForm(true);
   }
 
@@ -313,6 +315,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     setCertFile(null);
     setCertError("");
     setUseCustomTitle(!titleOptions.includes(cert.title));
+    setTitleIsFixed(false);
     setShowCertForm(true);
   }
 
@@ -323,6 +326,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     setCertFile(null);
     setCertError("");
     setUseCustomTitle(false);
+    setTitleIsFixed(true);
     setShowCertForm(true);
   }
 
@@ -332,6 +336,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     setCertForm(EMPTY_CERT_FORM);
     setCertFile(null);
     setCertError("");
+    setTitleIsFixed(false);
   }
 
   async function handleRsvp(eventId: string, attending: boolean) {
@@ -897,7 +902,11 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               {showCertForm && (
                 <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 mb-3 space-y-2">
                   {certError && <p className="text-xs text-red-500">{certError}</p>}
-                  {!useCustomTitle ? (
+                  {titleIsFixed ? (
+                    <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-medium" style={{ color: "#4A4238" }}>
+                      {certForm.title}
+                    </div>
+                  ) : !useCustomTitle ? (
                     <select
                       value={titleOptions.includes(certForm.title) ? certForm.title : ""}
                       onChange={(e) => {
