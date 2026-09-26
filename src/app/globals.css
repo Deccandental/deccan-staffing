@@ -1,29 +1,7 @@
-@import "tailwindcss";
-
-:root {
-  --brand-orange: #EF843F;
-  --brand-orange-deep: #DE6C24;
-  --brand-gray: #5a5a5a;
-  --brand-light-gray: #9a9a9a;
-  --brand-bg: #FBF7EF;
-  --brand-ink: #232634;
-}
-
-html, body {
-  margin: 0;
-  padding: 0;
-  background: var(--brand-bg);
-  color: var(--brand-ink);
-  font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-h1, h2, h3, h4, h5, h6 {
-  font-family: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 * { box-sizing: border-box; }
-button { cursor: pointer; font-family: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif; font-weight: 600; }
-table { border-collapse: collapse; }
-input, select { font: inherit; }
+body { background: #f7f3ec; color: #40403c; font-family: "Inter", system-ui, -apple-system, sans-serif; }
