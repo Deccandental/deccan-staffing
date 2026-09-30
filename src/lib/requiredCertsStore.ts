@@ -281,7 +281,19 @@ export function computeRequiredCertStatuses(
       // (matched by when it was entered, as a proxy for completion date).
       const ceHourTypeIds = new Set(types.filter((t) => t.kind === "ce_hours" && role.includes(t.appliesToRole)).map((t) => t.id));
       const loggedHours = ceEntries.filter((e) => ceHourTypeIds.has(e.requiredCertTypeId) && e.dateCompleted >= windowStart && e.dateCompleted <= licenseExpiration).reduce((sum, e) => sum + e.hours, 0);
-      const certHours = allCerts.filter((c) => c.ceHours != null && c.createdAt.slice(0, 10) >= windowStart && c.createdAt.slice(0, 10) <= licenseExpiration).reduce((sum, c) => sum + (c.ceHours ?? 0), 0);
+      // Window certificate credit by when the course was actually completed,
+      // not by when the record happened to be typed into the app. Using
+      // createdAt counted a certificate earned years ago (or years hence)
+      // toward the current period purely because it was entered today, and
+      // disagreed with the CE log, which uses the real date.
+      const certHours = allCerts.filter((c) => {
+        if (c.ceHours == null) return false;
+        const certType = types.find((t) => t.title === c.title);
+        const effectiveDate = certType && certType.dateMode === "completion" && c.expirationDate
+          ? addMonths(c.expirationDate, -certType.frequencyMonths)
+          : c.expirationDate ?? c.createdAt.slice(0, 10);
+        return effectiveDate >= windowStart && effectiveDate <= licenseExpiration;
+      }).reduce((sum, c) => sum + (c.ceHours ?? 0), 0);
       const totalHours = loggedHours + certHours;
       return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration, satisfied: type.targetHours != null && totalHours >= type.targetHours, missingLicense: false, targetHours: type.targetHours };
     }
