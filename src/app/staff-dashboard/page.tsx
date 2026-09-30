@@ -26,7 +26,7 @@ import { HoBonusMonth, loadHoBonusPayoutYear } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
 import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
 import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsStore";
-import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry, computeRequiredCertStatuses } from "@/lib/requiredCertsStore";
+import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry, computeRequiredCertStatuses, deleteCeCourseEntry } from "@/lib/requiredCertsStore";
 import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredCertsSection";
 import CeLogPanel from "@/components/CeLogPanel";
 import { formatMoney } from "@/lib/format";
@@ -1011,7 +1011,12 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   bare
                   filter="ce"
                 />
-                <CeLogPanel employee={selectedEmployee} certs={certs} ceEntries={ceEntriesForCerts} requiredTypes={requiredTypesForCerts} />
+                <CeLogPanel employee={selectedEmployee} certs={certs} ceEntries={ceEntriesForCerts} requiredTypes={requiredTypesForCerts}
+                  onDeleteEntry={async (id) => {
+                    if (!confirm("Delete this CE course entry?")) return;
+                    await deleteCeCourseEntry(id);
+                    await refreshCertsData();
+                  }} />
               </div>
             )}
             </div>
