@@ -29,6 +29,7 @@ import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsS
 import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry, computeRequiredCertStatuses, deleteCeCourseEntry } from "@/lib/requiredCertsStore";
 import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredCertsSection";
 import CeLogPanel from "@/components/CeLogPanel";
+import { WishlistItem, loadWishlistItems } from "@/lib/wishlist";
 import { formatMoney } from "@/lib/format";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
@@ -117,6 +118,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [pvPayments, setPvPayments] = useState<PvBonusPayment[]>([]);
   const [expandedPvQuarter, setExpandedPvQuarter] = useState<string | null>(null);
   const [rsvps, setRsvps] = useState<EventRsvp[]>([]);
+  const [wishlistItems, setWishlistItems] = useState<WishlistItem[]>([]);
   const [showOtherDocs, setShowOtherDocs] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({ name: "", email: "" });
@@ -136,6 +138,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [certSaving, setCertSaving] = useState(false);
 
   useEffect(() => { loadStaff().then(setStaff); }, []);
+  useEffect(() => { loadWishlistItems(selectedId).then(setWishlistItems); }, [selectedId]);
 
   useEffect(() => {
     if (selectedId == null) return;
@@ -1044,6 +1047,59 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
             </div>
+
+            {/* The wishlist lives on its own page and was easy to forget
+                about. Surfacing the leaders here keeps it visible, and the
+                unranked count gives people a reason to go and vote. */}
+            {wishlistItems.length > 0 && (
+              <div className="lg:col-span-3 rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(216,168,48,0.16)", borderTop: "4px solid #D8A830" }}>
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                  <h2 className="font-bold" style={{ color: "#8A6A12" }}>⭐ Team Wishlist — top requests</h2>
+                  <a href="/wishlist" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#D8A830" }}>
+                    {wishlistItems.some((i) => i.myRank != null) ? "Review my rankings →" : "Rank your top 5 →"}
+                  </a>
+                </div>
+
+                {(() => {
+                  const top = [...wishlistItems].sort((a, b) => b.score - a.score).slice(0, 3);
+                  const unranked = wishlistItems.filter((i) => i.myRank == null).length;
+                  const iHaveVoted = wishlistItems.some((i) => i.myRank != null);
+                  return (
+                    <>
+                      <div className="space-y-1.5 mb-3">
+                        {top.map((item, idx) => (
+                          <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-2" style={{ background: "#FDF6E4" }}>
+                            <span className="flex items-center gap-2 min-w-0">
+                              <span className="flex-shrink-0 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold text-white" style={{ background: "#D8A830" }}>{idx + 1}</span>
+                              <span className="text-sm truncate" style={{ color: "#4A4238" }}>{item.description}</span>
+                              {item.myRank != null && (
+                                <span className="flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: "#EAF3DE", color: "#3B6D11" }}>your #{item.myRank}</span>
+                              )}
+                            </span>
+                            <span className="flex-shrink-0 text-xs" style={{ color: "rgba(74,66,56,0.55)" }}>
+                              {item.estimatedCost != null ? `$${formatMoney(item.estimatedCost)}` : "—"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {identity.employeeId === selectedId && (
+                        iHaveVoted ? (
+                          unranked > 0 && (
+                            <p className="text-xs" style={{ color: "rgba(74,66,56,0.6)" }}>
+                              {unranked} item{unranked === 1 ? "" : "s"} you haven't ranked yet.
+                            </p>
+                          )
+                        ) : (
+                          <p className="text-xs font-semibold" style={{ color: "#8A6A12" }}>
+                            You haven't ranked anything yet — your picks help decide what gets bought.
+                          </p>
+                        )
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
 
             {canSeeThisPersonsPay && selectedEmployee?.hoBonusEligible && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
