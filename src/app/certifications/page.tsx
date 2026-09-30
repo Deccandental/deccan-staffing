@@ -123,7 +123,7 @@ function statusBadge(cert: Certification): { label: string; className: string } 
 }
 
 function CertForm({
-  form, setForm, file, setFile, error, saving, staff, lockOwner, editingId, onSave, onCancel, onDelete,
+  form, setForm, file, setFile, error, saving, staff, lockOwner, editingId, editingCert, onSave, onCancel, onDelete,
   titleOptions, useCustomTitle, setUseCustomTitle, requiredTypes,
 }: {
   form: FormState;
@@ -135,6 +135,7 @@ function CertForm({
   staff: Employee[];
   lockOwner: boolean;
   editingId: string | null;
+  editingCert?: Certification | null;
   onSave: () => void;
   onCancel: () => void;
   onDelete?: () => void;
@@ -240,6 +241,22 @@ function CertForm({
         <label className="block text-xs font-semibold text-slate-500 mb-1">
           Certificate File {editingId ? "(optional — leave blank to keep existing file)" : ""}
         </label>
+        {/* Without this there was no way to tell whether a file was already
+            attached, let alone check it was the right one before saving. */}
+        {editingId && (() => {
+          const existing = editingCert;
+          if (!existing?.fileUrl) {
+            return <p className="text-xs mb-1" style={{ color: "rgba(74,66,56,0.5)" }}>No file attached yet.</p>;
+          }
+          return (
+            <p className="text-xs mb-1">
+              <span style={{ color: "rgba(74,66,56,0.5)" }}>Currently attached: </span>
+              <a href={existing.fileUrl} target="_blank" rel="noopener noreferrer" className="font-semibold hover:underline" style={{ color: "#185FA5" }}>
+                {existing.fileName || "View file"} →
+              </a>
+            </p>
+          );
+        })()}
         <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
       </div>
@@ -588,11 +605,22 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
   }
 
   function startEdit(cert: Certification) {
+    // Only the expiration date is stored. For a requirement whose form asks
+    // for the COMPLETION date, showing the stored expiration in that field
+    // would be wrong twice over: it displays the wrong date, and saving
+    // would add another full cycle on top, pushing the expiry further out
+    // every time the record was edited. So convert back to the completion
+    // date the expiration was originally derived from.
+    const editType = requiredTypes.find((t) => t.title === cert.title);
+    const editIsCompletionMode = editType != null && editType.kind !== "ce_hours" && editType.dateMode === "completion";
+    const dateForForm = editIsCompletionMode && cert.expirationDate
+      ? addMonths(cert.expirationDate, -editType.frequencyMonths)
+      : cert.expirationDate ?? "";
     setForm({
       ownerType: cert.ownerType,
       employeeId: cert.employeeId != null ? String(cert.employeeId) : "",
       title: cert.title,
-      expirationDate: cert.expirationDate ?? "",
+      expirationDate: dateForForm,
       ceHours: cert.ceHours != null ? String(cert.ceHours) : "",
     });
     setEditingId(cert.id);
@@ -747,7 +775,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
               </button>
             )}
             {showForm && identity.mode === "staff" && (
-              <CertForm form={form} setForm={setForm} file={file} setFile={setFile} error={error} saving={saving}
+              <CertForm editingCert={allCerts.find((x) => x.id === editingId) ?? null} form={form} setForm={setForm} file={file} setFile={setFile} error={error} saving={saving}
                 staff={staff} lockOwner editingId={editingId} onSave={handleSave} onCancel={closeForm} onDelete={editingId ? handleDeleteFromForm : undefined}
                 titleOptions={titleOptions} useCustomTitle={useCustomTitle} setUseCustomTitle={setUseCustomTitle} requiredTypes={requiredTypes} />
             )}
@@ -809,7 +837,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
               </div>
             )}
             {showForm && (
-              <CertForm form={form} setForm={setForm} file={file} setFile={setFile} error={error} saving={saving}
+              <CertForm editingCert={allCerts.find((x) => x.id === editingId) ?? null} form={form} setForm={setForm} file={file} setFile={setFile} error={error} saving={saving}
                 staff={staff} lockOwner={false} editingId={editingId} onSave={handleSave} onCancel={closeForm} onDelete={editingId ? handleDeleteFromForm : undefined}
                 titleOptions={titleOptions} useCustomTitle={useCustomTitle} setUseCustomTitle={setUseCustomTitle} requiredTypes={requiredTypes} />
             )}
