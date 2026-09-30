@@ -311,7 +311,17 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   }
 
   function startEditCert(cert: Certification) {
-    setCertForm({ title: cert.title, expirationDate: cert.expirationDate ?? "", ceHours: cert.ceHours != null ? String(cert.ceHours) : "" });
+    // Only the expiration date is stored. For a requirement whose form asks
+    // for the COMPLETION date, loading the stored expiration into that
+    // field shows the wrong date AND adds another full cycle on save —
+    // pushing the expiry further out with every edit. Convert back to the
+    // completion date the expiration was derived from.
+    const editType = requiredTypesForCerts.find((t) => t.title === cert.title);
+    const editIsCompletionMode = editType != null && editType.kind !== "ce_hours" && editType.dateMode === "completion";
+    const dateForForm = editIsCompletionMode && cert.expirationDate
+      ? addMonthsToDate(cert.expirationDate, -editType.frequencyMonths)
+      : cert.expirationDate ?? "";
+    setCertForm({ title: cert.title, expirationDate: dateForForm, ceHours: cert.ceHours != null ? String(cert.ceHours) : "" });
     setEditingCertId(cert.id);
     setCertFile(null);
     setCertError("");
@@ -956,6 +966,20 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   })()}
                   <input type="number" onFocus={(e) => e.target.select()} value={certForm.ceHours} onChange={(e) => setCertForm((f) => ({ ...f, ceHours: e.target.value }))}
                     placeholder="CE credits earned (optional)" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  {/* Show what's already attached, so it's possible to check
+                      the right file is there before saving. */}
+                  {editingCertId && (() => {
+                    const existing = certs.find((x) => x.id === editingCertId);
+                    if (!existing?.fileUrl) return <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>No file attached yet.</p>;
+                    return (
+                      <p className="text-xs">
+                        <span style={{ color: "rgba(74,66,56,0.5)" }}>Currently attached: </span>
+                        <a href={existing.fileUrl} target="_blank" rel="noopener noreferrer" className="font-semibold hover:underline" style={{ color: "#185FA5" }}>
+                          {existing.fileName || "View file"} →
+                        </a>
+                      </p>
+                    );
+                  })()}
                   <input type="file" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
                     className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" />
                   {editingCertId && <p className="text-xs text-slate-400">Leave file blank to keep the existing one.</p>}
