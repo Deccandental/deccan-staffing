@@ -599,37 +599,32 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             )}
 
             {canSeeThisPersonsPay && selectedEmployee?.growthBonusEligible && !showBonusCountdown && (
-              <div className="lg:col-span-3 rounded-2xl p-6" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)", boxShadow: bonusUnlocked ? "0 8px 24px rgba(16,185,129,0.2)" : "0 8px 24px rgba(245,158,11,0.2)" }}>
-                <div className="text-center mb-4">
-                  <p className="text-sm font-semibold" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
-                    {QUARTER_LABELS[currentQuarter]} {bonusYear} bonus progress{bonusUnlocked ? " — unlocked!" : ""}
-                  </p>
-                  <p className="text-4xl font-bold mt-1" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>{bonusProgressPct}%</p>
-                  <p className="text-sm mt-1" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
-                    ${formatMoney(currentQuarterData?.netProductionCurrent ?? 0)} of ${formatMoney(requiredProduction)} goal
-                  </p>
-                </div>
-
-                <div className="w-full h-2.5 rounded-full bg-white overflow-hidden mb-5">
-                  <div className="h-full rounded-full transition-all" style={{ width: `${bonusProgressPct}%`, backgroundColor: bonusUnlocked ? "#10b981" : "#f59e0b" }} />
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2 mb-5">
-                  <div className="rounded-xl bg-white/70 p-3">
-                    <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Received this year</p>
-                    <p className="text-xl font-bold" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>${formatMoney(bonusReceivedThisYear)}</p>
+              <div className="lg:col-span-3 rounded-2xl p-4" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)", boxShadow: bonusUnlocked ? "0 8px 24px rgba(16,185,129,0.2)" : "0 8px 24px rgba(245,158,11,0.2)" }}>
+                {/* Laid out across rather than stacked — the same figures in
+                    roughly half the vertical space, so the cards below stay
+                    visible without scrolling. */}
+                <div className="flex items-center gap-4 flex-wrap mb-2">
+                  <div className="flex items-baseline gap-2 flex-shrink-0">
+                    <span className="text-3xl font-bold leading-none" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>{bonusProgressPct}%</span>
+                    <span className="text-xs font-semibold" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
+                      {QUARTER_LABELS[currentQuarter]} {bonusYear}{bonusUnlocked ? " — unlocked!" : ""}
+                    </span>
                   </div>
-                  {bonusBeingPaced ? (
-                    <div className="rounded-xl bg-white/70 p-3">
-                      <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Payout timing</p>
-                      <p className="text-xs mt-1 leading-snug text-slate-600">Paid out gradually — nothing earned is reduced</p>
+                  <div className="flex-1 min-w-[160px]">
+                    <div className="w-full h-2 rounded-full bg-white overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${bonusProgressPct}%`, backgroundColor: bonusUnlocked ? "#10b981" : "#f59e0b" }} />
                     </div>
-                  ) : (
-                    <div className="rounded-xl bg-white/70 p-3">
-                      <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Payout timing</p>
-                      <p className="text-xs mt-1 leading-snug text-slate-600">Paid in full once unlocked</p>
-                    </div>
-                  )}
+                    <p className="text-xs mt-1" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
+                      ${formatMoney(currentQuarterData?.netProductionCurrent ?? 0)} of ${formatMoney(requiredProduction)} goal
+                    </p>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Received this year</p>
+                    <p className="text-lg font-bold leading-tight" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>${formatMoney(bonusReceivedThisYear)}</p>
+                    <p className="text-xs" style={{ color: "rgba(74,66,56,0.45)" }}>
+                      {bonusBeingPaced ? "Paid gradually — nothing reduced" : "Paid in full once unlocked"}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-4 gap-2">
@@ -639,22 +634,16 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                     const isCurrent = q === currentQuarter;
                     const unlocked = result?.calc.eligible;
                     return (
-                      <div key={q} className="text-center rounded-xl py-3 px-1" style={{ background: unlocked ? "#EAF3DE" : isCurrent ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.4)", opacity: !isPast && !isCurrent ? 0.5 : 1 }}>
-                        <div className="text-xs mb-1" style={{ color: "rgba(74,66,56,0.5)" }}>{QUARTER_LABELS[q]}</div>
+                      <div key={q} className="flex items-center justify-center gap-1.5 rounded-lg py-1.5 px-2" style={{ background: unlocked ? "#EAF3DE" : isCurrent ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.4)", opacity: !isPast && !isCurrent ? 0.5 : 1 }}>
+                        <span className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>{QUARTER_LABELS[q].split(" ")[0]}</span>
                         {unlocked ? (
-                          <>
-                            <div style={{ color: "#3B6D11", fontSize: 16 }}>✓</div>
-                            <div className="text-xs font-semibold mt-0.5" style={{ color: "#3B6D11" }}>${formatMoney(result!.myBonus)}</div>
-                          </>
+                          <span className="text-xs font-semibold" style={{ color: "#3B6D11" }}>✓ ${formatMoney(result!.myBonus)}</span>
                         ) : isPast ? (
-                          <div className="text-xs text-slate-400 mt-2">Not met</div>
+                          <span className="text-xs text-slate-400">Not met</span>
                         ) : isCurrent ? (
-                          <>
-                            <div style={{ fontSize: 16 }}>⏳</div>
-                            <div className="text-xs text-slate-500 mt-0.5">In progress</div>
-                          </>
+                          <span className="text-xs text-slate-500">⏳ In progress</span>
                         ) : (
-                          <div className="text-xs text-slate-400 mt-2">—</div>
+                          <span className="text-xs text-slate-400">—</span>
                         )}
                       </div>
                     );
