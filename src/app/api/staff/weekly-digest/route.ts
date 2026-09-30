@@ -11,6 +11,12 @@ function daysUntil(dateStr: string): number {
   return Math.round((target - today) / 86400000);
 }
 
+function addMonthsStr(dateStr: string, months: number): string {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (secret) {
@@ -23,8 +29,11 @@ export async function GET(req: NextRequest) {
   }
 
   const [{ data: staffRows }, { data: certRows }, { data: docs }, { data: eventRows }, checkinSlots] = await Promise.all([
-    supabase.from("staff").select("id, name, email, archived, exempt_from_policy_signing, exempt_from_checkin").eq("archived", false),
-    supabase.from("certifications").select("*").not("expiration_date", "is", null),
+    // Role and specialty are needed to work out which requirements apply to
+    // each person; all certifications (not just dated ones) are needed to
+    // tell "never provided" apart from "expiring".
+    supabase.from("staff").select("id, name, email, role, specialty, archived, exempt_from_policy_signing, exempt_from_checkin").eq("archived", false),
+    supabase.from("certifications").select("*"),
     supabase.from("policy_documents").select("*"),
     supabase.from("events").select("*"),
     loadAllSlots(),
@@ -32,6 +41,12 @@ export async function GET(req: NextRequest) {
   // RSVP answers so far, so the digest can nudge only the people who
   // haven't replied yet rather than pestering everyone.
   const { data: rsvpRows } = await supabase.from("event_rsvps").select("event_id, employee_id");
+  // Required certificate/CE types, plus every logged CE course, so the
+  // digest can flag what's missing entirely — not only what's expiring.
+  const [{ data: requiredTypeRows }, { data: ceEntryRows }] = await Promise.all([
+    supabase.from("required_cert_types").select("*"),
+    supabase.from("ce_course_entries").select("*"),
+  ]);
   const today = new Date().toISOString().slice(0, 10);
 
   const docRequirements: { docTitle: string; requirementId: string; cycleLabel: string; signedIds: Set<number>; restrictedToEmployeeId: number | null }[] = [];
@@ -52,10 +67,65 @@ export async function GET(req: NextRequest) {
     if (!emp.email) continue;
     const items: string[] = [];
 
-    for (const cert of (certRows ?? []).filter((c) => c.employee_id === emp.id)) {
+    const myCerts = (certRows ?? []).filter((c) => c.employee_id === emp.id);
+
+    for (const cert of myCerts) {
+      if (!cert.expiration_date) continue;
       const remaining = daysUntil(cert.expiration_date);
       if (remaining < 0) items.push(`<strong>Certification expired:</strong> ${cert.title} (expired ${Math.abs(remaining)} day${Math.abs(remaining) === 1 ? "" : "s"} ago)`);
       else if (remaining <= 60) items.push(`<strong>Certification expiring:</strong> ${cert.title} — ${remaining} day${remaining === 1 ? "" : "s"} left`);
+    }
+
+    // Requirements with nothing on file at all. Previously invisible here,
+    // because the digest only looked at certificates that already existed —
+    // so someone who had never submitted their BLS/CPR was never told.
+    const myRoles: string[] = [];
+    if (emp.role === "Dentist") {
+      myRoles.push("Dentist");
+      if (emp.specialty && emp.specialty !== "General Dentist") myRoles.push("Specialist");
+    }
+    if (emp.role === "RDA") myRoles.push("RDA");
+    if (emp.role === "Hygienist") myRoles.push("Hygienist");
+    if (emp.role === "Assistant") myRoles.push("Assistant");
+
+    const seenTitles = new Set<string>();
+    const myRequirements = (requiredTypeRows ?? [])
+      .filter((t) => myRoles.includes(t.applies_to_role))
+      .filter((t) => { if (seenTitles.has(t.title)) return false; seenTitles.add(t.title); return true; });
+
+    // The licence anchors every CE renewal window, so find its expiry once.
+    const licenseType = myRequirements.find((t) => t.kind === "license");
+    const licenseExpiration = licenseType
+      ? myCerts.find((c) => c.title === licenseType.title)?.expiration_date ?? null
+      : null;
+    const daysToRenewal = licenseExpiration ? daysUntil(licenseExpiration) : null;
+
+    for (const req of myRequirements) {
+      const isCertKind = req.kind === "license" || req.kind === "standalone";
+      if (isCertKind) {
+        const onFile = myCerts.some((c) => c.title === req.title);
+        if (!onFile) items.push(`<strong>Certificate missing:</strong> ${req.title} — nothing on file yet`);
+        continue;
+      }
+
+      // CE requirements only get raised once the renewal is close enough to
+      // matter. Flagging them a year or more out would be noise every week.
+      if (daysToRenewal == null || daysToRenewal > 183 || daysToRenewal < 0) continue;
+
+      const windowStart = addMonthsStr(licenseExpiration!, -(req.frequency_months || 24));
+      const loggedHours = (ceEntryRows ?? [])
+        .filter((e) => e.employee_id === emp.id && e.required_cert_type_id === req.id)
+        .filter((e) => e.date_completed >= windowStart && e.date_completed <= licenseExpiration!)
+        .reduce((sum, e) => sum + (e.hours ?? 0), 0);
+
+      if (req.kind === "total_ce_hours") {
+        const target = req.target_hours ?? 0;
+        if (target > 0 && loggedHours < target) {
+          items.push(`<strong>CE hours outstanding:</strong> ${Math.round((target - loggedHours) * 100) / 100} of ${target} hrs still needed before your licence renews on ${new Date(licenseExpiration! + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`);
+        }
+      } else if (loggedHours <= 0) {
+        items.push(`<strong>CE course needed:</strong> ${req.title} — none logged for this renewal period (licence renews in ${daysToRenewal} day${daysToRenewal === 1 ? "" : "s"})`);
+      }
     }
 
     if (!emp.exempt_from_policy_signing) {
