@@ -130,6 +130,18 @@ export function RequiredCertsSection({
                     ) : status.satisfied ? (
                       <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ background: "#EAF3DE", color: "#3B6D11" }}>
                         ✓ {status.totalHoursInWindow} hrs logged
+                        {/* The date the requirement was actually satisfied —
+                            without it you had to open the CE log to find out
+                            when, which is the first thing you want to know. */}
+                        {(() => {
+                          const dates = myEntries
+                            .filter((e) => !status.windowStart || !status.windowEnd || (e.dateCompleted >= status.windowStart && e.dateCompleted <= status.windowEnd))
+                            .map((e) => e.dateCompleted)
+                            .sort();
+                          const latest = dates[dates.length - 1];
+                          if (!latest) return null;
+                          return <span className="font-normal"> · {new Date(latest + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>;
+                        })()}
                       </span>
                     ) : (
                       <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ background: "#FCEBEB", color: "#A32D2D" }}>
