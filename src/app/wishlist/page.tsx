@@ -122,6 +122,11 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
       <Sidebar />
       <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
         <header className="mb-2">
+          {/* People arrive here from the dashboard card, so give them a way
+              straight back rather than hunting through the sidebar. */}
+          <a href="/staff-dashboard" className="text-sm font-semibold hover:underline inline-block mb-1" style={{ color: "#e8622a" }}>
+            ← Back to dashboard
+          </a>
           <h1 className="text-2xl font-bold">Wishlist</h1>
         </header>
         <p className="text-sm text-slate-500 mb-1 max-w-3xl">
