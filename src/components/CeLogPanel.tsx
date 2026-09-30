@@ -22,6 +22,7 @@ import { getApplicableRoles } from "@/components/RequiredCertsSection";
  */
 
 interface CeLogRow {
+  entryId?: string; // set for logged courses, which can be deleted here
   date: string;
   title: string;
   courseName: string;
@@ -33,12 +34,13 @@ interface CeLogRow {
 }
 
 export default function CeLogPanel({
-  employee, certs, ceEntries, requiredTypes,
+  employee, certs, ceEntries, requiredTypes, onDeleteEntry,
 }: {
   employee: Employee;
   certs: Certification[];
   ceEntries: CeCourseEntry[];
   requiredTypes: RequiredCertType[];
+  onDeleteEntry?: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -61,6 +63,7 @@ export default function CeLogPanel({
   for (const e of ceEntries) {
     const type = typeById.get(e.requiredCertTypeId);
     rows.push({
+      entryId: e.id,
       date: e.dateCompleted,
       title: type?.title ?? "CE course",
       courseName: e.courseName,
@@ -160,9 +163,14 @@ export default function CeLogPanel({
                     </td>
                     <td className="py-1.5 pr-2 text-right font-semibold">{r.hours}</td>
                     <td className="py-1.5 print:hidden">
-                      {r.fileUrl && (
-                        <a href={r.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold hover:underline" style={{ color: "#185FA5" }}>View →</a>
-                      )}
+                      <span className="flex items-center gap-2 justify-end">
+                        {r.fileUrl && (
+                          <a href={r.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold hover:underline" style={{ color: "#185FA5" }}>View →</a>
+                        )}
+                        {r.entryId && onDeleteEntry && (
+                          <button onClick={() => onDeleteEntry(r.entryId!)} className="text-xs text-red-400 hover:underline">Delete</button>
+                        )}
+                      </span>
                     </td>
                   </tr>
                 ))}
