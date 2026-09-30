@@ -28,6 +28,7 @@ import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySigna
 import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsStore";
 import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry, computeRequiredCertStatuses } from "@/lib/requiredCertsStore";
 import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredCertsSection";
+import CeLogPanel from "@/components/CeLogPanel";
 import { formatMoney } from "@/lib/format";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
@@ -1010,6 +1011,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   bare
                   filter="ce"
                 />
+                <CeLogPanel employee={selectedEmployee} certs={certs} ceEntries={ceEntriesForCerts} requiredTypes={requiredTypesForCerts} />
               </div>
             )}
             </div>
