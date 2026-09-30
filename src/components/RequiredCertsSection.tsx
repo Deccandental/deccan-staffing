@@ -138,11 +138,6 @@ export function RequiredCertsSection({
                     )}
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    {myEntries.length > 0 && (
-                      <button onClick={() => setExpandedTypeId(expandedTypeId === type.id ? null : type.id)} className="text-xs hover:underline" style={{ color: "rgba(74,66,56,0.5)" }}>
-                        {expandedTypeId === type.id ? "Hide" : "History"} ({myEntries.length})
-                      </button>
-                    )}
                     <button onClick={() => {
                       const opening = loggingTypeId !== type.id;
                       setLoggingTypeId(opening ? type.id : null);
