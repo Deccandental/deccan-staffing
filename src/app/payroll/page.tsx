@@ -13,6 +13,7 @@ import { TempStaff } from "@/app/temps/page";
 import { getTempAssignmentsForMonth } from "@/lib/tempAssignments";
 import { supabase } from "@/lib/supabase";
 import { PayrollEntry, loadPayrollEntries, loadPayrollEntriesInRange, savePayrollEntry } from "@/lib/payrollStore";
+import { routeFor, recordBonusPayment, PROGRAMME_LABELS, eligibleProgrammes, addOffCyclePayment, loadOffCyclePayments, deleteOffCyclePayment, OffCyclePayment, BonusProgramme } from "@/lib/bonusRouting";
 import { PayPeriod, getPayPeriodForDate, stepPayPeriod } from "@/lib/payPeriods";
 import { getScheduledEmployeeIdsInRange } from "@/lib/staffSchedule";
 import {
@@ -92,6 +93,13 @@ function PayrollPageBody() {
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [savingAll, setSavingAll] = useState(false);
+  const [ocEmployeeId, setOcEmployeeId] = useState("");
+  const [ocDate, setOcDate] = useState(new Date().toISOString().slice(0, 10));
+  const [ocAmount, setOcAmount] = useState("");
+  const [ocProgramme, setOcProgramme] = useState<BonusProgramme | "none">("none");
+  const [ocNotes, setOcNotes] = useState("");
+  const [ocMsg, setOcMsg] = useState("");
+  const [offCyclePayments, setOffCyclePayments] = useState<OffCyclePayment[]>([]);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<Record<string, string>>({});
   const [globalMsg, setGlobalMsg] = useState("");
@@ -113,6 +121,7 @@ function PayrollPageBody() {
     setStaff([...s].sort(byLastName));
     setTemps(t);
     setLeaveRequests(lr);
+    loadOffCyclePayments().then(setOffCyclePayments);
     setHolidays(h);
     setScheduledStaffIds(schedIds);
     setScheduledTempIds(new Set(tempAssignments.filter((a) => a.date >= period.start && a.date <= period.end).map((a) => a.tempId)));
@@ -208,6 +217,21 @@ function PayrollPageBody() {
     }));
   }
 
+  async function handleAddOffCycle() {
+    const emp = staff.find((s) => s.id === Number(ocEmployeeId));
+    const amt = Number(ocAmount);
+    if (!emp || !ocDate || !amt) { setOcMsg("Pick a person, a date and an amount."); return; }
+    const result = await addOffCyclePayment({
+      employeeId: emp.id, paidDate: ocDate, amount: amt,
+      programme: ocProgramme, notes: ocNotes.trim(),
+    });
+    if (!result.ok) { setOcMsg(result.error ?? "Couldn't save."); return; }
+    setOcMsg("✓ Payment recorded.");
+    setOcEmployeeId(""); setOcAmount(""); setOcNotes(""); setOcProgramme("none");
+    setOffCyclePayments(await loadOffCyclePayments());
+    setTimeout(() => setOcMsg(""), 4000);
+  }
+
   async function saveOne(p: PersonRow): Promise<boolean> {
     const fields = rows[p.personKey] ?? EMPTY_ROW;
     const saved = await savePayrollEntry({
@@ -216,6 +240,31 @@ function PayrollPageBody() {
       ...fields,
     });
     if (saved) setSavedEntries((e) => ({ ...e, [p.personKey]: saved }));
+
+    // Bonus money paid on a paycheck is also recorded against whichever
+    // bonus programme the person is on, so it doesn't have to be entered
+    // twice and the programme's balance stays truthful. Temps are on no
+    // programme, so they're skipped.
+    if (saved && p.employee) {
+      const route = routeFor(p.employee);
+      if (route.programme) {
+        const result = await recordBonusPayment({
+          programme: route.programme,
+          employeeId: p.employee.id,
+          amount: Number(fields.bonusAmount) || 0,
+          paidDate: period.end,
+          payPeriodStart: period.start,
+          payPeriodEnd: period.end,
+          sourceKey: `payroll:${p.personKey}:${period.start}`,
+          notes: "Paid with payroll",
+        });
+        if (!result.ok) {
+          setSavedMsg((m) => ({ ...m, [p.personKey]: `Saved, but the bonus didn't reach ${PROGRAMME_LABELS[route.programme!]}.` }));
+        }
+      } else if (route.reason === "ambiguous" && (Number(fields.bonusAmount) || 0) > 0) {
+        setSavedMsg((m) => ({ ...m, [p.personKey]: `Saved. ${p.personName} is on more than one bonus programme — record this payment on the right tab yourself.` }));
+      }
+    }
     return !!saved;
   }
 
@@ -526,6 +575,75 @@ function PayrollPageBody() {
                     {savingAll ? "Saving…" : `Save All (${employeeRows.length + tempRows.length})`}
                   </button>
                   {globalMsg && <span className="text-xs text-slate-400">{globalMsg}</span>}
+                </div>
+
+                {/* Payments that don't fall on a normal pay period — a
+                    correction, or a bonus paid out between cycles. Tagging
+                    one to a programme records it there too. */}
+                <div className="mt-6 rounded-2xl bg-white shadow p-5">
+                  <h2 className="font-bold text-slate-700 mb-1">Off-Cycle Payment</h2>
+                  <p className="text-sm text-slate-500 mb-3">An adjustment or bonus paid outside a normal pay period, with its own date.</p>
+                  <div className="grid gap-3 sm:grid-cols-5">
+                    <div>
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Person</label>
+                      <select value={ocEmployeeId} onChange={(e) => setOcEmployeeId(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                        <option value="">Select…</option>
+                        {[...staff].filter((s) => !s.archived).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Date paid</label>
+                      <input type="date" value={ocDate} onChange={(e) => setOcDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Amount</label>
+                      <input type="number" onFocus={(e) => e.target.select()} value={ocAmount} onChange={(e) => setOcAmount(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Counts toward</label>
+                      {(() => {
+                        const emp = staff.find((s) => s.id === Number(ocEmployeeId));
+                        const opts = emp ? eligibleProgrammes(emp) : [];
+                        return (
+                          <select value={ocProgramme} onChange={(e) => setOcProgramme(e.target.value as BonusProgramme | "none")} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                            <option value="none">Nothing — just pay</option>
+                            {opts.map((o) => <option key={o} value={o}>{PROGRAMME_LABELS[o]}</option>)}
+                          </select>
+                        );
+                      })()}
+                    </div>
+                    <div className="flex items-end">
+                      <button onClick={handleAddOffCycle} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition w-full" style={{ backgroundColor: "#0F6E56" }}>Record Payment</button>
+                    </div>
+                    <div className="sm:col-span-5">
+                      <label className="block text-sm text-slate-800 font-semibold mb-1">Note (optional)</label>
+                      <input type="text" value={ocNotes} onChange={(e) => setOcNotes(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                    </div>
+                  </div>
+                  {ocMsg && <p className="text-sm font-semibold mt-2" style={{ color: ocMsg.startsWith("✓") ? "#0F6E56" : "#dc2626" }}>{ocMsg}</p>}
+
+                  {offCyclePayments.length > 0 && (
+                    <div className="mt-4 space-y-1">
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Recent off-cycle payments</p>
+                      {offCyclePayments.map((pay) => {
+                        const who = staff.find((s) => s.id === pay.employeeId)?.name ?? `Employee #${pay.employeeId}`;
+                        return (
+                          <div key={pay.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
+                            <span className="text-slate-600">
+                              {new Date(pay.paidDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} — {who} — ${formatMoney(pay.amount)}
+                              {pay.programme !== "none" && <span className="text-xs text-slate-400"> · {PROGRAMME_LABELS[pay.programme as BonusProgramme]}</span>}
+                              {pay.notes && <span className="text-xs text-slate-400"> · {pay.notes}</span>}
+                            </span>
+                            <button onClick={async () => {
+                              if (!confirm("Delete this off-cycle payment? Any linked bonus record will be removed too.")) return;
+                              await deleteOffCyclePayment(pay.id, pay.programme);
+                              setOffCyclePayments(await loadOffCyclePayments());
+                            }} className="text-xs text-red-400 hover:underline">Delete</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
