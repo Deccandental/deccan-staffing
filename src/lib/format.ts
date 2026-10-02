@@ -4,3 +4,24 @@
 export function formatMoney(n: number): string {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+/**
+ * Sorts people by surname.
+ *
+ * Names are stored as a single field, so the surname has to be inferred:
+ * drop any leading title ("Dr."), then take the last word — which handles
+ * "Dr. Coulter" (Coulter), "Margot Gonzales" (Gonzales) and "Karla G" (G)
+ * alike. Someone recorded with a single name sorts on that name. Ties fall
+ * back to the full name so the order stays stable rather than shuffling
+ * between renders.
+ */
+export function lastNameOf(fullName: string): string {
+  const cleaned = fullName.trim().replace(/^(dr\.?|mr\.?|mrs\.?|ms\.?)\s+/i, "");
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  return (parts[parts.length - 1] ?? cleaned).toLowerCase();
+}
+
+export function byLastName<T extends { name: string }>(a: T, b: T): number {
+  const cmp = lastNameOf(a.name).localeCompare(lastNameOf(b.name));
+  return cmp !== 0 ? cmp : a.name.localeCompare(b.name);
+}
