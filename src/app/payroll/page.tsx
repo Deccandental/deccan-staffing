@@ -30,7 +30,7 @@ import {
 } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, byLastName } from "@/lib/format";
 import {
   loadCashAccounts, loadLatestBalances,
   loadRecurringBills as loadCashflowBills, loadBillPayments as loadCashflowBillPayments,
@@ -110,7 +110,7 @@ function PayrollPageBody() {
       getScheduledEmployeeIdsInRange(period.start, period.end),
       getTempAssignmentsForMonth(y, m),
     ]);
-    setStaff(s);
+    setStaff([...s].sort(byLastName));
     setTemps(t);
     setLeaveRequests(lr);
     setHolidays(h);
@@ -594,7 +594,7 @@ function GrowthBonusPanel() {
       loadGrowthBonusHoursOverrides(year, 1), loadGrowthBonusHoursOverrides(year, 2),
       loadGrowthBonusHoursOverrides(year, 3), loadGrowthBonusHoursOverrides(year, 4),
     ]);
-    setStaff(s);
+    setStaff([...s].sort(byLastName));
     setYearQuarters({ 1: q1, 2: q2, 3: q3, 4: q4 });
     setYearEntries(entries);
     setHoursOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
@@ -929,7 +929,7 @@ function PvBonusPanel() {
 
   useEffect(() => {
     loadStaff().then((s) => {
-      setStaff(s);
+      setStaff([...s].sort(byLastName));
       const eligible = s.filter((e) => e.pvBonusEligible);
       if (eligible.length > 0) setEmployeeId(eligible[0].id);
       else setLoading(false);
@@ -1229,7 +1229,7 @@ function HoBonusPanel() {
 
   useEffect(() => {
     loadStaff().then((s) => {
-      setStaff(s);
+      setStaff([...s].sort(byLastName));
       const eligible = s.filter((e) => e.hoBonusEligible);
       if (eligible.length > 0) setEmployeeId(eligible[0].id);
       else setLoading(false);
@@ -1371,7 +1371,7 @@ function HygieneBonusPanel() {
 
   useEffect(() => {
     loadStaff().then((s) => {
-      setStaff(s);
+      setStaff([...s].sort(byLastName));
       const hygienists = s.filter(isHygienistRole);
       if (hygienists.length > 0) setHygienistId(hygienists[0].id);
       else setLoading(false);
