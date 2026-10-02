@@ -7,7 +7,7 @@ import { CreditCard } from "@/lib/cashflow";
 
 const EMPTY: Omit<Debt, "id"> = {
   name: "", kind: "installment", creditCardId: null, originalAmount: 0, currentBalance: 0,
-  interestRate: 0, monthlyPayment: 0, finalPaymentDate: null, lender: "", notes: "",
+  interestRate: null, monthlyPayment: 0, finalPaymentDate: null, lender: "", notes: "",
   active: true, sortOrder: 0,
 };
 
@@ -48,7 +48,7 @@ export default function DebtPanel({
       creditCardId: cc.id,
       originalAmount: 0,
       currentBalance: 0,
-      interestRate: 0,
+      interestRate: null,
       monthlyPayment: cc.autopayAmount || cc.minimumPayment || 0,
       finalPaymentDate: null,
       lender: "",
@@ -60,7 +60,7 @@ export default function DebtPanel({
   const installmentDebts = debts.filter((d) => d.kind !== "revolving");
   const allDebts = [...cardDebts, ...installmentDebts];
   const summary = computeDebtSummary(allDebts, cardBalances, monthlyCollections);
-  const unratedCards = summary.lines.filter((l) => l.debt.kind === "revolving" && l.balance > 0 && !l.debt.interestRate);
+  const unratedCards = summary.lines.filter((l) => l.debt.kind === "revolving" && l.balance > 0 && l.debt.interestRate == null);
   const input = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none";
 
   async function handleSave() {
@@ -190,7 +190,11 @@ export default function DebtPanel({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1">Interest rate (annual %)</label>
-                <input type="number" onFocus={(e) => e.target.select()} value={form.interestRate} onChange={(e) => setForm((f) => ({ ...f, interestRate: Number(e.target.value) }))} placeholder="24.99" className={input} />
+                <input type="number" step="0.01" min="0" onFocus={(e) => e.target.select()}
+                  value={form.interestRate ?? ""}
+                  onChange={(e) => setForm((f) => ({ ...f, interestRate: e.target.value === "" ? null : Number(e.target.value) }))}
+                  placeholder="24.99 — enter 0 for an introductory 0% rate" className={input} />
+                <p className="text-xs text-slate-400 mt-1">Leave blank if you don't know it yet. Enter 0 for a genuine 0% promotional rate — if it expires, note the date in the Note field.</p>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1">Monthly payment</label>
@@ -241,7 +245,13 @@ export default function DebtPanel({
                         </div>
                       )}
                     </td>
-                    <td className="px-2 py-2">{l.debt.interestRate ? `${l.debt.interestRate}%` : <span className="text-amber-600 text-xs">not set</span>}</td>
+                    <td className="px-2 py-2">
+                      {l.debt.interestRate == null
+                        ? <span className="text-amber-600 text-xs">not set</span>
+                        : l.debt.interestRate === 0
+                          ? <span style={{ color: "#3B6D11" }}>0%</span>
+                          : `${l.debt.interestRate}%`}
+                    </td>
                     <td className="px-2 py-2 whitespace-nowrap">${formatMoney(l.monthlyPayment)}</td>
                     <td className="px-2 py-2 whitespace-nowrap" style={{ color: l.monthlyInterest > 0 ? "#A32D2D" : undefined }}>${formatMoney(l.monthlyInterest)}</td>
                     <td className="px-2 py-2 whitespace-nowrap text-xs" style={{ color: l.neverClears ? "#A32D2D" : "rgba(74,66,56,0.6)" }}>
