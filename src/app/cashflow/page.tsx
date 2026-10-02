@@ -1832,7 +1832,18 @@ export default function CashFlowPage() {
             {activeTab === "debt" && (
               <DebtPanel
                 creditCards={creditCards}
-                cardBalances={Object.fromEntries(creditCards.map((cc) => [cc.id, latestBalances[cc.name]?.balance ?? 0]))}
+                // Statement balance, not the live balance: interest is charged
+                // on what was billed, and it's already maintained on the card
+                // record, so nothing has to be entered twice. Falls back to
+                // the current balance for a card with no statement on file.
+                cardBalances={Object.fromEntries(creditCards.map((cc) => [
+                  cc.id,
+                  cc.statementBalance > 0 ? cc.statementBalance : (latestBalances[cc.name]?.balance ?? 0),
+                ]))}
+                cardBalanceSource={Object.fromEntries(creditCards.map((cc) => [
+                  cc.id,
+                  cc.statementBalance > 0 ? "statement" : "current",
+                ]))}
                 monthlyCollections={debtMonthlyCollections}
               />
             )}
