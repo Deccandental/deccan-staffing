@@ -520,7 +520,7 @@ export async function loadDentalMonthlyHistory(): Promise<DentalMonthlyEntry[]> 
 }
 
 // Backfills or corrects a specific month's official Net Production figure.
-// Entirely separate from the daily running numbers on Update Numbers.
+// Entirely separate from the daily running numbers on Weekly Update.
 export async function backfillDentalMonth(month: string, netProduction: number | null): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from("dental_monthly_entries").upsert({
     month, net_production: netProduction, entered_at: new Date().toISOString(),
@@ -536,7 +536,7 @@ export async function deleteDentalMonthlyEntry(id: string): Promise<void> {
 
 // ---------------- Open Dental — historical monthly summary ----------------
 // Deliberately a separate table from weekly_cash_reviews: that one holds the
-// day-to-day RUNNING figures shown on Update Numbers (which keep changing
+// day-to-day RUNNING figures shown on Weekly Update (which keep changing
 // until the month closes), while this one holds the locked-in HISTORICAL
 // figure for a finished month, used for Trends. Keeping them apart means a
 // running update and a historical entry can never collide on the same date.
@@ -1007,7 +1007,7 @@ export function computeAvgMonthlyProduction(history: DentalMonthlyEntry[], month
  *
  * Actual net production is only known once a month closes, so until then
  * the projection is the best figure available — and it's already being
- * maintained weekly on the Update Numbers tab. Without this, the current
+ * maintained weekly on the Weekly Update tab. Without this, the current
  * month showed whatever was typed into Trends at some earlier point and
  * then silently went stale, which made the chart fall off a cliff at the
  * right-hand edge and dragged the A/R Ratio down with it.
@@ -1031,4 +1031,117 @@ export function withCurrentMonthProjection(
     return history.map((e) => (e.month === currentMonth ? { ...e, netProduction: projected } : e));
   }
   return [...history, { id: `projected-${currentMonth}`, month: currentMonth, netProduction: projected, enteredAt: latestReview.reviewDate }];
+}
+
+// ---------------- Production goals ----------------
+
+export interface ProductionGoal {
+  id: string;
+  year: number;
+  annualGoal: number;
+  notes: string;
+}
+
+export async function loadProductionGoal(year: number): Promise<ProductionGoal | null> {
+  const { data, error } = await supabase.from("production_goals").select("*").eq("year", year).maybeSingle();
+  if (error) { console.error("loadProductionGoal error:", error); return null; }
+  if (!data) return null;
+  return { id: data.id, year: data.year, annualGoal: data.annual_goal ?? 0, notes: data.notes ?? "" };
+}
+
+export async function saveProductionGoal(year: number, annualGoal: number, notes = ""): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("production_goals").upsert(
+    { year, annual_goal: annualGoal, notes, updated_at: new Date().toISOString() },
+    { onConflict: "year" }
+  );
+  if (error) { console.error("saveProductionGoal error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
+export interface GoalMonthRow {
+  month: number;          // 1-12
+  baseline: number;       // an even twelfth of the annual goal
+  adjustedTarget: number; // what this month needs, given how the year has gone
+  actual: number | null;  // null for a month with nothing recorded yet
+  variance: number | null; // actual less baseline
+  isPast: boolean;
+  isCurrent: boolean;
+}
+
+export interface GoalProgress {
+  annualGoal: number;
+  rows: GoalMonthRow[];
+  actualToDate: number;
+  baselineToDate: number;      // where the year should be by now at an even pace
+  shortfallToDate: number;     // positive means behind
+  remainingMonths: number;
+  requiredPerRemainingMonth: number; // what each remaining month must do to still land on the goal
+  onTrack: boolean;
+  unreachable: boolean;        // the catch-up figure has passed what a month has ever produced
+}
+
+/**
+ * Works out where the year stands and what the remaining months now need.
+ *
+ * A shortfall is spread across the months still to come rather than left
+ * sitting at the end of the year, so the target you're working to always
+ * reflects the ground still to make up. The reverse applies too: a strong
+ * month lowers what the rest of the year has to carry.
+ */
+export function computeGoalProgress(
+  annualGoal: number,
+  monthlyActuals: { month: string; netProduction: number | null }[], // month as "YYYY-MM"
+  year: number,
+  today: string = new Date().toISOString().slice(0, 10)
+): GoalProgress {
+  const baseline = annualGoal / 12;
+  const currentMonth = today.slice(0, 4) === String(year) ? Number(today.slice(5, 7)) : 13;
+
+  const actualFor = (m: number) => {
+    const key = `${year}-${String(m).padStart(2, "0")}`;
+    const found = monthlyActuals.find((a) => a.month === key);
+    return found?.netProduction ?? null;
+  };
+
+  // Everything booked in months that have finished. The current month is
+  // left out of "to date" — it isn't done, so counting it would make the
+  // year look worse than it is.
+  let actualToDate = 0;
+  let completedMonths = 0;
+  for (let m = 1; m < Math.min(currentMonth, 13); m++) {
+    const a = actualFor(m);
+    if (a != null) { actualToDate += a; completedMonths++; }
+  }
+
+  const baselineToDate = baseline * completedMonths;
+  const shortfallToDate = baselineToDate - actualToDate;
+  const remainingMonths = Math.max(0, 12 - completedMonths);
+  const requiredPerRemainingMonth = remainingMonths > 0 ? (annualGoal - actualToDate) / remainingMonths : 0;
+
+  const rows: GoalMonthRow[] = Array.from({ length: 12 }, (_, i) => {
+    const month = i + 1;
+    const actual = actualFor(month);
+    const isPast = month < currentMonth;
+    const isCurrent = month === currentMonth;
+    return {
+      month, baseline,
+      // A finished month is judged against the even split it was set; a
+      // month still to come carries its share of the catch-up.
+      adjustedTarget: isPast ? baseline : Math.max(0, requiredPerRemainingMonth),
+      actual,
+      variance: actual != null ? actual - baseline : null,
+      isPast, isCurrent,
+    };
+  });
+
+  const bestMonth = Math.max(0, ...monthlyActuals.map((a) => a.netProduction ?? 0));
+
+  return {
+    annualGoal, rows, actualToDate, baselineToDate, shortfallToDate,
+    remainingMonths, requiredPerRemainingMonth,
+    onTrack: shortfallToDate <= 0,
+    // Worth saying plainly when the catch-up has stopped being achievable,
+    // rather than printing a number nobody can hit.
+    unreachable: remainingMonths > 0 && bestMonth > 0 && requiredPerRemainingMonth > bestMonth * 1.15,
+  };
 }
