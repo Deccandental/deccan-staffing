@@ -12,10 +12,11 @@ const EMPTY: Omit<Debt, "id"> = {
 };
 
 export default function DebtPanel({
-  creditCards, cardBalances, monthlyCollections,
+  creditCards, cardBalances, cardBalanceSource = {}, monthlyCollections,
 }: {
   creditCards: CreditCard[];
   cardBalances: Record<string, number>;
+  cardBalanceSource?: Record<string, "statement" | "current">;
   monthlyCollections?: number | null;
 }) {
   const [debts, setDebts] = useState<Debt[]>([]);
@@ -128,7 +129,7 @@ export default function DebtPanel({
                     <option value="">Select…</option>
                     {creditCards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
-                  <p className="text-xs text-slate-400 mt-1">The balance comes from the card itself, so it only has to be entered once.</p>
+                  <p className="text-xs text-slate-400 mt-1">The balance is read from the card's statement balance on the Credit Cards tab, so it only has to be entered once. Interest is charged on the statement balance, so that's the figure used here.</p>
                 </div>
               ) : (
                 <>
@@ -192,7 +193,14 @@ export default function DebtPanel({
                       <span className="text-xs text-slate-400"> · {l.debt.kind === "revolving" ? "card" : "loan"}</span>
                       {l.debt.lender && <div className="text-xs text-slate-400">{l.debt.lender}</div>}
                     </td>
-                    <td className="px-2 py-2 whitespace-nowrap">${formatMoney(l.balance)}</td>
+                    <td className="px-2 py-2 whitespace-nowrap">
+                      ${formatMoney(l.balance)}
+                      {l.debt.kind === "revolving" && l.debt.creditCardId && (
+                        <div className="text-xs text-slate-400">
+                          {cardBalanceSource[l.debt.creditCardId] === "current" ? "current balance" : "statement balance"}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-2 py-2">{l.debt.interestRate ? `${l.debt.interestRate}%` : <span className="text-amber-600 text-xs">not set</span>}</td>
                     <td className="px-2 py-2 whitespace-nowrap">${formatMoney(l.monthlyPayment)}</td>
                     <td className="px-2 py-2 whitespace-nowrap" style={{ color: l.monthlyInterest > 0 ? "#A32D2D" : undefined }}>${formatMoney(l.monthlyInterest)}</td>
