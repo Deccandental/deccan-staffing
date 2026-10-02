@@ -1347,6 +1347,7 @@ function HoBonusPanel() {
   const [hoPayDate, setHoPayDate] = useState(new Date().toISOString().slice(0, 10));
   const [hoPayAmount, setHoPayAmount] = useState("");
   const [hoPayNotes, setHoPayNotes] = useState("");
+  const [hoPayError, setHoPayError] = useState("");
   const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
   const [newYearInput, setNewYearInput] = useState("");
 
@@ -1495,18 +1496,35 @@ function HoBonusPanel() {
                                       </div>
                                     ))}
                                   </div>
-                                  <div className="flex flex-wrap items-center gap-1.5">
-                                    <input type="date" value={hoPayDate} onChange={(e) => setHoPayDate(e.target.value)} className={`${cellClass} w-36`} />
-                                    <input type="number" onFocus={(e) => e.target.select()} value={hoPayAmount} onChange={(e) => setHoPayAmount(e.target.value)} placeholder="$" className={`${cellClass} w-24`} />
-                                    <input type="text" value={hoPayNotes} onChange={(e) => setHoPayNotes(e.target.value)} placeholder="Note (optional)" className={`${cellClass} w-48`} />
+                                  {/* Labelled, because an unlabelled narrow
+                                      "$" box beside a wide note box invited
+                                      typing the amount into the wrong one. */}
+                                  <div className="flex flex-wrap items-end gap-2">
+                                    <div>
+                                      <label className="block text-xs font-semibold text-slate-500 mb-0.5">Date paid</label>
+                                      <input type="date" value={hoPayDate} onChange={(e) => setHoPayDate(e.target.value)} className={`${cellClass} w-36`} />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-semibold text-slate-500 mb-0.5">Amount</label>
+                                      <input type="number" onFocus={(e) => e.target.select()} value={hoPayAmount} onChange={(e) => { setHoPayAmount(e.target.value); setHoPayError(""); }} placeholder="0.00" className={`${cellClass} w-28`} />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-semibold text-slate-500 mb-0.5">Note (optional)</label>
+                                      <input type="text" value={hoPayNotes} onChange={(e) => setHoPayNotes(e.target.value)} className={`${cellClass} w-48`} />
+                                    </div>
                                     <button onClick={async () => {
                                       const amt = Number(hoPayAmount);
-                                      if (!hoPayDate || !amt || employeeId == null) return;
-                                      await addHoBonusPayment({ employeeId, datePaid: hoPayDate, amount: amt, notes: hoPayNotes.trim() });
+                                      if (employeeId == null) { setHoPayError("No employee selected."); return; }
+                                      if (!hoPayDate) { setHoPayError("Pick the date the payment was made."); return; }
+                                      if (!amt) { setHoPayError("Enter an amount — it goes in the Amount box, not the note."); return; }
+                                      setHoPayError("");
+                                      const res = await addHoBonusPayment({ employeeId, datePaid: hoPayDate, amount: amt, notes: hoPayNotes.trim() });
+                                      if (!res.ok) { setHoPayError(res.error ?? "Couldn't save the payment."); return; }
                                       setHoPayAmount(""); setHoPayNotes("");
                                       setHoPayments(await loadHoBonusPayments(employeeId));
-                                    }} className="rounded-lg px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add Payment</button>
+                                    }} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add Payment</button>
                                   </div>
+                                  {hoPayError && <p className="text-xs font-semibold text-red-600 mt-1.5">⚠️ {hoPayError}</p>}
                                 </td>
                               </tr>
                             )}
