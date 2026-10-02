@@ -19,7 +19,10 @@ export interface Debt {
   creditCardId: string | null;
   originalAmount: number;
   currentBalance: number;
-  interestRate: number;   // annual %
+  // null means no rate recorded yet; 0 is a real rate — a 0% introductory
+  // card genuinely costs nothing to carry, and shouldn't be confused with
+  // one whose rate nobody has entered.
+  interestRate: number | null;   // annual %
   monthlyPayment: number;
   finalPaymentDate: string | null;
   lender: string;
@@ -34,7 +37,7 @@ function fromRow(row: any): Debt {
     creditCardId: row.credit_card_id ?? null,
     originalAmount: row.original_amount ?? 0,
     currentBalance: row.current_balance ?? 0,
-    interestRate: row.interest_rate ?? 0,
+    interestRate: row.interest_rate === null || row.interest_rate === undefined ? null : Number(row.interest_rate),
     monthlyPayment: row.monthly_payment ?? 0,
     finalPaymentDate: row.final_payment_date ?? null,
     lender: row.lender ?? "", notes: row.notes ?? "",
@@ -93,10 +96,10 @@ export interface DebtSummary {
  * interest. Returns null where the payment never clears it, which is the
  * case worth surfacing rather than hiding behind a large number.
  */
-export function monthsToPayOff(balance: number, annualRate: number, payment: number): number | null {
+export function monthsToPayOff(balance: number, annualRate: number | null, payment: number): number | null {
   if (balance <= 0) return 0;
   if (payment <= 0) return null;
-  const r = annualRate / 100 / 12;
+  const r = (annualRate ?? 0) / 100 / 12;
   if (r === 0) return Math.ceil(balance / payment);
   const monthlyInterest = balance * r;
   if (payment <= monthlyInterest) return null; // never clears
@@ -112,7 +115,7 @@ export function computeDebtSummary(
     const balance = debt.kind === "revolving" && debt.creditCardId
       ? cardBalances[debt.creditCardId] ?? 0
       : debt.currentBalance;
-    const monthlyInterest = balance * (debt.interestRate / 100 / 12);
+    const monthlyInterest = balance * ((debt.interestRate ?? 0) / 100 / 12);
     const payment = debt.monthlyPayment;
     const payoffMonths = monthsToPayOff(balance, debt.interestRate, payment);
     return {
@@ -137,6 +140,6 @@ export function computeDebtSummary(
       : null,
     // Highest rate first: with balances carrying, the rate decides where an
     // extra payment buys the most, regardless of balance size.
-    worstFirst: [...lines].filter((l) => l.balance > 0).sort((a, b) => b.debt.interestRate - a.debt.interestRate),
+    worstFirst: [...lines].filter((l) => l.balance > 0).sort((a, b) => (b.debt.interestRate ?? 0) - (a.debt.interestRate ?? 0)),
   };
 }
