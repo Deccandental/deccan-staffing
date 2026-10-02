@@ -32,12 +32,44 @@ export default function DebtPanel({
   }
   useEffect(() => { refresh(); }, []);
 
-  const summary = computeDebtSummary(debts, cardBalances, monthlyCollections);
+  // Every credit card is debt by definition, so they appear here without
+  // being added — the cards are already defined on the Credit Cards tab and
+  // re-entering them would be duplicate work. A card only needs a row in the
+  // debts table once its rate is filled in; until then it's shown from the
+  // card record alone, with the payment defaulting to whatever is already
+  // scheduled against it.
+  const cardDebts: Debt[] = creditCards.map((cc) => {
+    const saved = debts.find((d) => d.kind === "revolving" && d.creditCardId === cc.id);
+    if (saved) return saved;
+    return {
+      id: `card:${cc.id}`,
+      name: cc.name,
+      kind: "revolving" as DebtKind,
+      creditCardId: cc.id,
+      originalAmount: 0,
+      currentBalance: 0,
+      interestRate: 0,
+      monthlyPayment: cc.autopayAmount || cc.minimumPayment || 0,
+      finalPaymentDate: null,
+      lender: "",
+      notes: "",
+      active: true,
+      sortOrder: cc.sortOrder,
+    };
+  });
+  const installmentDebts = debts.filter((d) => d.kind !== "revolving");
+  const allDebts = [...cardDebts, ...installmentDebts];
+  const summary = computeDebtSummary(allDebts, cardBalances, monthlyCollections);
+  const unratedCards = summary.lines.filter((l) => l.debt.kind === "revolving" && l.balance > 0 && !l.debt.interestRate);
   const input = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none";
 
   async function handleSave() {
     if (!form.name.trim()) { setError("Give it a name."); return; }
-    const res = await saveDebt({ ...form, name: form.name.trim() });
+    // A card shown straight from the Credit Cards tab has a placeholder id
+    // until it's saved here for the first time.
+    const payload = { ...form, name: form.name.trim() };
+    if (payload.id?.startsWith("card:")) delete payload.id;
+    const res = await saveDebt(payload);
     if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
     setError(""); setShowForm(false); setForm({ ...EMPTY });
     refresh();
@@ -95,11 +127,19 @@ export default function DebtPanel({
         </div>
       )}
 
+      {unratedCards.length > 0 && (
+        <div className="rounded-xl px-4 py-3" style={{ background: "#E6F1FB" }}>
+          <p className="text-xs font-semibold" style={{ color: "#185FA5" }}>
+            {unratedCards.length === 1 ? "One card carries a balance but has" : `${unratedCards.length} cards carry a balance but have`} no interest rate recorded, so the interest figures above are understated. The rate is on each statement, usually shown as the APR for purchases — click Edit on the row to add it.
+          </p>
+        </div>
+      )}
+
       <div className="rounded-2xl bg-white shadow p-5">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-bold text-slate-700">Debts</h2>
           {!showForm && (
-            <button onClick={() => { setForm({ ...EMPTY }); setShowForm(true); }} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add Debt</button>
+            <button onClick={() => { setForm({ ...EMPTY }); setShowForm(true); }} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add Loan</button>
           )}
         </div>
 
@@ -170,7 +210,7 @@ export default function DebtPanel({
         )}
 
         {summary.lines.length === 0 ? (
-          <p className="text-sm text-slate-400">Nothing added yet. Add your loans and any card you carry a balance on.</p>
+          <p className="text-sm text-slate-400">No cards or loans yet. Credit cards appear here automatically once added on the Credit Cards tab.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -212,10 +252,12 @@ export default function DebtPanel({
                     </td>
                     <td className="px-2 py-2 text-right whitespace-nowrap">
                       <button onClick={() => { setForm({ ...l.debt }); setShowForm(true); }} className="text-xs text-orange-500 hover:underline mr-2">Edit</button>
-                      <button onClick={async () => {
-                        if (!confirm(`Remove ${l.debt.name} from the register?`)) return;
-                        await deleteDebt(l.debt.id); refresh();
-                      }} className="text-xs text-red-400 hover:underline">Delete</button>
+                      {!l.debt.id.startsWith("card:") && l.debt.kind !== "revolving" && (
+                        <button onClick={async () => {
+                          if (!confirm(`Remove ${l.debt.name} from the register?`)) return;
+                          await deleteDebt(l.debt.id); refresh();
+                        }} className="text-xs text-red-400 hover:underline">Delete</button>
+                      )}
                     </td>
                   </tr>
                 ))}
