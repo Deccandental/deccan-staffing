@@ -128,14 +128,14 @@ function PayrollPageBody() {
       .filter((e) => !e.excludeFromPayroll)
       .filter((e) => scheduledStaffIds.has(e.id) || manuallyAdded.has(`staff:${e.id}`) || savedEntries[`staff:${e.id}`])
       .map((e) => ({ personKey: `staff:${e.id}`, personName: e.name, isTemp: false, employee: e }))
-      .sort((a, b) => a.personName.localeCompare(b.personName));
+      .sort((a, b) => byLastName({ name: a.personName }, { name: b.personName }));
   }, [staff, scheduledStaffIds, manuallyAdded, savedEntries]);
 
   const tempRows: PersonRow[] = useMemo(() => {
     return temps
       .filter((t) => scheduledTempIds.has(t.id) || manuallyAdded.has(`temp:${t.id}`) || savedEntries[`temp:${t.id}`])
       .map((t) => ({ personKey: `temp:${t.id}`, personName: t.name, isTemp: true }))
-      .sort((a, b) => a.personName.localeCompare(b.personName));
+      .sort((a, b) => byLastName({ name: a.personName }, { name: b.personName }));
   }, [temps, scheduledTempIds, manuallyAdded, savedEntries]);
 
   const addablePeople: PersonRow[] = useMemo(() => {
@@ -146,7 +146,7 @@ function PayrollPageBody() {
     const tempOptions = temps
       .filter((t) => !shown.has(`temp:${t.id}`))
       .map((t) => ({ personKey: `temp:${t.id}`, personName: t.name, isTemp: true }));
-    return [...staffOptions, ...tempOptions].sort((a, b) => a.personName.localeCompare(b.personName));
+    return [...staffOptions, ...tempOptions].sort((a, b) => byLastName({ name: a.personName }, { name: b.personName }));
   }, [staff, temps, employeeRows, tempRows]);
 
   function sumApprovedHours(employeeId: number, reason: "pto" | "sick"): number {
