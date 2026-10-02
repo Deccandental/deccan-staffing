@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { formatMoney } from "@/lib/format";
+import DebtPanel from "@/components/DebtPanel";
 import { loadStaff } from "@/lib/staffStore";
 import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
 import {
@@ -1738,6 +1739,14 @@ export default function CashFlowPage() {
   const [latestReviewForTabs, setLatestReviewForTabs] = useState<WeeklyCashReview | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("");
+  // Debt service is only meaningful against what the practice actually
+  // collects, so the register is given the recent monthly average.
+  const [debtMonthlyCollections, setDebtMonthlyCollections] = useState<number | null>(null);
+  useEffect(() => {
+    Promise.all([loadDentalMonthlyHistory(), loadLatestWeeklyReview()]).then(([history, review]) => {
+      setDebtMonthlyCollections(computeAvgMonthlyProduction(withCurrentMonthProjection(history, review)));
+    });
+  }, []);
 
   useEffect(() => { refresh(); }, []);
 
@@ -1811,6 +1820,8 @@ export default function CashFlowPage() {
               ))}
               <button onClick={() => setActiveTab("cards")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "cards" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Credit Cards</button>
+              <button onClick={() => setActiveTab("debt")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
+                style={activeTab === "debt" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Debt</button>
               <button onClick={() => setActiveTab("trends")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "trends" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Trends</button>
             </div>
@@ -1818,6 +1829,14 @@ export default function CashFlowPage() {
             {cashAccounts.map((a) => activeTab === a.id && (
               <AccountPanel key={a.id} account={a} allBills={bills} allPayments={payments} latestBalances={latestBalances} cards={creditCards} refreshAll={refresh} />
             ))}
+            {activeTab === "debt" && (
+              <DebtPanel
+                creditCards={creditCards}
+                cardBalances={Object.fromEntries(creditCards.map((cc) => [cc.id, latestBalances[cc.name]?.balance ?? 0]))}
+                monthlyCollections={debtMonthlyCollections}
+              />
+            )}
+
             {activeTab === "cards" && (
               <CreditCardsPanel cards={creditCards} charges={cardCharges} cashAccounts={cashAccounts} latestBalances={latestBalances} allBills={bills} allPayments={payments} refreshAll={refresh} />
             )}
