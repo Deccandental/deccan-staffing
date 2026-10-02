@@ -788,6 +788,7 @@ export interface RequiredCollectionsResult {
   knownInflows: number; // any inflow-type transactions already scheduled this month
   requiredCollections: number; // $ still needed to collect this month to cover obligations + cushions
   requiredCollectionRate: number | null; // requiredCollections as a % of projected production, null if none entered
+  outstandingBonuses: number; // bonus money earned but not yet paid, included in totalObligations
 }
 
 // "How much of this month's projected production actually needs to convert
@@ -798,15 +799,90 @@ export function computeRequiredCollections(
   ffAccount: CashAccount, chaseAccount: CashAccount,
   ffBalance: number, chaseBalance: number,
   monthOccurrences: Occurrence[],
-  projectedProduction: number | null
+  projectedProduction: number | null,
+  // Bonus money earned but unpaid. Optional so existing callers keep
+  // working, but it belongs in the total — it has to be paid like any bill.
+  outstandingBonuses: number = 0
 ): RequiredCollectionsResult {
-  const totalObligations = monthOccurrences.filter((o) => o.direction === "outflow").reduce((sum, o) => sum + o.amount, 0);
+  const scheduledOutflows = monthOccurrences.filter((o) => o.direction === "outflow").reduce((sum, o) => sum + o.amount, 0);
+  const totalObligations = scheduledOutflows + Math.max(0, outstandingBonuses);
   const knownInflows = monthOccurrences.filter((o) => o.direction === "inflow").reduce((sum, o) => sum + o.amount, 0);
   const totalCushions = ffAccount.cushionTarget + chaseAccount.cushionTarget;
   const combinedCurrentBalance = ffBalance + chaseBalance;
   const requiredCollections = Math.max(0, totalObligations + totalCushions - combinedCurrentBalance - knownInflows);
   const requiredCollectionRate = projectedProduction && projectedProduction > 0 ? (requiredCollections / projectedProduction) * 100 : null;
-  return { totalObligations, totalCushions, combinedCurrentBalance, knownInflows, requiredCollections, requiredCollectionRate };
+  return { totalObligations, totalCushions, combinedCurrentBalance, knownInflows, requiredCollections, requiredCollectionRate, outstandingBonuses: Math.max(0, outstandingBonuses) };
+}
+
+
+// ---------------- Upcoming bonus obligations ----------------
+
+/**
+ * Bonus money already earned but not yet paid.
+ *
+ * These are real commitments that fall due like any bill, but they were
+ * missing from the cash position entirely, so "required collections"
+ * understated what the month actually has to cover.
+ *
+ * Dr. Ho's bonus is worked out rather than averaged: it is 40% of a month's
+ * production, paid across the following month, so once a month's production
+ * is entered the obligation is known exactly. An average of past payments
+ * would be a worse predictor, smoothing away genuinely strong or weak
+ * months.
+ */
+
+export interface BonusObligation {
+  label: string;
+  detail: string;
+  amount: number;
+}
+
+export interface BonusObligationsResult {
+  items: BonusObligation[];
+  total: number;
+}
+
+export function computeBonusObligations(input: {
+  hoMonths?: { year: number; month: number; production: number }[];
+  hoPayments?: { datePaid: string; amount: number }[];
+  hoPercent?: number;
+  pvBalance?: number | null;
+  today?: string;
+}): BonusObligationsResult {
+  const items: BonusObligation[] = [];
+  const today = input.today ?? new Date().toISOString().slice(0, 10);
+  const pct = (input.hoPercent ?? 40) / 100;
+
+  if (input.hoMonths && input.hoMonths.length > 0) {
+    // Everything earned to date, less everything paid to date. A single
+    // running figure avoids double-counting when a payment for one month's
+    // production lands in another — which it routinely does, since payment
+    // runs a month behind production.
+    const earned = input.hoMonths
+      .filter((m) => `${m.year}-${String(m.month).padStart(2, "0")}` <= today.slice(0, 7))
+      .reduce((sum, m) => sum + m.production * pct, 0);
+    const paid = (input.hoPayments ?? []).reduce((sum, p) => sum + p.amount, 0);
+    const outstanding = earned - paid;
+    if (Math.abs(outstanding) > 0.5) {
+      items.push({
+        label: "Dr. Ho bonus",
+        detail: outstanding > 0
+          ? `${Math.round(pct * 100)}% of production earned to date, less payments made`
+          : "Paid ahead of what has been earned so far",
+        amount: outstanding,
+      });
+    }
+  }
+
+  if (input.pvBalance != null && Math.abs(input.pvBalance) > 0.5) {
+    items.push({
+      label: "Net production bonus",
+      detail: input.pvBalance > 0 ? "Running balance owed across quarters" : "Paid ahead of the running balance",
+      amount: input.pvBalance,
+    });
+  }
+
+  return { items, total: items.reduce((sum, i) => sum + i.amount, 0) };
 }
 
 // ---------------- Accounts Receivable (A/R) aging ----------------
