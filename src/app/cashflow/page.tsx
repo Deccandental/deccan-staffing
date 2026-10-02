@@ -925,8 +925,11 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
 
 // ---------------- Update Numbers Panel (all manual entry, one place) ----------------
 
-function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
+function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll, debtCardBalances = {}, debtCardBalanceSource = {}, debtMonthlyCollections }: {
   cashAccounts: CashAccount[]; cards: CreditCard[]; latestBalances: Record<string, BalanceCheck>; refreshAll: () => void;
+  debtCardBalances?: Record<string, number>;
+  debtCardBalanceSource?: Record<string, "statement" | "current">;
+  debtMonthlyCollections?: number | null;
 }) {
   const [latestReview, setLatestReview] = useState<WeeklyCashReview | null>(null);
   const [projectedProduction, setProjectedProduction] = useState("");
@@ -1055,56 +1058,57 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
     <div className="space-y-4">
       <div className="rounded-2xl bg-white shadow p-5">
         <h2 className="font-bold text-slate-700 mb-1">Account & Card Balances</h2>
-        <p className="text-sm text-slate-500 mb-4">Update everything here — the same numbers shown on each account/card's own tab, so updating here updates everywhere.</p>
-        <div className="grid gap-3 sm:grid-cols-2 mb-3">
-          {cashAccounts.map((acct) => (
-            <div key={acct.id} className="rounded-lg bg-slate-50 p-3">
-              <p className="text-sm font-semibold text-slate-700 mb-2">{acct.name}</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div>
-                  <label className="block text-sm text-slate-800 font-semibold mb-1">
-                    Balance <span className="text-slate-400 font-normal">— ${formatMoney(latestBalances[acct.name]?.balance ?? 0)}</span>
-                    <span className="block text-xs font-normal text-slate-400 mt-0.5">{latestBalances[acct.name] ? `Last updated ${new Date(latestBalances[acct.name].checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}</span>
-                  </label>
-                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[acct.id] ?? String(latestBalances[acct.name]?.balance ?? 0)} onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
-                    placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-800 font-semibold mb-1">
-                    Statement Balance <span className="text-slate-400 font-normal">— ${formatMoney(acct.statementBalance)}</span>
-                    <span className="block text-xs font-normal text-slate-400 mt-0.5">{acct.statementBalanceUpdatedAt ? `Last updated ${new Date(acct.statementBalanceUpdatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}</span>
-                  </label>
-                  <input type="number" onFocus={(e) => e.target.select()} value={bankStmtInputs[acct.id] ?? String(acct.statementBalance)} onChange={(e) => setBankStmtInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
-                    placeholder="From statement" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {cards.map((card) => (
-            <div key={card.id} className="rounded-lg bg-slate-50 p-3">
-              <p className="text-sm font-semibold text-slate-700 mb-2">{card.name}</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div>
-                  <label className="block text-sm text-slate-800 font-semibold mb-1">
-                    Current Balance <span className="text-slate-400 font-normal">— ${formatMoney(latestBalances[card.name]?.balance ?? 0)}</span>
-                    <span className="block text-xs font-normal text-slate-400 mt-0.5">{latestBalances[card.name] ? `Last updated ${new Date(latestBalances[card.name].checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}</span>
-                  </label>
-                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? String(latestBalances[card.name]?.balance ?? 0)} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
-                    placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-800 font-semibold mb-1">
-                    Statement Balance <span className="text-slate-400 font-normal">— ${formatMoney(card.statementBalance)}</span>
-                    <span className="block text-xs font-normal text-slate-400 mt-0.5">{card.statementBalanceUpdatedAt ? `Last updated ${new Date(card.statementBalanceUpdatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}</span>
-                  </label>
-                  <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? String(card.statementBalance)} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
-                    placeholder="From statement" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                </div>
-              </div>
-            </div>
-          ))}
+        <p className="text-sm text-slate-500 mb-3">Bank accounts and credit cards together. Statement balance is what interest is charged on.</p>
+        {/* One compact table rather than a card per account and per card —
+            the same six figures in a fraction of the space, so the whole
+            weekly update is visible without scrolling. */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                <th className="px-2 py-2 font-medium">Account / Card</th>
+                <th className="px-2 py-2 font-medium">Current balance</th>
+                <th className="px-2 py-2 font-medium">Statement balance</th>
+                <th className="px-2 py-2 font-medium">Last updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cashAccounts.map((acct) => (
+                <tr key={acct.id} className="border-b border-slate-50">
+                  <td className="px-2 py-1.5 font-medium text-slate-700 whitespace-nowrap">{acct.name}</td>
+                  <td className="px-2 py-1.5">
+                    <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[acct.id] ?? String(latestBalances[acct.name]?.balance ?? 0)} onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
+                      className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <input type="number" onFocus={(e) => e.target.select()} value={bankStmtInputs[acct.id] ?? String(acct.statementBalance)} onChange={(e) => setBankStmtInputs((f) => ({ ...f, [acct.id]: e.target.value }))}
+                      className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  </td>
+                  <td className="px-2 py-1.5 text-xs text-slate-400 whitespace-nowrap">
+                    {latestBalances[acct.name] ? new Date(latestBalances[acct.name].checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : <span className="text-amber-600">never</span>}
+                  </td>
+                </tr>
+              ))}
+              {cards.map((card) => (
+                <tr key={card.id} className="border-b border-slate-50 last:border-0">
+                  <td className="px-2 py-1.5 font-medium text-slate-700 whitespace-nowrap">
+                    {card.name} <span className="text-xs font-normal text-slate-400">card</span>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? String(latestBalances[card.name]?.balance ?? 0)} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
+                      className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? String(card.statementBalance)} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
+                      className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  </td>
+                  <td className="px-2 py-1.5 text-xs text-slate-400 whitespace-nowrap">
+                    {latestBalances[card.name] ? new Date(latestBalances[card.name].checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : <span className="text-amber-600">never</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
         <button onClick={handleSaveAllBalances} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition mt-4" style={{ backgroundColor: "#e8622a" }}>
           Save All Balances
@@ -1272,6 +1276,14 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll }: {
         </button>
         {arSaved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
         {arError && <span className="ml-3 text-xs text-red-600 font-semibold">⚠️ {arError}</span>}
+      </div>
+
+      {/* Debt lives here too, so there's one place to update every figure
+          rather than hunting across tabs for whichever is stale. */}
+      <div>
+        <h2 className="font-bold text-lg mb-1" style={{ color: "#4A4238" }}>Debt</h2>
+        <p className="text-sm text-slate-500 mb-3">Cards appear automatically from the Credit Cards tab. Add loans and interest rates here.</p>
+        <DebtPanel creditCards={cards} cardBalances={debtCardBalances} cardBalanceSource={debtCardBalanceSource} monthlyCollections={debtMonthlyCollections} />
       </div>
     </div>
   );
@@ -1820,8 +1832,6 @@ export default function CashFlowPage() {
               ))}
               <button onClick={() => setActiveTab("cards")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "cards" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Credit Cards</button>
-              <button onClick={() => setActiveTab("debt")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
-                style={activeTab === "debt" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Debt</button>
               <button onClick={() => setActiveTab("trends")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "trends" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Trends</button>
             </div>
@@ -1829,25 +1839,6 @@ export default function CashFlowPage() {
             {cashAccounts.map((a) => activeTab === a.id && (
               <AccountPanel key={a.id} account={a} allBills={bills} allPayments={payments} latestBalances={latestBalances} cards={creditCards} refreshAll={refresh} />
             ))}
-            {activeTab === "debt" && (
-              <DebtPanel
-                creditCards={creditCards}
-                // Statement balance, not the live balance: interest is charged
-                // on what was billed, and it's already maintained on the card
-                // record, so nothing has to be entered twice. Falls back to
-                // the current balance for a card with no statement on file.
-                cardBalances={Object.fromEntries(creditCards.map((cc) => [
-                  cc.id,
-                  cc.statementBalance > 0 ? cc.statementBalance : (latestBalances[cc.name]?.balance ?? 0),
-                ]))}
-                cardBalanceSource={Object.fromEntries(creditCards.map((cc) => [
-                  cc.id,
-                  cc.statementBalance > 0 ? "statement" : "current",
-                ]))}
-                monthlyCollections={debtMonthlyCollections}
-              />
-            )}
-
             {activeTab === "cards" && (
               <CreditCardsPanel cards={creditCards} charges={cardCharges} cashAccounts={cashAccounts} latestBalances={latestBalances} allBills={bills} allPayments={payments} refreshAll={refresh} />
             )}
@@ -1855,7 +1846,16 @@ export default function CashFlowPage() {
               <OverviewPanel cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setActiveTab("entry")} />
             )}
             {activeTab === "entry" && (
-              <EntryPanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={refresh} />
+              <EntryPanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={refresh}
+                debtCardBalances={Object.fromEntries(creditCards.map((cc) => [
+                  cc.id,
+                  cc.statementBalance > 0 ? cc.statementBalance : (latestBalances[cc.name]?.balance ?? 0),
+                ]))}
+                debtCardBalanceSource={Object.fromEntries(creditCards.map((cc) => [
+                  cc.id,
+                  cc.statementBalance > 0 ? "statement" : "current",
+                ]))}
+                debtMonthlyCollections={debtMonthlyCollections} />
             )}
             {activeTab === "trends" && (
               <TrendsPanel cashAccounts={cashAccounts} cards={creditCards} refreshAll={refresh} />
