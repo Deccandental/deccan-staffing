@@ -29,7 +29,7 @@ import {
   PvBonusPayment, loadPvBonusPayments, addPvBonusPayment, updatePvBonusPayment, deletePvBonusPayment,
   computePvQuarterCalcs, PvQuarterCalc, getPvQuarterDateRange,
 } from "@/lib/pvBonus";
-import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth, HoBonusPayment, loadHoBonusPayments, addHoBonusPayment, deleteHoBonusPayment } from "@/lib/hoBonus";
+import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth, HoBonusPayment, loadHoBonusPayments, addHoBonusPayment, updateHoBonusPayment, deleteHoBonusPayment } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
 import { formatMoney, byLastName } from "@/lib/format";
 import {
@@ -1348,6 +1348,10 @@ function HoBonusPanel() {
   const [hoPayAmount, setHoPayAmount] = useState("");
   const [hoPayNotes, setHoPayNotes] = useState("");
   const [hoPayError, setHoPayError] = useState("");
+  const [editingHoPayId, setEditingHoPayId] = useState<string | null>(null);
+  const [editHoDate, setEditHoDate] = useState("");
+  const [editHoAmount, setEditHoAmount] = useState("");
+  const [editHoNotes, setEditHoNotes] = useState("");
   const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
   const [newYearInput, setNewYearInput] = useState("");
 
@@ -1482,18 +1486,49 @@ function HoBonusPanel() {
                                   <div className="space-y-1 mb-2">
                                     {monthPayments.length === 0 && <p className="text-xs text-slate-400 italic">Nothing paid yet this month.</p>}
                                     {monthPayments.map((pay) => (
-                                      <div key={pay.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-2 py-1.5">
-                                        <span className="text-slate-600">
-                                          {new Date(pay.datePaid + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} — ${formatMoney(pay.amount)}
-                                          {pay.notes && <span className="text-slate-400"> · {pay.notes}</span>}
-                                          {pay.sourceKey && <span className="text-slate-400"> · from payroll</span>}
-                                        </span>
-                                        <button onClick={async () => {
-                                          if (!confirm("Delete this payment?")) return;
-                                          await deleteHoBonusPayment(pay.id);
-                                          setHoPayments(await loadHoBonusPayments(employeeId!));
-                                        }} className="text-red-400 hover:underline">Delete</button>
-                                      </div>
+                                      editingHoPayId === pay.id ? (
+                                        // Editing a date can move the payment into a
+                                        // different month — which is the point, since
+                                        // migrated payments all landed on month-end.
+                                        <div key={pay.id} className="flex flex-wrap items-center gap-1.5 bg-white rounded-lg px-2 py-1.5">
+                                          <input type="date" value={editHoDate} onChange={(e) => setEditHoDate(e.target.value)} className={`${cellClass} w-36`} />
+                                          <input type="number" onFocus={(e) => e.target.select()} value={editHoAmount} onChange={(e) => setEditHoAmount(e.target.value)} className={`${cellClass} w-24`} />
+                                          <input type="text" value={editHoNotes} onChange={(e) => setEditHoNotes(e.target.value)} placeholder="Note" className={`${cellClass} w-40`} />
+                                          <button onClick={async () => {
+                                            const amt = Number(editHoAmount);
+                                            if (!editHoDate || !amt) { setHoPayError("A payment needs a date and an amount."); return; }
+                                            const res = await updateHoBonusPayment(pay.id, { datePaid: editHoDate, amount: amt, notes: editHoNotes.trim() });
+                                            if (!res.ok) { setHoPayError(res.error ?? "Couldn't save."); return; }
+                                            setHoPayError("");
+                                            setEditingHoPayId(null);
+                                            setHoPayments(await loadHoBonusPayments(employeeId!));
+                                          }} className="rounded-lg px-2.5 py-1 text-xs font-semibold text-white" style={{ backgroundColor: "#e8622a" }}>Save</button>
+                                          <button onClick={() => { setEditingHoPayId(null); setHoPayError(""); }} className="text-xs text-slate-400 hover:underline">Cancel</button>
+                                        </div>
+                                      ) : (
+                                        <div key={pay.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-2 py-1.5">
+                                          <span className="text-slate-600">
+                                            {new Date(pay.datePaid + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} — ${formatMoney(pay.amount)}
+                                            {pay.notes && <span className="text-slate-400"> · {pay.notes}</span>}
+                                            {pay.sourceKey?.startsWith("payroll:") && <span className="text-slate-400"> · from payroll</span>}
+                                            {pay.sourceKey?.startsWith("migrated:") && <span className="text-amber-600"> · date needs checking</span>}
+                                          </span>
+                                          <span className="flex items-center gap-2">
+                                            <button onClick={() => {
+                                              setEditingHoPayId(pay.id);
+                                              setEditHoDate(pay.datePaid);
+                                              setEditHoAmount(String(pay.amount));
+                                              setEditHoNotes(pay.notes);
+                                              setHoPayError("");
+                                            }} className="text-orange-500 hover:underline">Edit</button>
+                                            <button onClick={async () => {
+                                              if (!confirm("Delete this payment?")) return;
+                                              await deleteHoBonusPayment(pay.id);
+                                              setHoPayments(await loadHoBonusPayments(employeeId!));
+                                            }} className="text-red-400 hover:underline">Delete</button>
+                                          </span>
+                                        </div>
+                                      )
                                     ))}
                                   </div>
                                   {/* Labelled, because an unlabelled narrow
