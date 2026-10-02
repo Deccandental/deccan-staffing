@@ -19,6 +19,7 @@ import {
   loadCardCharges, addCardCharge, updateCardCharge, deleteCardCharge,
   loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview, deleteWeeklyReview,
   ArAgingEntry, loadLatestArAging, loadArAgingHistory, saveArAgingEntry, deleteArAgingEntry, computeArHealth, computeAvgMonthlyProduction, withCurrentMonthProjection, computeBonusObligations, BonusObligationsResult,
+  loadProductionGoal, saveProductionGoal, computeGoalProgress, GoalProgress,
   loadDentalMonthlyHistory, backfillDentalMonth, deleteDentalMonthlyEntry, DentalMonthlyEntry,
   loadDentalMonthlySummaries, saveDentalMonthlySummary, deleteDentalMonthlySummary, DentalMonthlySummary,
   buildOccurrences, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
@@ -580,6 +581,12 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
   const [history, setHistory] = useState<WeeklyCashReview[]>([]);
   const [latestArAging, setLatestArAging] = useState<ArAgingEntry | null>(null);
   const [bonusObligations, setBonusObligations] = useState<BonusObligationsResult | null>(null);
+  const [overviewGoal, setOverviewGoal] = useState<number | null>(null);
+  useEffect(() => {
+    loadProductionGoal(new Date().getFullYear()).then((g) => {
+      if (g?.annualGoal) setOverviewGoal(g.annualGoal / 12);
+    });
+  }, []);
   const [avgMonthlyProduction, setAvgMonthlyProduction] = useState<number | null>(null);
 
   useEffect(() => {
@@ -617,7 +624,10 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
   const chaseForecast = chase ? computeAccountForecast(chase, latestBalances[chase.name]?.balance ?? 0, occurrences, today, 0) : null;
   const transfer = ffForecast && chaseForecast ? computeSuggestedTransfer(ffForecast, chaseForecast) : null;
 
-  const productionTarget = 165000;
+  // The goal was hardcoded here; it now comes from whatever is set for the
+  // year on the Weekly Update tab, falling back to the old figure only
+  // until a goal has been entered.
+  const productionTarget = overviewGoal ?? 165000;
   const collectionsTarget = 145000;
   const now = new Date();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -768,7 +778,7 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
                 </p>
               </div>
             </div>
-            <button onClick={onViewArDetails} className="text-xs font-semibold underline" style={{ color: style.color }}>See details in Update Numbers →</button>
+            <button onClick={onViewArDetails} className="text-xs font-semibold underline" style={{ color: style.color }}>See details in Weekly Update →</button>
           </div>
         );
       })()}
@@ -781,7 +791,7 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
           <p className="text-sm font-semibold text-slate-700">
             {productionNum != null
               ? <>Need to collect <strong style={{ color: requiredCollections.requiredCollectionRate != null && requiredCollections.requiredCollectionRate > 100 ? "#dc2626" : "#059669" }}>${formatMoney(requiredCollections.requiredCollections)}</strong> this month — {requiredCollections.requiredCollectionRate != null ? `${requiredCollections.requiredCollectionRate.toFixed(1)}%` : "—"} of your ${formatMoney(productionNum)} projected production — to cover all obligations plus both cushions.</>
-              : <>Enter a Projected Total Production figure (Update Numbers tab) to see what collection rate is needed this month.</>}
+              : <>Enter a Projected Total Production figure (Weekly Update tab) to see what collection rate is needed this month.</>}
           </p>
           <p className="text-xs text-slate-400 mt-1">${formatMoney(requiredCollections.totalObligations)} in obligations + ${formatMoney(requiredCollections.totalCushions)} cushions − ${formatMoney(requiredCollections.combinedCurrentBalance)} current combined balance{requiredCollections.knownInflows > 0 ? ` − $${formatMoney(requiredCollections.knownInflows)} known deposits` : ""} = ${formatMoney(requiredCollections.requiredCollections)} still needed.</p>
           {/* Bonus money already earned is part of the obligations figure
@@ -812,7 +822,7 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
             {statementsStale && <li>Credit card statement balances — last updated over a month ago</li>}
             {incomeStale && <li>Open Dental numbers — {latestReview ? `last entered ${new Date(latestReview.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "never entered"}</li>}
           </ul>
-          <p className="text-xs text-amber-600 mt-1">Update these on the "Update Numbers" tab.</p>
+          <p className="text-xs text-amber-600 mt-1">Update these on the "Weekly Update" tab.</p>
         </div>
       )}
 
@@ -923,7 +933,7 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
   );
 }
 
-// ---------------- Update Numbers Panel (all manual entry, one place) ----------------
+// ---------------- Weekly Update Panel (all manual entry, one place) ----------------
 
 function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll, debtCardBalances = {}, debtCardBalanceSource = {}, debtMonthlyCollections }: {
   cashAccounts: CashAccount[]; cards: CreditCard[]; latestBalances: Record<string, BalanceCheck>; refreshAll: () => void;
@@ -947,6 +957,30 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll, debtCardB
   const [latestArAging, setLatestArAging] = useState<ArAgingEntry | null>(null);
   const [avgMonthlyProduction, setAvgMonthlyProduction] = useState<number | null>(null);
   const [arSaved, setArSaved] = useState(false);
+  const goalYear = new Date().getFullYear();
+  const [goalInput, setGoalInput] = useState("");
+  const [goalSaved, setGoalSaved] = useState(false);
+  const [goalProgress, setGoalProgress] = useState<GoalProgress | null>(null);
+
+  async function refreshGoal() {
+    const [goal, history, review] = await Promise.all([
+      loadProductionGoal(goalYear), loadDentalMonthlyHistory(), loadLatestWeeklyReview(),
+    ]);
+    setGoalInput(goal ? String(goal.annualGoal) : "");
+    const merged = withCurrentMonthProjection(history, review);
+    setGoalProgress(computeGoalProgress(goal?.annualGoal ?? 0, merged.map((e) => ({ month: e.month, netProduction: e.netProduction })), goalYear));
+  }
+  useEffect(() => { refreshGoal(); }, []);
+
+  async function handleSaveGoal() {
+    const amt = Number(goalInput);
+    if (!amt || amt <= 0) return;
+    const res = await saveProductionGoal(goalYear, amt);
+    if (!res.ok) return;
+    setGoalSaved(true);
+    setTimeout(() => setGoalSaved(false), 2500);
+    refreshGoal();
+  }
   const [arError, setArError] = useState<string | null>(null);
 
   const [balanceInputs, setBalanceInputs] = useState<Record<string, string>>({});
@@ -1276,6 +1310,88 @@ function EntryPanel({ cashAccounts, cards, latestBalances, refreshAll, debtCardB
         </button>
         {arSaved && <span className="ml-3 text-xs text-emerald-600 font-semibold">✓ Saved</span>}
         {arError && <span className="ml-3 text-xs text-red-600 font-semibold">⚠️ {arError}</span>}
+      </div>
+
+      {/* Production goal — set once a year, then it recalculates what each
+          remaining month needs as the year actually unfolds. */}
+      <div className="rounded-2xl bg-white shadow p-5">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <h2 className="font-bold text-slate-700">{goalYear} Production Goal</h2>
+          <div className="flex items-center gap-2">
+            <input type="number" onFocus={(e) => e.target.select()} value={goalInput} onChange={(e) => setGoalInput(e.target.value)}
+              placeholder="Annual goal $" className="w-40 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            <button onClick={handleSaveGoal} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Save Goal</button>
+            {goalSaved && <span className="text-xs text-emerald-600 font-semibold">✓</span>}
+          </div>
+        </div>
+
+        {goalProgress && goalProgress.annualGoal > 0 ? (
+          <>
+            <p className="text-sm text-slate-500 mb-3">
+              ${formatMoney(goalProgress.annualGoal / 12)} a month at an even pace. Months still to come carry any ground lost so far.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-3 mb-3">
+              <div className="rounded-xl p-3" style={{ background: "#F1F0EE" }}>
+                <p className="text-xs text-slate-400">Booked so far</p>
+                <p className="text-xl font-bold" style={{ color: "#4A4238" }}>${formatMoney(goalProgress.actualToDate)}</p>
+                <p className="text-xs text-slate-400">of ${formatMoney(goalProgress.baselineToDate)} expected by now</p>
+              </div>
+              <div className="rounded-xl p-3" style={{ background: goalProgress.onTrack ? "#EAF3DE" : "#FAEEDA" }}>
+                <p className="text-xs" style={{ color: goalProgress.onTrack ? "#3B6D11" : "#854F0B" }}>{goalProgress.onTrack ? "Ahead by" : "Behind by"}</p>
+                <p className="text-xl font-bold" style={{ color: goalProgress.onTrack ? "#3B6D11" : "#854F0B" }}>
+                  ${formatMoney(Math.abs(goalProgress.shortfallToDate))}
+                </p>
+              </div>
+              <div className="rounded-xl p-3" style={{ background: goalProgress.unreachable ? "#FCEBEB" : "#E6F1FB" }}>
+                <p className="text-xs" style={{ color: goalProgress.unreachable ? "#A32D2D" : "#185FA5" }}>Each remaining month needs</p>
+                <p className="text-xl font-bold" style={{ color: goalProgress.unreachable ? "#A32D2D" : "#185FA5" }}>
+                  ${formatMoney(goalProgress.requiredPerRemainingMonth)}
+                </p>
+                <p className="text-xs" style={{ color: goalProgress.unreachable ? "#A32D2D" : "#185FA5" }}>
+                  across {goalProgress.remainingMonths} month{goalProgress.remainingMonths === 1 ? "" : "s"}
+                </p>
+              </div>
+            </div>
+
+            {goalProgress.unreachable && (
+              <div className="rounded-xl px-3 py-2 mb-3" style={{ background: "#FCEBEB" }}>
+                <p className="text-xs font-semibold" style={{ color: "#A32D2D" }}>
+                  That catch-up figure is above anything the practice has produced in a month this year. The goal may be worth revisiting rather than carrying a target nobody can hit.
+                </p>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                    <th className="px-2 py-1.5 font-medium">Month</th>
+                    <th className="px-2 py-1.5 font-medium">Target</th>
+                    <th className="px-2 py-1.5 font-medium">Actual</th>
+                    <th className="px-2 py-1.5 font-medium">vs even pace</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {goalProgress.rows.map((r) => (
+                    <tr key={r.month} className="border-b border-slate-50 last:border-0" style={r.isCurrent ? { background: "#FDF6E4" } : undefined}>
+                      <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: r.isPast || r.isCurrent ? "#4A4238" : "rgba(74,66,56,0.45)" }}>
+                        {new Date(`${goalYear}-${String(r.month).padStart(2, "0")}-02`).toLocaleDateString("en-US", { month: "long" })}
+                        {r.isCurrent && <span className="text-xs text-slate-400"> · current</span>}
+                      </td>
+                      <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: "rgba(74,66,56,0.6)" }}>${formatMoney(r.adjustedTarget)}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap font-medium">{r.actual != null ? `$${formatMoney(r.actual)}` : <span className="text-slate-300">—</span>}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap text-xs font-semibold" style={{ color: r.variance == null ? "#cbd5e1" : r.variance >= 0 ? "#3B6D11" : "#A32D2D" }}>
+                        {r.variance == null ? "—" : `${r.variance >= 0 ? "+" : "−"}$${formatMoney(Math.abs(r.variance))}`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-slate-400">Set an annual production goal to track the year against it.</p>
+        )}
       </div>
 
       {/* Debt lives here too, so there's one place to update every figure
@@ -1665,7 +1781,7 @@ function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAc
 
       <div className="rounded-2xl bg-white shadow p-5">
         <h2 className="font-bold text-slate-700 mb-1">Add / Backfill Net Production</h2>
-        <p className="text-sm text-slate-500 mb-4">Enter the official net production figure for any month, past or present. This is a separate historical record from the day-to-day running numbers on Update Numbers — one won't overwrite the other.</p>
+        <p className="text-sm text-slate-500 mb-4">Enter the official net production figure for any month, past or present. This is a separate historical record from the day-to-day running numbers on Weekly Update — one won't overwrite the other.</p>
         <div className="grid gap-3 sm:grid-cols-3 mb-3">
           <div>
             <label className="block text-sm text-slate-800 font-semibold mb-1">Month</label>
@@ -1824,7 +1940,7 @@ export default function CashFlowPage() {
                 style={activeTab === "overview" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Overview</button>
               <button onClick={() => setActiveTab("entry")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "entry" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : updateNumbersNeedsAttention ? { backgroundColor: "#fee2e2", color: "#991b1b", borderColor: "#991b1b" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>
-                {updateNumbersNeedsAttention && activeTab !== "entry" ? "⚠️ " : ""}Update Numbers
+                {updateNumbersNeedsAttention && activeTab !== "entry" ? "⚠️ " : ""}Weekly Update
               </button>
               {cashAccounts.map((a) => (
                 <button key={a.id} onClick={() => setActiveTab(a.id)} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
