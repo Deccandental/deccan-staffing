@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { formatMoney } from "@/lib/format";
+import { loadStaff } from "@/lib/staffStore";
+import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
 import {
   RecurringBill, BillPayment, BalanceCheck, Occurrence, BillFrequency, BillCategory,
   CashAccount, CreditCard, CardCharge, WeeklyCashReview,
@@ -15,7 +17,7 @@ import {
   loadCreditCards, updateStatementBalance,
   loadCardCharges, addCardCharge, updateCardCharge, deleteCardCharge,
   loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview, deleteWeeklyReview,
-  ArAgingEntry, loadLatestArAging, loadArAgingHistory, saveArAgingEntry, deleteArAgingEntry, computeArHealth, computeAvgMonthlyProduction, withCurrentMonthProjection,
+  ArAgingEntry, loadLatestArAging, loadArAgingHistory, saveArAgingEntry, deleteArAgingEntry, computeArHealth, computeAvgMonthlyProduction, withCurrentMonthProjection, computeBonusObligations, BonusObligationsResult,
   loadDentalMonthlyHistory, backfillDentalMonth, deleteDentalMonthlyEntry, DentalMonthlyEntry,
   loadDentalMonthlySummaries, saveDentalMonthlySummary, deleteDentalMonthlySummary, DentalMonthlySummary,
   buildOccurrences, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
@@ -576,10 +578,28 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
   const [latestReview, setLatestReview] = useState<WeeklyCashReview | null>(null);
   const [history, setHistory] = useState<WeeklyCashReview[]>([]);
   const [latestArAging, setLatestArAging] = useState<ArAgingEntry | null>(null);
+  const [bonusObligations, setBonusObligations] = useState<BonusObligationsResult | null>(null);
   const [avgMonthlyProduction, setAvgMonthlyProduction] = useState<number | null>(null);
 
   useEffect(() => {
-    Promise.all([loadLatestWeeklyReview(), loadWeeklyReviewHistory(8), loadLatestArAging(), loadDentalMonthlyHistory()]).then(([latest, hist, ar, dentalHist]) => {
+    Promise.all([
+      loadLatestWeeklyReview(), loadWeeklyReviewHistory(8), loadLatestArAging(), loadDentalMonthlyHistory(),
+      loadStaff(),
+    ]).then(async ([latest, hist, ar, dentalHist, staffList]) => {
+      // Bonus obligations are real commitments that fall due like any bill,
+      // so the cash position has to know about them.
+      const ho = staffList.find((s) => s.hoBonusEligible && !s.archived);
+      if (ho) {
+        const year = new Date().getFullYear();
+        const [months, payments] = await Promise.all([
+          loadHoBonusPayoutYear(ho.id, year),
+          loadHoBonusPayments(ho.id),
+        ]);
+        setBonusObligations(computeBonusObligations({
+          hoMonths: months.map((m) => ({ year: m.year, month: m.month, production: m.production })),
+          hoPayments: payments.map((p) => ({ datePaid: p.datePaid, amount: p.amount })),
+        }));
+      }
       setLatestReview(latest);
       setHistory(hist);
       setLatestArAging(ar);
@@ -610,7 +630,7 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
   const monthEnd = `${today.slice(0, 8)}${String(daysInMonth).padStart(2, "0")}`;
   const fullMonthOccurrences = buildOccurrences(allBills, allPayments, monthStart, monthEnd);
   const requiredCollections = ff && chase
-    ? computeRequiredCollections(ff, chase, latestBalances[ff.name]?.balance ?? 0, latestBalances[chase.name]?.balance ?? 0, fullMonthOccurrences, productionNum)
+    ? computeRequiredCollections(ff, chase, latestBalances[ff.name]?.balance ?? 0, latestBalances[chase.name]?.balance ?? 0, fullMonthOccurrences, productionNum, bonusObligations?.total ?? 0)
     : null;
 
   const STALE_DAYS = 7;
@@ -763,6 +783,20 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
               : <>Enter a Projected Total Production figure (Update Numbers tab) to see what collection rate is needed this month.</>}
           </p>
           <p className="text-xs text-slate-400 mt-1">${formatMoney(requiredCollections.totalObligations)} in obligations + ${formatMoney(requiredCollections.totalCushions)} cushions − ${formatMoney(requiredCollections.combinedCurrentBalance)} current combined balance{requiredCollections.knownInflows > 0 ? ` − $${formatMoney(requiredCollections.knownInflows)} known deposits` : ""} = ${formatMoney(requiredCollections.requiredCollections)} still needed.</p>
+          {/* Bonus money already earned is part of the obligations figure
+              above, but it's worth naming — it isn't a bill anyone sends
+              you, so it's the easiest commitment to forget. */}
+          {bonusObligations && bonusObligations.items.length > 0 && (
+            <div className="mt-2 rounded-xl p-3" style={{ background: "#FAEEDA" }}>
+              <p className="text-xs font-semibold mb-1" style={{ color: "#854F0B" }}>Bonus earned but not yet paid — included above</p>
+              {bonusObligations.items.map((item) => (
+                <div key={item.label} className="flex items-center justify-between text-xs" style={{ color: "#854F0B" }}>
+                  <span>{item.label} <span className="opacity-70">· {item.detail}</span></span>
+                  <span className="font-semibold">${formatMoney(item.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
           {requiredCollections.requiredCollectionRate != null && requiredCollections.requiredCollectionRate > 100 && (
             <p className="text-xs text-red-600 mt-1 font-semibold">⚠️ This exceeds projected production — even collecting everything produced this month wouldn't be enough at current obligations and cushions.</p>
           )}
