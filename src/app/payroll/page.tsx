@@ -29,7 +29,7 @@ import {
   PvBonusPayment, loadPvBonusPayments, addPvBonusPayment, updatePvBonusPayment, deletePvBonusPayment,
   computePvQuarterCalcs, PvQuarterCalc, getPvQuarterDateRange,
 } from "@/lib/pvBonus";
-import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth } from "@/lib/hoBonus";
+import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth, HoBonusPayment, loadHoBonusPayments, addHoBonusPayment, deleteHoBonusPayment } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
 import { formatMoney, byLastName } from "@/lib/format";
 import {
@@ -1342,6 +1342,11 @@ function HoBonusPanel() {
   const [rows, setRows] = useState<Record<number, HoBonusMonth[]>>({});
   const [loading, setLoading] = useState(true);
   const [savingYear, setSavingYear] = useState<number | null>(null);
+  const [hoPayments, setHoPayments] = useState<HoBonusPayment[]>([]);
+  const [openHoMonth, setOpenHoMonth] = useState<string | null>(null);
+  const [hoPayDate, setHoPayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [hoPayAmount, setHoPayAmount] = useState("");
+  const [hoPayNotes, setHoPayNotes] = useState("");
   const [savedMsg, setSavedMsg] = useState<Record<number, string>>({});
   const [newYearInput, setNewYearInput] = useState("");
 
@@ -1354,7 +1359,11 @@ function HoBonusPanel() {
     });
   }, []);
 
-  useEffect(() => { if (employeeId != null) loadYears(years); }, [employeeId]);
+  useEffect(() => {
+    if (employeeId == null) return;
+    loadYears(years);
+    loadHoBonusPayments(employeeId).then(setHoPayments);
+  }, [employeeId]);
 
   async function loadYears(ys: number[]) {
     if (employeeId == null) return;
@@ -1443,16 +1452,65 @@ function HoBonusPanel() {
                     <tbody>
                       {yearRows.map((m) => {
                         const owed = m.production * 0.4;
-                        const balance = owed - m.paid;
+                        // Paid is the sum of individually dated payments, so
+                        // two or three payments in one month each keep their
+                        // own date instead of collapsing into one figure.
+                        const monthPayments = hoPayments.filter((pay) => pay.datePaid.startsWith(`${m.year}-${String(m.month).padStart(2, "0")}`));
+                        const paid = monthPayments.reduce((sum, pay) => sum + pay.amount, 0);
+                        const balance = owed - paid;
+                        const key = `${m.year}-${m.month}`;
+                        const isOpen = openHoMonth === key;
                         return (
-                          <tr key={m.month} className="border-b border-slate-50 last:border-0">
-                            <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
-                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={m.production} onChange={(e) => updateCell(year, m.month, "production", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
-                            <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
-                            <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={m.paid} onChange={(e) => updateCell(year, m.month, "paid", Number(e.target.value))} className={`${cellClass} w-24`} /></td>
-                            <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
-                            <td className="px-2 py-2"><input type="text" value={m.notes} onChange={(e) => updateCell(year, m.month, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
-                          </tr>
+                          <Fragment key={m.month}>
+                            <tr className="border-b border-slate-50 last:border-0">
+                              <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
+                              <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={m.production} onChange={(e) => updateCell(year, m.month, "production", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
+                              <td className="px-2 py-2">
+                                <button onClick={() => setOpenHoMonth(isOpen ? null : key)} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
+                                  ${formatMoney(paid)}{monthPayments.length > 0 ? ` (${monthPayments.length})` : ""} {isOpen ? "▲" : "▼"}
+                                </button>
+                              </td>
+                              <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                              <td className="px-2 py-2"><input type="text" value={m.notes} onChange={(e) => updateCell(year, m.month, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
+                            </tr>
+                            {isOpen && (
+                              <tr className="bg-slate-50/60 border-b border-slate-100">
+                                <td colSpan={6} className="px-4 py-3">
+                                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Payments in {MONTH_NAMES[m.month - 1]} {m.year}</p>
+                                  <div className="space-y-1 mb-2">
+                                    {monthPayments.length === 0 && <p className="text-xs text-slate-400 italic">Nothing paid yet this month.</p>}
+                                    {monthPayments.map((pay) => (
+                                      <div key={pay.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-2 py-1.5">
+                                        <span className="text-slate-600">
+                                          {new Date(pay.datePaid + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} — ${formatMoney(pay.amount)}
+                                          {pay.notes && <span className="text-slate-400"> · {pay.notes}</span>}
+                                          {pay.sourceKey && <span className="text-slate-400"> · from payroll</span>}
+                                        </span>
+                                        <button onClick={async () => {
+                                          if (!confirm("Delete this payment?")) return;
+                                          await deleteHoBonusPayment(pay.id);
+                                          setHoPayments(await loadHoBonusPayments(employeeId!));
+                                        }} className="text-red-400 hover:underline">Delete</button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <input type="date" value={hoPayDate} onChange={(e) => setHoPayDate(e.target.value)} className={`${cellClass} w-36`} />
+                                    <input type="number" onFocus={(e) => e.target.select()} value={hoPayAmount} onChange={(e) => setHoPayAmount(e.target.value)} placeholder="$" className={`${cellClass} w-24`} />
+                                    <input type="text" value={hoPayNotes} onChange={(e) => setHoPayNotes(e.target.value)} placeholder="Note (optional)" className={`${cellClass} w-48`} />
+                                    <button onClick={async () => {
+                                      const amt = Number(hoPayAmount);
+                                      if (!hoPayDate || !amt || employeeId == null) return;
+                                      await addHoBonusPayment({ employeeId, datePaid: hoPayDate, amount: amt, notes: hoPayNotes.trim() });
+                                      setHoPayAmount(""); setHoPayNotes("");
+                                      setHoPayments(await loadHoBonusPayments(employeeId));
+                                    }} className="rounded-lg px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add Payment</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
                         );
                       })}
                     </tbody>
