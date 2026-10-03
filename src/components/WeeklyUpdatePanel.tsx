@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { formatMoney } from "@/lib/format";
 import DebtPanel from "@/components/DebtPanel";
-import { HistoryBlock, HistoryButton, MonthSelect, NumInput, monthLabel, HistRow } from "@/components/CashHistory";
+import { balanceWarnings, statementWarnings, weeklyEntryWarnings, previousMonth } from "@/lib/staleness";
+import { HistoryBlock, HistoryButton, MonthSelect, NumInput, UpdatedStamp, monthLabel, HistRow } from "@/components/CashHistory";
 import {
   CashAccount, CreditCard, CardCharge, RecurringBill, BillPayment, BalanceCheck, WeeklyCashReview, ArAgingEntry, BankStatementEntry, GoalProgress,
   addBalanceCheck, loadBalanceHistoryForAccount, deleteBalanceCheck,
@@ -17,14 +18,6 @@ import {
 function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-// Bank statements cover a calendar month and arrive after it ends, so the
-// latest one available is last month's.
-function previousMonth(): string {
-  const d = new Date();
-  const p = new Date(d.getFullYear(), d.getMonth() - 1, 1);
-  return `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, "0")}`;
 }
 
 const m0 = (n: number | null | undefined) => (n == null ? "—" : `$${Math.round(n).toLocaleString("en-US")}`);
@@ -45,7 +38,7 @@ function Field({ label, title, width, children }: { label: React.ReactNode; titl
   );
 }
 
-const BANK_GRID = "minmax(130px,1.2fr) 110px 196px 64px 56px";
+const BANK_GRID = "minmax(130px,1.2fr) 110px 196px 110px 56px";
 
 export default function WeeklyUpdatePanel({
   cashAccounts, cards, latestBalances, refreshAll, debtMonthlyCollections, charges, allBills, allPayments,
@@ -78,6 +71,19 @@ export default function WeeklyUpdatePanel({
     setBankHist(map);
   }
   useEffect(() => { loadBankStatements(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Weekly: current balance. Monthly: the statement for last month (only once
+  // statements are being tracked for the account).
+  function bankWarnings(acctId: string, checkedAt?: string): string[] {
+    return [
+      ...balanceWarnings(checkedAt, "weekly"),
+      ...statementWarnings((bankHist[acctId] ?? [])[0]?.month, previousMonth()),
+    ];
+  }
+  function bankWhen(acctId: string, checkedAt?: string): string | null {
+    const stamps = [checkedAt, (bankHist[acctId] ?? [])[0]?.enteredAt].filter((t): t is string => !!t);
+    return stamps.length ? stamps.reduce((a, b) => (new Date(a) > new Date(b) ? a : b)) : null;
+  }
 
   const balancesDirty = Object.keys(balanceInputs).length > 0 || Object.keys(stmtInputs).length > 0;
 
@@ -204,6 +210,7 @@ export default function WeeklyUpdatePanel({
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
     setLatestReview(await loadLatestWeeklyReview());
+    refreshAll();
   }
 
   const n = (s: string) => (s ? Number(s) : 0);
@@ -222,6 +229,7 @@ export default function WeeklyUpdatePanel({
     setArSaved(true);
     setTimeout(() => setArSaved(false), 3000);
     setLatestArAging(await loadLatestArAging());
+    refreshAll();
   }
 
   const health = computeArHealth(
@@ -255,7 +263,7 @@ export default function WeeklyUpdatePanel({
         <div className="overflow-x-auto">
           <div style={{ minWidth: 560 }}>
             <div className="grid items-end gap-x-2 text-[11px] text-slate-400 font-medium border-b border-slate-100 pb-1" style={{ gridTemplateColumns: BANK_GRID }}>
-              <span>Account</span><span>Current bal.</span><span>Statement Balance</span><span>Updated</span><span />
+              <span>Account</span><span>Current bal.</span><span>Statement Balance</span><span>Last update</span><span />
             </div>
             {cashAccounts.map((acct) => {
               const hist = bankHist[acct.id] ?? [];
@@ -288,13 +296,13 @@ export default function WeeklyUpdatePanel({
                           className="text-[10px] font-semibold text-amber-600 whitespace-nowrap hover:underline">{monthLabel(covered).split(" ")[0]}?</button>
                       )}
                     </span>
-                    <span className="text-slate-400 whitespace-nowrap">{last ? shortDate(last.checkedAt) : <span className="text-amber-600">never</span>}</span>
+                    <UpdatedStamp prefix="" when={bankWhen(acct.id, last?.checkedAt)} warnings={bankWarnings(acct.id, last?.checkedAt)} />
                     <span className="text-right"><HistoryButton open={histOpen} onClick={() => setOpenBankHist(histOpen ? null : acct.id)} /></span>
                   </div>
                   {histOpen && (
                     <div className="pb-2">
                       <HistoryBlock
-                        onChanged={loadBankStatements}
+                        onChanged={() => { loadBankStatements(); refreshAll(); }}
                         columns={[
                           {
                             title: "Current balance",
@@ -333,8 +341,8 @@ export default function WeeklyUpdatePanel({
       <div className={card}>
         <div className={hdr}>
           <h2 className="font-bold text-sm text-slate-700">Open Dental Numbers</h2>
-          <div className="flex items-center gap-3 text-xs text-slate-400">
-            <span>{latestReview ? `Updated ${ymdLabel(latestReview.reviewDate, true)}` : "Never entered"}</span>
+          <div className="flex items-center gap-3 text-xs">
+            <UpdatedStamp when={latestReview?.reviewDate} warnings={weeklyEntryWarnings(latestReview?.reviewDate)} />
             <HistoryButton open={openOdHist} onClick={() => setOpenOdHist((o) => !o)} />
           </div>
         </div>
@@ -382,8 +390,8 @@ export default function WeeklyUpdatePanel({
       <div className={card}>
         <div className={hdr}>
           <h2 className="font-bold text-sm text-slate-700">A/R Aging</h2>
-          <div className="flex items-center gap-3 text-xs text-slate-400">
-            <span>{latestArAging ? `Updated ${ymdLabel(latestArAging.entryDate, true)}` : "Never entered"}</span>
+          <div className="flex items-center gap-3 text-xs">
+            <UpdatedStamp when={latestArAging?.entryDate} warnings={weeklyEntryWarnings(latestArAging?.entryDate)} />
             <HistoryButton open={openArHist} onClick={() => setOpenArHist((o) => !o)} />
           </div>
         </div>
@@ -509,11 +517,9 @@ export default function WeeklyUpdatePanel({
       </div>
 
       {/* ---------- Debt — credit cards live only here ---------- */}
-      <div>
-        <h2 className="font-bold text-sm mb-1" style={{ color: "#4A4238" }}>Debt <span className="font-normal text-xs text-slate-400">· cards appear automatically, with their warnings; enter balances, rate and payment on each line</span></h2>
-        <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={debtMonthlyCollections}
-          cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments} />
-      </div>
+      {/* Debt — summary, every card and loan, and card warnings in one card */}
+      <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={debtMonthlyCollections}
+        cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments} />
     </div>
   );
 }
