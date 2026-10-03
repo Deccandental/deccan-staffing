@@ -238,7 +238,6 @@ export default function DebtPanel({
       <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
         <h2 className="font-bold text-slate-700 text-sm">
           Debt <span className="font-normal text-xs text-slate-400">· cards appear automatically, with their warnings</span>
-          {overdueCount > 0 && <span className="ml-2 text-xs font-semibold" style={{ color: "#b91c1c" }}>⚠️ {overdueCount} {overdueCount === 1 ? "line needs" : "lines need"} updating</span>}
         </h2>
         <div className="flex items-center gap-2">
           {dirty && <span className="text-xs text-red-600 font-semibold">⚠️ unsaved</span>}
@@ -466,7 +465,7 @@ export default function DebtPanel({
                         {!l.counted ? "monthly" : l.neverClears ? "⚠️ never" : fmtMonths(l.payoffMonths)}
                         {d.finalPaymentDate && !l.neverClears && <span className="text-slate-400"> · {new Date(d.finalPaymentDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "2-digit" })}</span>}
                       </span>
-                      <UpdatedStamp when={status.when} warnings={status.warnings} prefix="" />
+                      <UpdatedStamp when={status.when} prefix="" />
                       <span className="text-right whitespace-nowrap">
                         <HistoryButton open={histOpen} onClick={() => setOpenHist(histOpen ? null : key)} />
                         <button onClick={() => { setForm({ ...d }); setShowForm(true); }} className="text-xs text-orange-500 hover:underline ml-2">Edit</button>
