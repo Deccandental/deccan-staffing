@@ -1145,3 +1145,18 @@ export function computeGoalProgress(
     unreachable: remainingMonths > 0 && bestMonth > 0 && requiredPerRemainingMonth > bestMonth * 1.15,
   };
 }
+
+// ---------------- Edit an entry's amount in place (corrections) ----------------
+// These change only the amount. The entry keeps its date or month, so fixing a
+// typo doesn't move it on the chart or count as a fresh update.
+
+type EditResult = Promise<{ ok: boolean; error?: string }>;
+
+async function updateAmount(table: string, id: string, balance: number): EditResult {
+  const { error } = await supabase.from(table).update({ balance }).eq("id", id);
+  if (error) { console.error(`update ${table} amount error:`, error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+export const updateBalanceCheckAmount = (id: string, balance: number): EditResult => updateAmount("balance_checks", id, balance);
+export const updateStatementEntryAmount = (id: string, balance: number): EditResult => updateAmount("card_statement_entries", id, balance);
+export const updateBankStatementEntryAmount = (id: string, balance: number): EditResult => updateAmount("bank_statement_entries", id, balance);
