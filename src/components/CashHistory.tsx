@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { formatUSD } from "@/lib/format";
 
 /**
  * Compact history viewer for the Cash Flow "Weekly Update" tab.
@@ -20,6 +21,11 @@ export interface HistRow {
   // moved to the right month.
   month?: string;
   onMonth?: (newMonth: string) => Promise<void>;
+  // Balance rows: the number behind `value`. When onAmount is supplied the
+  // figure becomes click-to-edit, so a typo is fixed in place instead of
+  // deleting and re-entering the entry.
+  amount?: number;
+  onAmount?: (newAmount: number) => Promise<{ ok: boolean; error?: string }>;
   onDelete?: () => Promise<void>;
 }
 
@@ -60,6 +66,42 @@ export function MonthSelect({ value, onChange, className = "", extra = [] }: {
   );
 }
 
+function AmountCell({ row, onDone }: { row: HistRow; onDone: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function commit() {
+    const n = Number(val);
+    if (val === "" || isNaN(n)) { setEditing(false); return; }
+    if (n === row.amount) { setEditing(false); return; }
+    setBusy(true); setErr(null);
+    const r = await row.onAmount!(n);
+    setBusy(false);
+    if (!r.ok) { setErr(r.error ?? "Couldn't save"); return; }
+    setEditing(false); onDone();
+  }
+
+  if (!editing) {
+    return (
+      <button title="Click to correct this amount" onClick={() => { setVal(String(row.amount ?? "")); setErr(null); setEditing(true); }}
+        className="font-semibold text-slate-700 truncate flex-1 text-left hover:underline hover:text-orange-600">{row.value}</button>
+    );
+  }
+  return (
+    <span className="flex-1 flex items-center gap-1">
+      <NumInput autoFocus wrap="w-28" value={val} onChange={(e) => setVal(e.target.value)} disabled={busy}
+        onFocus={(e) => e.target.select()}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+        className="w-full rounded border border-orange-300 px-1 py-0 text-xs focus:outline-none" />
+      <button onClick={commit} disabled={busy} className="text-emerald-600 hover:text-emerald-800" title="Save">✓</button>
+      <button onClick={() => setEditing(false)} className="text-slate-400 hover:text-slate-600" title="Cancel">✕</button>
+      {err && <span className="text-red-600" title={err}>⚠️</span>}
+    </span>
+  );
+}
+
 function Column({ col, onChanged }: { col: HistColumn; onChanged?: () => void }) {
   const [rows, setRows] = useState<HistRow[] | null>(null);
   // The parent builds the column objects inline, so keep the latest loader in
@@ -85,7 +127,9 @@ function Column({ col, onChanged }: { col: HistColumn; onChanged?: () => void })
             ) : (
               <span className="text-slate-500 w-24 shrink-0">{r.label}</span>
             )}
-            <span className="font-semibold text-slate-700 truncate flex-1">{r.value}</span>
+            {r.onAmount
+              ? <AmountCell row={r} onDone={async () => { await load(); onChanged?.(); }} />
+              : <span className="font-semibold text-slate-700 truncate flex-1">{r.value}</span>}
             {r.onDelete && (
               <button title="Delete this entry"
                 onClick={async () => {
