@@ -10,6 +10,7 @@ import BarChart, { BarPoint, BarSeries } from "@/components/BarChart";
 import { UpdatedStamp } from "@/components/CashHistory";
 import { loadDebts, loadDebtStatements, Debt, CATEGORY_SHORT, CATEGORY_LABEL, categoryRank } from "@/lib/debt";
 import { loadStaff } from "@/lib/staffStore";
+import { loadCompOwed, CompOwedResult } from "@/lib/compOwed";
 import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
 import {
   RecurringBill, BillPayment, BalanceCheck, Occurrence, BillFrequency, BillCategory,
@@ -404,7 +405,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   const [latestReview, setLatestReview] = useState<WeeklyCashReview | null>(null);
   const [history, setHistory] = useState<WeeklyCashReview[]>([]);
   const [latestArAging, setLatestArAging] = useState<ArAgingEntry | null>(null);
-  const [bonusObligations, setBonusObligations] = useState<BonusObligationsResult | null>(null);
+  const [bonusObligations, setBonusObligations] = useState<CompOwedResult | null>(null);
   const [overviewGoal, setOverviewGoal] = useState<number | null>(null);
   useEffect(() => {
     loadProductionGoal(new Date().getFullYear()).then((g) => {
@@ -470,20 +471,9 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       loadLatestWeeklyReview(), loadWeeklyReviewHistory(8), loadLatestArAging(), loadDentalMonthlyHistory(),
       loadStaff(),
     ]).then(async ([latest, hist, ar, dentalHist, staffList]) => {
-      // Bonus obligations are real commitments that fall due like any bill,
-      // so the cash position has to know about them.
-      const ho = staffList.find((s) => s.hoBonusEligible && !s.archived);
-      if (ho) {
-        const year = new Date().getFullYear();
-        const [months, payments] = await Promise.all([
-          loadHoBonusPayoutYear(ho.id, year),
-          loadHoBonusPayments(ho.id),
-        ]);
-        setBonusObligations(computeBonusObligations({
-          hoMonths: months.map((m) => ({ year: m.year, month: m.month, production: m.production })),
-          hoPayments: payments.map((p) => ({ datePaid: p.datePaid, amount: p.amount })),
-        }));
-      }
+      // Compensation and bonuses are paid as they are calculated, so the cash
+      // position has to know what is owed right now (Dr. Ho, PV, staff growth).
+      setBonusObligations(await loadCompOwed(staffList));
       setLatestReview(latest);
       setHistory(hist);
       setLatestArAging(ar);
@@ -519,8 +509,21 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   // balance, so counting it here as well would double-count it and make the
   // number creep UP as the month goes on instead of holding steady.
   const fullMonthOccurrences = buildOccurrences(allBills, allPayments, monthStart, monthEnd).filter((o) => !o.isPaid);
+  // A card minimum has to be covered to avoid an overdraft or late fee. When a
+  // card's payment is already a scheduled bill this month it is counted with the
+  // other obligations; when it isn't, its minimum is added here so it isn't missed.
+  const monthAllOccurrences = buildOccurrences(allBills, allPayments, monthStart, monthEnd);
+  const unscheduledCardMins = cards
+    .filter((c) => c.minimumPayment > 0 && !monthAllOccurrences.some((o) => o.direction === "outflow" && o.linkedCreditCardId === c.id))
+    .map((c) => ({ name: c.name, amount: c.minimumPayment }));
+  const cardMinTotal = unscheduledCardMins.reduce((sum, c) => sum + c.amount, 0);
+  const owedItems = [
+    ...(bonusObligations?.items ?? []),
+    ...(cardMinTotal > 0 ? [{ label: "Card minimums not scheduled as bills", detail: unscheduledCardMins.map((c) => `${c.name} $${formatMoney(c.amount)}`).join(", "), amount: cardMinTotal }] : []),
+  ];
+  const owedTotal = owedItems.reduce((sum, i) => sum + i.amount, 0);
   const requiredCollections = ff && chase
-    ? computeRequiredCollections(ff, chase, latestBalances[ff.name]?.balance ?? 0, latestBalances[chase.name]?.balance ?? 0, fullMonthOccurrences, productionNum, bonusObligations?.total ?? 0)
+    ? computeRequiredCollections(ff, chase, latestBalances[ff.name]?.balance ?? 0, latestBalances[chase.name]?.balance ?? 0, fullMonthOccurrences, productionNum, owedTotal)
     : null;
 
   const cardRecs = cards.map((card) => {
@@ -846,15 +849,15 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
           <p className="text-xs text-slate-500">
             ${formatMoney(requiredCollections.totalObligations)} in unpaid obligations this month + ${formatMoney(requiredCollections.totalCushions)} cushions − ${formatMoney(requiredCollections.combinedCurrentBalance)} on hand{requiredCollections.knownInflows > 0 ? ` − $${formatMoney(requiredCollections.knownInflows)} already scheduled` : ""}.
           </p>
-          {/* Bonus money already earned is part of the obligations figure above,
-              but it's worth naming — it isn't a bill anyone sends you. */}
-          {bonusObligations && bonusObligations.items.length > 0 && (
+          {/* Compensation, bonuses and unscheduled card minimums are part of the
+              obligations figure above; they're listed because no bill arrives for them. */}
+          {owedItems.length > 0 && (
             <div className="mt-1.5 rounded-lg px-3 py-2" style={{ background: "#FAEEDA" }}>
-              <p className="text-xs font-semibold mb-0.5" style={{ color: "#854F0B" }}>Bonus earned but not yet paid — included above</p>
-              {bonusObligations.items.map((item) => (
-                <div key={item.label} className="flex items-center justify-between text-xs" style={{ color: "#854F0B" }}>
+              <p className="text-xs font-semibold mb-0.5" style={{ color: "#854F0B" }}>Compensation, bonuses and minimums owed -- included above</p>
+              {owedItems.map((item) => (
+                <div key={item.label} className="flex items-start justify-between gap-3 text-xs" style={{ color: "#854F0B" }}>
                   <span>{item.label} <span className="opacity-70">· {item.detail}</span></span>
-                  <span className="font-semibold">${formatMoney(item.amount)}</span>
+                  <span className="font-semibold whitespace-nowrap">${formatMoney(item.amount)}</span>
                 </div>
               ))}
             </div>
