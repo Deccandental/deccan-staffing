@@ -252,3 +252,9 @@ export async function deleteDebtStatement(id: string): Promise<void> {
   const { error } = await supabase.from("debt_statement_entries").delete().eq("id", id);
   if (error) console.error("deleteDebtStatement error:", error);
 }
+
+export async function updateDebtStatementAmount(id: string, balance: number): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("debt_statement_entries").update({ balance }).eq("id", id);
+  if (error) { console.error("updateDebtStatementAmount error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
