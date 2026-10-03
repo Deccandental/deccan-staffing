@@ -31,6 +31,8 @@ import {
 } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth, HoBonusPayment, loadHoBonusPayments, addHoBonusPayment, updateHoBonusPayment, deleteHoBonusPayment } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
+import { BonusCarryover, loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
+import BroughtForward from "@/components/BroughtForward";
 import { formatMoney, byLastName } from "@/lib/format";
 import {
   loadCashAccounts, loadLatestBalances,
@@ -835,6 +837,8 @@ function GrowthBonusPanel() {
         </div>
       </div>
 
+      <BroughtForward programme="growth" employeeId={0} />
+
       <div className="rounded-xl bg-white shadow-sm p-4 space-y-3">
         <h2 className="font-bold text-slate-700 text-lg">{QUARTER_LABELS[quarter]} {year} Bonus</h2>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -1183,6 +1187,8 @@ function PvBonusPanel() {
           + Add Year
         </button>
       </div>
+
+      {employeeId != null && <BroughtForward programme="pv" employeeId={employeeId} />}
 
       {loading ? <p className="text-slate-400 text-sm">Loading…</p> : sortedYears.map((year) => {
         const isExpanded = expanded.has(year);
@@ -1592,6 +1598,8 @@ function HygieneBonusPanel() {
   const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>([]);
   const [overrides, setOverrides] = useState<Record<string, HygieneBonusEntry>>({});
   const [rows, setRows] = useState<Record<string, { patientCount: number; amountPaid: number }>>({});
+  // Unpaid balance typed on Cash Flow -> Numbers (carried in from earlier years).
+  const [carryover, setCarryover] = useState<BonusCarryover | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
@@ -1614,10 +1622,12 @@ function HygieneBonusPanel() {
     setLoading(true);
     const yearStart = `${year}-01-01`;
     const yearEnd = `${year}-12-31`;
-    const [entries, overrideRows] = await Promise.all([
+    const [entries, overrideRows, carryMap] = await Promise.all([
       loadPayrollEntriesInRange(yearStart, yearEnd),
       loadHygieneBonusEntries(hygienistId, yearStart, yearEnd),
+      loadBonusCarryovers(),
     ]);
+    setCarryover(carryMap.get(carryKey("hygiene", hygienistId)) ?? null);
     setPayrollEntries(entries);
     const overrideMap: Record<string, HygieneBonusEntry> = {};
     overrideRows.forEach((o) => { overrideMap[o.payPeriodStart] = o; });
@@ -1677,6 +1687,8 @@ function HygieneBonusPanel() {
           className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
       </div>
 
+      {hygienistId != null && <BroughtForward programme="hygiene" employeeId={hygienistId} onSaved={refresh} />}
+
       {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
         <div className="rounded-xl bg-white shadow-sm overflow-hidden">
           <div className="overflow-x-auto max-h-[32rem]">
@@ -1718,6 +1730,18 @@ function HygieneBonusPanel() {
             {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
             <span className="text-sm text-slate-500 ml-auto">
               {year} balance: <strong className={runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${formatMoney(runningEarned - runningPaid)}</strong>
+              {carryover && Math.abs(carryover.amount) > 0.5 && (
+                <>
+                  <span className="mx-2 text-slate-300">|</span>
+                  Carried in from before {carryover.asOfYear}: <strong className="text-slate-600">${formatMoney(carryover.amount)}</strong>
+                  {year === carryover.asOfYear && (
+                    <>
+                      <span className="mx-2 text-slate-300">|</span>
+                      Total owed: <strong className={carryover.amount + runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${formatMoney(carryover.amount + runningEarned - runningPaid)}</strong>
+                    </>
+                  )}
+                </>
+              )}
             </span>
           </div>
         </div>
