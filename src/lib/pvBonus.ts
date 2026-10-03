@@ -177,10 +177,13 @@ export interface PvQuarterCalc {
 // balance forward exactly as described: an unpaid amount from Q1 shows up
 // added into Q2's balance, and so on indefinitely.
 export function computePvQuarterCalcs(
-  quarters: PvBonusQuarter[], payrollEntries: PvBonusPayrollEntry[], payments: PvBonusPayment[], percent: number
+  quarters: PvBonusQuarter[], payrollEntries: PvBonusPayrollEntry[], payments: PvBonusPayment[], percent: number,
+  // A balance brought forward from before the first quarter given: the
+  // running balance starts here instead of at zero.
+  opening: number = 0
 ): PvQuarterCalc[] {
   const sorted = [...quarters].sort((a, b) => a.year - b.year || a.quarter - b.quarter);
-  let runningBalance = 0;
+  let runningBalance = opening;
   return sorted.map((q) => {
     const { start, end } = getPvQuarterDateRange(q.year, q.quarter);
     const gustoPayroll = payrollEntries
