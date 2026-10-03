@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react";
 import { formatMoney } from "@/lib/format";
 import DebtPanel from "@/components/DebtPanel";
-import { HistoryBlock, HistoryButton, MonthSelect, monthLabel, HistRow } from "@/components/CashHistory";
+import { HistoryBlock, HistoryButton, MonthSelect, NumInput, monthLabel, HistRow } from "@/components/CashHistory";
 import {
-  CashAccount, CreditCard, BalanceCheck, WeeklyCashReview, ArAgingEntry, BankStatementEntry, GoalProgress,
+  CashAccount, CreditCard, CardCharge, RecurringBill, BillPayment, BalanceCheck, WeeklyCashReview, ArAgingEntry, BankStatementEntry, GoalProgress,
   addBalanceCheck, loadBalanceHistoryForAccount, deleteBalanceCheck,
   updateBankStatementBalance, loadStatementHistoryForAccount, backfillBankStatementMonth, deleteBankStatementEntry,
   loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview, deleteWeeklyReview,
@@ -48,9 +48,12 @@ function Field({ label, title, width, children }: { label: React.ReactNode; titl
 const BANK_GRID = "minmax(130px,1.2fr) 110px 196px 64px 56px";
 
 export default function WeeklyUpdatePanel({
-  cashAccounts, cards, latestBalances, refreshAll, debtMonthlyCollections,
+  cashAccounts, cards, latestBalances, refreshAll, debtMonthlyCollections, charges, allBills, allPayments,
 }: {
   cashAccounts: CashAccount[];
+  charges: CardCharge[];
+  allBills: RecurringBill[];
+  allPayments: BillPayment[];
   cards: CreditCard[];
   latestBalances: Record<string, BalanceCheck>;
   refreshAll: () => void;
@@ -252,7 +255,7 @@ export default function WeeklyUpdatePanel({
         <div className="overflow-x-auto">
           <div style={{ minWidth: 560 }}>
             <div className="grid items-end gap-x-2 text-[11px] text-slate-400 font-medium border-b border-slate-100 pb-1" style={{ gridTemplateColumns: BANK_GRID }}>
-              <span>Account</span><span>Current bal.</span><span>Statement (month covered)</span><span>Updated</span><span />
+              <span>Account</span><span>Current bal.</span><span>Statement Balance</span><span>Updated</span><span />
             </div>
             {cashAccounts.map((acct) => {
               const hist = bankHist[acct.id] ?? [];
@@ -267,7 +270,7 @@ export default function WeeklyUpdatePanel({
                 <div key={acct.id} className="border-b border-slate-50 last:border-0">
                   <div className="grid items-center gap-x-2 text-xs py-1" style={{ gridTemplateColumns: BANK_GRID }}>
                     <span className="font-medium text-slate-700 truncate" title={acct.name}>{acct.name}</span>
-                    <input type="number" onFocus={(e) => e.target.select()} className={inp}
+                    <NumInput onFocus={(e) => e.target.select()} className={inp}
                       value={balanceInputs[acct.id] ?? String(last?.balance ?? 0)}
                       onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))} />
                     <span className="flex items-center gap-1">
@@ -276,7 +279,7 @@ export default function WeeklyUpdatePanel({
                           setBankMonths((s) => ({ ...s, [acct.id]: m }));
                           setStmtInputs((s) => { const c = { ...s }; delete c[acct.id]; return c; });
                         }} />
-                      <input type="number" onFocus={(e) => e.target.select()} className={inp} placeholder="—"
+                      <NumInput onFocus={(e) => e.target.select()} className={inp} placeholder="—"
                         value={stmtInputs[acct.id] ?? (entryForSel ? String(entryForSel.balance) : "")}
                         onChange={(e) => setStmtInputs((f) => ({ ...f, [acct.id]: e.target.value }))} />
                       {newerDue && (
@@ -337,13 +340,13 @@ export default function WeeklyUpdatePanel({
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <Field label="Projected production" title="Month-end estimate" width={124}>
-            <input type="number" onFocus={(e) => e.target.select()} value={projectedProduction} onChange={(e) => setProjectedProduction(e.target.value)} placeholder="$" className={inp} />
+            <NumInput onFocus={(e) => e.target.select()} value={projectedProduction} onChange={(e) => setProjectedProduction(e.target.value)} className={inp} />
           </Field>
           <Field label="Income to date" title="Patient + insurance, so far this month" width={112}>
-            <input type="number" onFocus={(e) => e.target.select()} value={currentIncome} onChange={(e) => setCurrentIncome(e.target.value)} placeholder="$" className={inp} />
+            <NumInput onFocus={(e) => e.target.select()} value={currentIncome} onChange={(e) => setCurrentIncome(e.target.value)} className={inp} />
           </Field>
           <Field label="Patient income" title="So far this month" width={112}>
-            <input type="number" onFocus={(e) => e.target.select()} value={currentPatientIncome} onChange={(e) => setCurrentPatientIncome(e.target.value)} placeholder="$" className={inp} />
+            <NumInput onFocus={(e) => e.target.select()} value={currentPatientIncome} onChange={(e) => setCurrentPatientIncome(e.target.value)} className={inp} />
           </Field>
           <Field label="Insurance (calc)" width={112}>
             <div className={calc}>{insuranceIncome != null ? m0(insuranceIncome) : "—"}</div>
@@ -385,14 +388,14 @@ export default function WeeklyUpdatePanel({
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-1.5">
-          <Field label="0–30" width={82}><input type="number" onFocus={(e) => e.target.select()} value={ar0to30} onChange={(e) => setAr0to30(e.target.value)} placeholder="$" className={inp} /></Field>
-          <Field label="31–60" width={82}><input type="number" onFocus={(e) => e.target.select()} value={ar31to60} onChange={(e) => setAr31to60(e.target.value)} placeholder="$" className={inp} /></Field>
-          <Field label="61–90" width={82}><input type="number" onFocus={(e) => e.target.select()} value={ar61to90} onChange={(e) => setAr61to90(e.target.value)} placeholder="$" className={inp} /></Field>
-          <Field label="90+" width={82}><input type="number" onFocus={(e) => e.target.select()} value={ar90plus} onChange={(e) => setAr90plus(e.target.value)} placeholder="$" className={inp} /></Field>
+          <Field label="0–30" width={82}><NumInput onFocus={(e) => e.target.select()} value={ar0to30} onChange={(e) => setAr0to30(e.target.value)} className={inp} /></Field>
+          <Field label="31–60" width={82}><NumInput onFocus={(e) => e.target.select()} value={ar31to60} onChange={(e) => setAr31to60(e.target.value)} className={inp} /></Field>
+          <Field label="61–90" width={82}><NumInput onFocus={(e) => e.target.select()} value={ar61to90} onChange={(e) => setAr61to90(e.target.value)} className={inp} /></Field>
+          <Field label="90+" width={82}><NumInput onFocus={(e) => e.target.select()} value={ar90plus} onChange={(e) => setAr90plus(e.target.value)} className={inp} /></Field>
           <Field label="Total" title="The four buckets added up" width={88}><div className={`${calc} font-semibold`}>{arRaw > 0 ? m0(arRaw) : "—"}</div></Field>
-          <Field label="W/O est." width={82}><input type="number" onFocus={(e) => e.target.select()} value={arWoEstimate} onChange={(e) => setArWoEstimate(e.target.value)} placeholder="$" className={inp} /></Field>
+          <Field label="W/O est." width={82}><NumInput onFocus={(e) => e.target.select()} value={arWoEstimate} onChange={(e) => setArWoEstimate(e.target.value)} className={inp} /></Field>
           <Field label="True A/R" title="Total less write-offs" width={88}><div className={`${calc} font-semibold`}>{arRaw > 0 ? m0(arTrue) : "—"}</div></Field>
-          <Field label="Ins. est." width={82}><input type="number" onFocus={(e) => e.target.select()} value={arInsuranceEstimate} onChange={(e) => setArInsuranceEstimate(e.target.value)} placeholder="$" className={inp} /></Field>
+          <Field label="Ins. est." width={82}><NumInput onFocus={(e) => e.target.select()} value={arInsuranceEstimate} onChange={(e) => setArInsuranceEstimate(e.target.value)} className={inp} /></Field>
           <Field label="Patient est." title="True A/R less insurance estimate" width={88}><div className={calc}>{arRaw > 0 ? m0(arPatient) : "—"}</div></Field>
           <div className="flex items-center gap-2 pb-0.5">
             <button onClick={handleSaveAr} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Save</button>
@@ -450,8 +453,8 @@ export default function WeeklyUpdatePanel({
       <div className={card}>
         <div className="flex items-center gap-2 flex-wrap">
           <h2 className="font-bold text-sm text-slate-700 whitespace-nowrap">{goalYear} Goal</h2>
-          <input type="number" onFocus={(e) => e.target.select()} value={goalInput} onChange={(e) => setGoalInput(e.target.value)}
-            placeholder="Annual $" className="w-28 rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none" />
+          <NumInput onFocus={(e) => e.target.select()} value={goalInput} onChange={(e) => setGoalInput(e.target.value)}
+            placeholder="Annual" wrap="w-28" className="w-full rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none" />
           <button onClick={handleSaveGoal} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Save</button>
           {goalSaved && <span className="text-xs text-emerald-600 font-semibold">✓</span>}
           {goalProgress && goalProgress.annualGoal > 0 ? (
@@ -507,8 +510,9 @@ export default function WeeklyUpdatePanel({
 
       {/* ---------- Debt — credit cards live only here ---------- */}
       <div>
-        <h2 className="font-bold text-sm mb-1" style={{ color: "#4A4238" }}>Debt <span className="font-normal text-xs text-slate-400">· credit cards appear automatically; enter their balances, rate and payment on their line</span></h2>
-        <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={debtMonthlyCollections} />
+        <h2 className="font-bold text-sm mb-1" style={{ color: "#4A4238" }}>Debt <span className="font-normal text-xs text-slate-400">· cards appear automatically, with their warnings; enter balances, rate and payment on each line</span></h2>
+        <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={debtMonthlyCollections}
+          cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments} />
       </div>
     </div>
   );
