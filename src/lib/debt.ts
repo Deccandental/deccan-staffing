@@ -12,6 +12,33 @@ import { supabase } from "./supabase";
 
 export type DebtKind = "installment" | "revolving";
 
+// How a dental-practice CPA would bucket the practice's debt. The split
+// matters because lenders judge the FIXED obligations (acquisition, real
+// estate, equipment) against collections, while cards and the line of credit
+// swing monthly and would distort that picture.
+export type DebtCategory = "acquisition" | "real_estate" | "equipment" | "line_of_credit" | "card" | "other";
+
+export const CATEGORY_LABEL: Record<DebtCategory, string> = {
+  acquisition: "Practice acquisition",
+  real_estate: "Real estate / build-out",
+  equipment: "Equipment",
+  line_of_credit: "Line of credit",
+  card: "Credit card",
+  other: "Other",
+};
+export const CATEGORY_SHORT: Record<DebtCategory, string> = {
+  acquisition: "Acquisition", real_estate: "Real estate", equipment: "Equipment",
+  line_of_credit: "Line of credit", card: "Card", other: "Other",
+};
+// Categories offered when adding a loan (cards come from the Credit Cards list).
+export const LOAN_CATEGORIES: DebtCategory[] = ["acquisition", "real_estate", "equipment", "line_of_credit", "other"];
+// Long-term, fixed-payment obligations — the ones debt service is measured on.
+export const FIXED_CATEGORIES: DebtCategory[] = ["acquisition", "real_estate", "equipment"];
+const CATEGORY_ORDER: DebtCategory[] = ["card", "acquisition", "real_estate", "equipment", "line_of_credit", "other"];
+export const categoryRank = (c: DebtCategory) => CATEGORY_ORDER.indexOf(c);
+
+export type RateType = "fixed" | "variable";
+
 export interface Debt {
   id: string;
   name: string;
@@ -29,6 +56,10 @@ export interface Debt {
   notes: string;
   active: boolean;
   sortOrder: number;
+  category: DebtCategory;
+  rateType: RateType | null;       // fixed or variable rate (loans)
+  prepayPenalty: boolean;          // paying early costs a penalty (loans)
+  paidInFullMonthly: boolean;      // cards: balance is cleared every month, so it isn't carried debt
 }
 
 function fromRow(row: any): Debt {
@@ -42,6 +73,10 @@ function fromRow(row: any): Debt {
     finalPaymentDate: row.final_payment_date ?? null,
     lender: row.lender ?? "", notes: row.notes ?? "",
     active: row.active ?? true, sortOrder: row.sort_order ?? 0,
+    category: (row.category as DebtCategory) ?? (row.kind === "revolving" ? "card" : "other"),
+    rateType: (row.rate_type as RateType) ?? null,
+    prepayPenalty: row.prepay_penalty ?? false,
+    paidInFullMonthly: row.paid_in_full ?? false,
   };
 }
 
@@ -59,6 +94,10 @@ export async function saveDebt(d: Omit<Debt, "id"> & { id?: string }): Promise<{
     interest_rate: d.interestRate, monthly_payment: d.monthlyPayment,
     final_payment_date: d.finalPaymentDate || null,
     lender: d.lender, notes: d.notes, active: d.active, sort_order: d.sortOrder,
+    category: d.kind === "revolving" ? "card" : d.category,
+    rate_type: d.kind === "revolving" ? null : d.rateType,
+    prepay_penalty: d.kind === "revolving" ? false : d.prepayPenalty,
+    paid_in_full: d.kind === "revolving" ? d.paidInFullMonthly : false,
   };
   const { error } = await supabase.from("debts").upsert(payload);
   if (error) { console.error("saveDebt error:", error); return { ok: false, error: error.message }; }
@@ -80,7 +119,10 @@ export interface DebtLine {
   principalPerMonth: number; // payment less interest — what actually reduces the balance
   payoffMonths: number | null; // null when the payment never clears the interest
   neverClears: boolean;     // payment is at or below the monthly interest
+  counted: boolean;         // false for a card that's paid in full monthly — shown, but not carried debt
 }
+
+export interface CategoryTotal { category: DebtCategory; balance: number; payment: number; interest: number; count: number }
 
 export interface DebtSummary {
   lines: DebtLine[];
@@ -88,7 +130,12 @@ export interface DebtSummary {
   totalMonthlyPayment: number;
   totalMonthlyInterest: number;
   debtServiceRate: number | null; // monthly payments as a % of monthly collections
-  worstFirst: DebtLine[];         // highest rate first — where a spare dollar does most good
+  worstFirst: DebtLine[];         // where a spare dollar does most good (see computeDebtSummary)
+  skippedForPenalty: number;      // loans left out of worstFirst because paying early costs a penalty
+  categories: CategoryTotal[];    // counted debt only, in display order
+  fixedServiceMonthly: number;    // acquisition + real estate + equipment payments
+  fixedServiceRate: number | null;// …as a % of monthly collections
+  paidMonthlyBalance: number;     // cards cleared every month — informational, not debt
 }
 
 /**
@@ -115,32 +162,58 @@ export function computeDebtSummary(
     const balance = debt.kind === "revolving" && debt.creditCardId
       ? cardBalances[debt.creditCardId] ?? 0
       : debt.currentBalance;
-    const monthlyInterest = balance * ((debt.interestRate ?? 0) / 100 / 12);
+    // A card cleared in full every month carries no interest and isn't debt.
+    const paidMonthly = debt.kind === "revolving" && debt.paidInFullMonthly;
+    const monthlyInterest = paidMonthly ? 0 : balance * ((debt.interestRate ?? 0) / 100 / 12);
     const payment = debt.monthlyPayment;
-    const payoffMonths = monthsToPayOff(balance, debt.interestRate, payment);
+    const payoffMonths = paidMonthly ? 0 : monthsToPayOff(balance, debt.interestRate, payment);
     return {
       debt, balance, monthlyInterest, monthlyPayment: payment,
       principalPerMonth: Math.max(0, payment - monthlyInterest),
       payoffMonths,
-      neverClears: balance > 0 && payment > 0 && payoffMonths === null,
+      neverClears: !paidMonthly && balance > 0 && payment > 0 && payoffMonths === null,
+      counted: !paidMonthly,
     };
   });
 
-  const totalBalance = lines.reduce((s, l) => s + l.balance, 0);
-  const totalMonthlyPayment = lines.reduce((s, l) => s + l.monthlyPayment, 0);
-  const totalMonthlyInterest = lines.reduce((s, l) => s + l.monthlyInterest, 0);
+  const counted = lines.filter((l) => l.counted);
+  const totalBalance = counted.reduce((s, l) => s + l.balance, 0);
+  const totalMonthlyPayment = counted.reduce((s, l) => s + l.monthlyPayment, 0);
+  const totalMonthlyInterest = counted.reduce((s, l) => s + l.monthlyInterest, 0);
+  const rateOf = (amt: number) => (monthlyCollections && monthlyCollections > 0 ? (amt / monthlyCollections) * 100 : null);
+
+  const byCat = new Map<DebtCategory, CategoryTotal>();
+  for (const l of counted) {
+    const c = l.debt.category;
+    const t = byCat.get(c) ?? { category: c, balance: 0, payment: 0, interest: 0, count: 0 };
+    t.balance += l.balance; t.payment += l.monthlyPayment; t.interest += l.monthlyInterest; t.count += 1;
+    byCat.set(c, t);
+  }
+  const categories = [...byCat.values()].sort((a, b) => categoryRank(a.category) - categoryRank(b.category));
+  const fixedServiceMonthly = counted.filter((l) => FIXED_CATEGORIES.includes(l.debt.category)).reduce((s, l) => s + l.monthlyPayment, 0);
+
+  // Where a spare dollar goes furthest: revolving debt that's actually costing
+  // interest (carried cards, the line of credit) first, then everything else
+  // by rate. Loans with a prepayment penalty are left out — paying early
+  // there has a cost the rate alone doesn't show.
+  const candidates = counted.filter((l) => l.balance > 0);
+  const eligible = candidates.filter((l) => !l.debt.prepayPenalty);
+  const revolvingCosting = (l: DebtLine) => (l.debt.category === "card" || l.debt.category === "line_of_credit") && (l.debt.interestRate ?? 0) > 0 ? 0 : 1;
+  const worstFirst = [...eligible].sort((a, b) =>
+    revolvingCosting(a) - revolvingCosting(b) || (b.debt.interestRate ?? 0) - (a.debt.interestRate ?? 0));
 
   return {
     lines,
     totalBalance,
     totalMonthlyPayment,
     totalMonthlyInterest,
-    debtServiceRate: monthlyCollections && monthlyCollections > 0
-      ? (totalMonthlyPayment / monthlyCollections) * 100
-      : null,
-    // Highest rate first: with balances carrying, the rate decides where an
-    // extra payment buys the most, regardless of balance size.
-    worstFirst: [...lines].filter((l) => l.balance > 0).sort((a, b) => (b.debt.interestRate ?? 0) - (a.debt.interestRate ?? 0)),
+    debtServiceRate: rateOf(totalMonthlyPayment),
+    worstFirst,
+    skippedForPenalty: candidates.length - eligible.length,
+    categories,
+    fixedServiceMonthly,
+    fixedServiceRate: rateOf(fixedServiceMonthly),
+    paidMonthlyBalance: lines.filter((l) => !l.counted).reduce((s, l) => s + l.balance, 0),
   };
 }
 
