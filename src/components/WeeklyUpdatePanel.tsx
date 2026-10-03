@@ -3,7 +3,10 @@
 import { useState, useEffect } from "react";
 import { formatMoney } from "@/lib/format";
 import DebtPanel from "@/components/DebtPanel";
-import { balanceWarnings, statementWarnings, weeklyEntryWarnings, previousMonth } from "@/lib/staleness";
+import { previousMonth } from "@/lib/staleness";
+import CardChargesPanel from "@/components/CardChargesPanel";
+import BackfillPanel from "@/components/BackfillPanel";
+import { Debt } from "@/lib/debt";
 import { HistoryBlock, HistoryButton, MonthSelect, NumInput, UpdatedStamp, monthLabel, HistRow } from "@/components/CashHistory";
 import {
   CashAccount, CreditCard, CardCharge, RecurringBill, BillPayment, BalanceCheck, WeeklyCashReview, ArAgingEntry, BankStatementEntry, GoalProgress,
@@ -41,8 +44,9 @@ function Field({ label, title, width, children }: { label: React.ReactNode; titl
 const BANK_GRID = "minmax(130px,1.2fr) 110px 196px 110px 56px";
 
 export default function WeeklyUpdatePanel({
-  cashAccounts, cards, latestBalances, refreshAll, debtMonthlyCollections, charges, allBills, allPayments,
+  cashAccounts, cards, latestBalances, refreshAll, debtMonthlyCollections, charges, allBills, allPayments, loans,
 }: {
+  loans: Debt[];
   cashAccounts: CashAccount[];
   charges: CardCharge[];
   allBills: RecurringBill[];
@@ -72,14 +76,6 @@ export default function WeeklyUpdatePanel({
   }
   useEffect(() => { loadBankStatements(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Weekly: current balance. Monthly: the statement for last month (only once
-  // statements are being tracked for the account).
-  function bankWarnings(acctId: string, checkedAt?: string): string[] {
-    return [
-      ...balanceWarnings(checkedAt, "weekly"),
-      ...statementWarnings((bankHist[acctId] ?? [])[0]?.month, previousMonth()),
-    ];
-  }
   function bankWhen(acctId: string, checkedAt?: string): string | null {
     const stamps = [checkedAt, (bankHist[acctId] ?? [])[0]?.enteredAt].filter((t): t is string => !!t);
     return stamps.length ? stamps.reduce((a, b) => (new Date(a) > new Date(b) ? a : b)) : null;
@@ -296,7 +292,7 @@ export default function WeeklyUpdatePanel({
                           className="text-[10px] font-semibold text-amber-600 whitespace-nowrap hover:underline">{monthLabel(covered).split(" ")[0]}?</button>
                       )}
                     </span>
-                    <UpdatedStamp prefix="" when={bankWhen(acct.id, last?.checkedAt)} warnings={bankWarnings(acct.id, last?.checkedAt)} />
+                    <UpdatedStamp prefix="" when={bankWhen(acct.id, last?.checkedAt)} />
                     <span className="text-right"><HistoryButton open={histOpen} onClick={() => setOpenBankHist(histOpen ? null : acct.id)} /></span>
                   </div>
                   {histOpen && (
@@ -342,7 +338,7 @@ export default function WeeklyUpdatePanel({
         <div className={hdr}>
           <h2 className="font-bold text-sm text-slate-700">Open Dental Numbers</h2>
           <div className="flex items-center gap-3 text-xs">
-            <UpdatedStamp when={latestReview?.reviewDate} warnings={weeklyEntryWarnings(latestReview?.reviewDate)} />
+            <UpdatedStamp when={latestReview?.reviewDate} />
             <HistoryButton open={openOdHist} onClick={() => setOpenOdHist((o) => !o)} />
           </div>
         </div>
@@ -391,7 +387,7 @@ export default function WeeklyUpdatePanel({
         <div className={hdr}>
           <h2 className="font-bold text-sm text-slate-700">A/R Aging</h2>
           <div className="flex items-center gap-3 text-xs">
-            <UpdatedStamp when={latestArAging?.entryDate} warnings={weeklyEntryWarnings(latestArAging?.entryDate)} />
+            <UpdatedStamp when={latestArAging?.entryDate} />
             <HistoryButton open={openArHist} onClick={() => setOpenArHist((o) => !o)} />
           </div>
         </div>
@@ -520,6 +516,18 @@ export default function WeeklyUpdatePanel({
       {/* Debt — summary, every card and loan, and card warnings in one card */}
       <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={debtMonthlyCollections}
         cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments} />
+
+      {/* Card charges — the recurring charges the near-limit warning is projected from */}
+      <div>
+        <h2 className="font-bold text-sm text-slate-700 mb-1">Card Charges</h2>
+        <CardChargesPanel cards={cards} charges={charges} refreshAll={refreshAll} />
+      </div>
+
+      {/* Backfill — past statement balances and past net production */}
+      <div className={card}>
+        <h2 className="font-bold text-sm text-slate-700 mb-2">Backfill Past Months</h2>
+        <BackfillPanel accounts={cashAccounts} cards={cards} loans={loans} refreshAll={refreshAll} />
+      </div>
     </div>
   );
 }
