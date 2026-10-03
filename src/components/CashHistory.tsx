@@ -118,3 +118,19 @@ export function HistoryButton({ open, onClick }: { open: boolean; onClick: () =>
     </button>
   );
 }
+
+/**
+ * Number input that shows its unit inside the box: "$" by default, or pass
+ * prefix="" suffix="%" for a rate. Everything else is a normal <input>.
+ */
+export function NumInput({ prefix = "$", suffix = "", wrap = "w-full", className = "", style, ...rest }:
+  Omit<React.InputHTMLAttributes<HTMLInputElement>, "type" | "prefix"> & { prefix?: string; suffix?: string; wrap?: string }) {
+  return (
+    <span className={`relative inline-block ${wrap}`}>
+      {prefix && <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">{prefix}</span>}
+      <input {...rest} type="number" className={className}
+        style={{ ...style, paddingLeft: prefix ? 16 : undefined, paddingRight: suffix ? 16 : undefined }} />
+      {suffix && <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">{suffix}</span>}
+    </span>
+  );
+}
