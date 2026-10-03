@@ -134,3 +134,37 @@ export function NumInput({ prefix = "$", suffix = "", wrap = "w-full", className
     </span>
   );
 }
+
+// ---------------- "Updated …" stamps with overdue warnings ----------------
+
+export const UPDATED_COLOR = "#1e4e8c";   // dark blue — as strong as the card headings, a different hue
+export const WARN_COLOR = "#b91c1c";
+
+function parseWhen(when: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(when) ? new Date(when + "T00:00:00") : new Date(when);
+}
+
+export function daysAgo(when: string | null | undefined): number {
+  if (!when) return Infinity;
+  return (Date.now() - parseWhen(when).getTime()) / 86400000;
+}
+
+export function fmtWhen(when: string): string {
+  const d = parseWhen(when);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString("en-US", sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "2-digit" });
+}
+
+/**
+ * "Updated Oct 2" in dark blue; turns red with a ⚠️ (and the reasons on hover)
+ * when something on that line is overdue.
+ */
+export function UpdatedStamp({ when, warnings = [], prefix = "Updated " }: { when: string | null | undefined; warnings?: string[]; prefix?: string }) {
+  const warn = warnings.length > 0;
+  return (
+    <span className="text-xs font-medium whitespace-nowrap" style={{ color: warn ? WARN_COLOR : UPDATED_COLOR }}
+      title={warn ? warnings.join("\n") : when ? `Last updated ${parseWhen(when).toLocaleString("en-US", { dateStyle: "medium" })}` : undefined}>
+      {warn ? "⚠️ " : ""}{when ? `${prefix}${fmtWhen(when)}` : "Never entered"}
+    </span>
+  );
+}
