@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { formatMoney } from "@/lib/format";
 import WeeklyUpdatePanel from "@/components/WeeklyUpdatePanel";
 import CardChargesPanel from "@/components/CardChargesPanel";
-import { buildStaleItems, StaleItem, newestMonth } from "@/lib/staleness";
-import { loadDebts, loadDebtStatements, Debt } from "@/lib/debt";
+import { buildStaleItems, StaleItem, newestMonth, monthLabel as stmtMonthLabel } from "@/lib/staleness";
+import BarChart, { BarPoint, BarSeries } from "@/components/BarChart";
+import { UpdatedStamp } from "@/components/CashHistory";
+import { loadDebts, loadDebtStatements, Debt, CATEGORY_SHORT } from "@/lib/debt";
 import { loadStaff } from "@/lib/staffStore";
 import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
 import {
@@ -395,8 +397,8 @@ function AccountPanel({ account, allBills, allPayments, latestBalances, cards, r
 
 // ---------------- Weekly Review Panel ----------------
 
-function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, allPayments, latestBalances, onViewArDetails }: {
-  staleItems: StaleItem[]; cashAccounts: CashAccount[]; cards: CreditCard[]; charges: CardCharge[]; allBills: RecurringBill[]; allPayments: BillPayment[];
+function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, allPayments, latestBalances, onViewArDetails, refreshAll }: {
+  refreshAll: () => void; staleItems: StaleItem[]; cashAccounts: CashAccount[]; cards: CreditCard[]; charges: CardCharge[]; allBills: RecurringBill[]; allPayments: BillPayment[];
   latestBalances: Record<string, BalanceCheck>; onViewArDetails: () => void;
 }) {
   const [latestReview, setLatestReview] = useState<WeeklyCashReview | null>(null);
@@ -410,6 +412,58 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     });
   }, []);
   const [avgMonthlyProduction, setAvgMonthlyProduction] = useState<number | null>(null);
+
+  // Chart data. Balances: every entry per account/card/loan (the chart keeps
+  // the last one of each week or month). Statements: monthly. Open Dental:
+  // monthly production plus the last income entry of each month. A/R: weekly.
+  const [balanceHist, setBalanceHist] = useState<Record<string, BalanceCheck[]>>({});
+  const [statementPts, setStatementPts] = useState<Record<string, BarPoint[]>>({});
+  const [loans, setLoans] = useState<Debt[]>([]);
+  const [odSeries, setOdSeries] = useState<{ production: BarPoint[]; income: BarPoint[]; patient: BarPoint[]; insurance: BarPoint[] }>({ production: [], income: [], patient: [], insurance: [] });
+  const [arPoints, setArPoints] = useState<BarPoint[]>([]);
+  const [showBackfill, setShowBackfill] = useState(false);
+  useEffect(() => {
+    (async () => {
+      const loanList = (await loadDebts()).filter((d) => d.kind !== "revolving" && d.active);
+      const named = [...cashAccounts, ...cards, ...loanList];
+      const [balLists, acctStmts, cardStmts, loanStmts, dental, review, reviews, arHist] = await Promise.all([
+        Promise.all(named.map((x) => loadBalanceHistoryForAccount(x.name, 500))),
+        Promise.all(cashAccounts.map((a) => loadStatementHistoryForAccount(a.id))),
+        Promise.all(cards.map((c) => loadStatementHistoryForCard(c.id))),
+        Promise.all(loanList.map((l) => loadDebtStatements(l.id))),
+        loadDentalMonthlyHistory(), loadLatestWeeklyReview(), loadWeeklyReviewHistory(120), loadArAgingHistory(80),
+      ]);
+      const bh: Record<string, BalanceCheck[]> = {};
+      named.forEach((x, i) => { bh[x.name] = balLists[i]; });
+      setBalanceHist(bh);
+      const sp: Record<string, BarPoint[]> = {};
+      const toPts = (list: { month: string; balance: number }[]) => list.map((e) => ({ date: e.month, value: e.balance }));
+      cashAccounts.forEach((a, i) => { sp[a.id] = toPts(acctStmts[i]); });
+      cards.forEach((c, i) => { sp[c.id] = toPts(cardStmts[i]); });
+      loanList.forEach((l, i) => { sp[l.id] = toPts(loanStmts[i]); });
+      setStatementPts(sp);
+      setLoans(loanList);
+      setArPoints(arHist.map((e) => ({ date: e.entryDate, value: e.ar0to30 + e.ar31to60 + e.ar61to90 + e.ar90plus })));
+
+      // Income resets every month, so each month shows the LAST entry made in it.
+      const lastByMonth = new Map<string, WeeklyCashReview>();
+      for (const r of reviews) {
+        const k = r.reviewDate.slice(0, 7);
+        const prev = lastByMonth.get(k);
+        if (!prev || r.reviewDate > prev.reviewDate) lastByMonth.set(k, r);
+      }
+      const income: BarPoint[] = [], patient: BarPoint[] = [], insurance: BarPoint[] = [];
+      lastByMonth.forEach((r, k) => {
+        if (r.currentIncome != null) income.push({ date: k, value: r.currentIncome });
+        if (r.currentPatientIncome != null) patient.push({ date: k, value: r.currentPatientIncome });
+        if (r.currentIncome != null && r.currentPatientIncome != null) insurance.push({ date: k, value: r.currentIncome - r.currentPatientIncome });
+      });
+      setOdSeries({
+        production: withCurrentMonthProjection(dental, review).filter((e) => e.netProduction != null).map((e) => ({ date: e.month, value: e.netProduction as number })),
+        income, patient, insurance,
+      });
+    })();
+  }, [cashAccounts, cards]);
 
   useEffect(() => {
     Promise.all([
@@ -523,146 +577,121 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     }
   }
 
+  // ---------------- Warnings: built once, shown in the lead list AND in each card ----------------
+  type WarnKind = "act" | "soon" | "suggest" | "update";
+  interface Warn { kind: WarnKind; text: string; lead?: boolean }
+  const WARN_STYLE: Record<WarnKind, { tag: string; fg: string; bg: string; rank: number }> = {
+    act: { tag: "Act now", fg: "#991b1b", bg: "#fee2e2", rank: 0 },
+    soon: { tag: "Soon", fg: "#92400e", bg: "#fef3c7", rank: 1 },
+    suggest: { tag: "Suggestion", fg: "#1e4e8c", bg: "#dbeafe", rank: 2 },
+    update: { tag: "Update", fg: "#991b1b", bg: "#fee2e2", rank: 3 },
+  };
+  const staleFor = (name: string): Warn[] =>
+    (staleItems.find((it) => it.name === name)?.warnings ?? []).map((t) => ({ kind: "update" as const, text: t.charAt(0).toLowerCase() + t.slice(1) + "." }));
+
+  // Chart series: the weekly/monthly balance plus a monthly statement view, toggled on each card.
+  const balSeries = (name: string, mode: "week" | "month"): BarSeries => ({
+    label: "Balance", mode,
+    caption: mode === "week" ? "Balance · last entry each week" : "Balance · last entry each month",
+    points: (balanceHist[name] ?? []).map((b) => ({ date: b.checkedAt, value: b.balance })),
+  });
+  const stmtSeries = (id: string): BarSeries => ({ label: "Statement", mode: "month", caption: "Statement balance · by month covered", points: statementPts[id] ?? [] });
+  const latestOf = (pts?: BarPoint[]) => (pts && pts.length ? pts.reduce((a, b) => (b.date > a.date ? b : a)) : null);
+
+  const bankTiles = cashAccounts.map((a) => {
+    const bal = latestBalances[a.name];
+    const fc = computeAccountForecast(a, bal?.balance ?? 0, occurrences, today, 0);
+    const warns: Warn[] = [];
+    if (fc.excessOrShortfall < 0) warns.push({ kind: "act", text: `short of its $${formatMoney(fc.cushion)} cushion by $${formatMoney(-fc.excessOrShortfall)} over the next 14 days.` });
+    if (transfer && transfer.amount > 0 && transfer.fromAccountName === a.name) warns.push({ kind: "suggest", text: `transfer $${formatMoney(transfer.amount)} to ${transfer.toAccountName}. ${transfer.reason}` });
+    if (transfer && transfer.amount > 0 && transfer.toAccountName === a.name) warns.push({ kind: "suggest", text: `a $${formatMoney(transfer.amount)} transfer from ${transfer.fromAccountName} is suggested to cover this.`, lead: false });
+    warns.push(...staleFor(a.name));
+    const stmtTop = latestOf(statementPts[a.id]);
+    const stmt = stmtTop ? { month: stmtTop.date, balance: stmtTop.value } : undefined;
+    const stats: { k: string; v: string; color?: string }[] = [
+      ...(stmt ? [{ k: `Statement ${stmtMonthLabel(stmt.month)}`, v: `$${formatMoney(stmt.balance)}` }] : []),
+      { k: "Cushion target", v: `$${formatMoney(fc.cushion)}` },
+      { k: "Next 14 days", v: `+$${formatMoney(fc.expectedDeposits14d)} / −$${formatMoney(fc.obligations14d)}` },
+      { k: "Excess / (shortfall)", v: `$${formatMoney(fc.excessOrShortfall)}`, color: safeColor(fc.excessOrShortfall) },
+    ];
+    return { key: a.id, name: a.name, tag: "Bank account", balance: bal?.balance ?? null, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(a.name, "week"), stmtSeries(a.id)] };
+  });
+
+  const cardTiles = cards.map((c, i) => {
+    const rec = cardRecs[i];
+    const bal = latestBalances[c.name];
+    const warns: Warn[] = [];
+    if (rec.overLimitRisk) warns.push({ kind: "act", text: `projected to approach the credit limit within 14 days (est. $${formatMoney(rec.projectedBalance)} of $${formatMoney(c.creditLimit)}) — pay down now.` });
+    if (rec.urgentMinimumDue) warns.push({ kind: "soon", text: `payment due in ${rec.daysUntilDue} day${rec.daysUntilDue === 1 ? "" : "s"} — minimum $${formatMoney(c.minimumPayment)}, autopay $${formatMoney(c.autopayAmount)}.` });
+    if (!rec.overLimitRisk && !rec.urgentMinimumDue && rec.suggestedExtraPayment > 0) warns.push({ kind: "suggest", text: `spare cash flow available — consider an extra $${formatMoney(rec.suggestedExtraPayment)} payment.` });
+    warns.push(...staleFor(c.name));
+    const stmtTop = latestOf(statementPts[c.id]);
+    const stmt = stmtTop ? { month: stmtTop.date, balance: stmtTop.value } : undefined;
+    const stats: { k: string; v: string; color?: string }[] = [
+      { k: stmt ? `Statement ${stmtMonthLabel(stmt.month)}` : "Statement", v: `$${formatMoney(stmt ? stmt.balance : rec.statementBalance)}` },
+      { k: "Limit · available", v: `$${formatMoney(c.creditLimit)} · $${formatMoney(rec.availableCredit)}` },
+      { k: "Payment due", v: `day ${c.dueDay} (${rec.daysUntilDue}d)`, color: rec.urgentMinimumDue ? "#b45309" : undefined },
+      { k: "Projected in 14 days", v: `$${formatMoney(rec.projectedBalance)}`, color: rec.overLimitRisk ? "#b91c1c" : undefined },
+    ];
+    return { key: c.id, name: c.name, tag: "Credit card", balance: bal?.balance ?? null, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(c.name, "week"), stmtSeries(c.id)] };
+  });
+  const loanTiles = loans.map((l) => {
+    const bal = latestBalances[l.name];
+    const warns: Warn[] = [...staleFor(l.name)];
+    const stmtTop = latestOf(statementPts[l.id]);
+    const stats: { k: string; v: string; color?: string }[] = [
+      { k: stmtTop ? `Statement ${stmtMonthLabel(stmtTop.date)}` : "Statement", v: stmtTop ? `$${formatMoney(stmtTop.value)}` : "—" },
+      { k: "Rate", v: l.interestRate == null ? "not set" : `${l.interestRate}%${l.rateType ? ` ${l.rateType}` : ""}` },
+      { k: "Monthly payment", v: `$${formatMoney(l.monthlyPayment)}` },
+    ];
+    return { key: l.id, name: l.name, tag: CATEGORY_SHORT[l.category], balance: bal?.balance ?? l.currentBalance, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(l.name, "month"), stmtSeries(l.id)] };
+  });
+  const tiles = [...bankTiles, ...cardTiles, ...loanTiles];
+
+  // Lead list: every account warning, plus anything overdue that isn't an account
+  // card (loans, Open Dental numbers, A/R), plus practice-level notes.
+  const tileNames = new Set(tiles.map((t) => t.name));
+  const leadWarns: { account: string; warn: Warn }[] = [
+    ...tiles.flatMap((t) => t.warns.filter((w) => w.lead !== false).map((w) => ({ account: t.name, warn: w }))),
+    ...staleItems.filter((it) => !tileNames.has(it.name)).flatMap((it) => it.warnings.map((t) => ({ account: it.name, warn: { kind: "update" as const, text: t.charAt(0).toLowerCase() + t.slice(1) + "." } }))),
+  ];
+  if (incomeNum != null && productionNum != null && incomeNum < productionNum * monthProgress * 0.8) {
+    leadWarns.push({ account: "Collections", warn: { kind: "soon", text: "lagging materially behind production — consider reviewing insurance A/R aging before discretionary spending." } });
+  }
+  if (requiredCollections && requiredCollections.requiredCollectionRate != null && requiredCollections.requiredCollectionRate > 100) {
+    leadWarns.push({ account: "Required collections", warn: { kind: "act", text: "exceed projected production — even collecting everything produced this month wouldn't cover obligations and cushions." } });
+  }
+  leadWarns.sort((x, y) => WARN_STYLE[x.warn.kind].rank - WARN_STYLE[y.warn.kind].rank);
+
+  const arHealth = latestArAging ? computeArHealth({
+    ar0to30: latestArAging.ar0to30, ar31to60: latestArAging.ar31to60, ar61to90: latestArAging.ar61to90, ar90plus: latestArAging.ar90plus, woEstimate: latestArAging.woEstimate,
+  }, avgMonthlyProduction) : null;
+  const arColor = arHealth ? (arHealth.status === "good" ? "#047857" : arHealth.status === "fair" ? "#b45309" : "#b91c1c") : "#64748b";
+  const arLabel = arHealth ? (arHealth.status === "good" ? "Healthy" : arHealth.status === "fair" ? "Needs attention" : "Poor") : "—";
+
+  const kpi = "flex-1 min-w-[190px] rounded-xl bg-white shadow px-4 py-2.5";
+  const kpiLabel = "text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight";
+
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
-        {ffForecast && (
-          <div className="rounded-xl p-4 shadow" style={{ background: `linear-gradient(135deg, ${safeColor(ffForecast.excessOrShortfall)}22, ${safeColor(ffForecast.excessOrShortfall)}44)` }}>
-            <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">{ffForecast.accountName}</p>
-            <p className="text-lg font-bold mt-1" style={{ color: safeColor(ffForecast.excessOrShortfall) }}>${formatMoney(ffForecast.excessOrShortfall)}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">excess/(shortfall)</p>
+    <div className="space-y-3">
+      {/* 1. Check a bill before paying — one compact row */}
+      <div className="rounded-2xl px-5 py-3.5" style={{ background: "#e6f1f9" }}>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex-1" style={{ minWidth: 200 }}>
+            <h2 className="font-bold text-sm" style={{ color: "#0c4a6e" }}>Check a Bill Before Paying</h2>
+            <p className="text-xs text-slate-500">See whether a scheduled or one-off payment is still safe.</p>
           </div>
-        )}
-        {chaseForecast && (
-          <div className="rounded-xl p-4 shadow" style={{ background: `linear-gradient(135deg, ${safeColor(chaseForecast.excessOrShortfall)}22, ${safeColor(chaseForecast.excessOrShortfall)}44)` }}>
-            <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">{chaseForecast.accountName}</p>
-            <p className="text-lg font-bold mt-1" style={{ color: safeColor(chaseForecast.excessOrShortfall) }}>${formatMoney(chaseForecast.excessOrShortfall)}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">excess/(shortfall)</p>
-          </div>
-        )}
-        <div className="rounded-xl p-4 shadow bg-white">
-          <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">Projected Production</p>
-          <p className="text-lg font-bold mt-1" style={{ color: productionNum != null && productionNum >= productionTarget ? "#059669" : "#f59e0b" }}>{productionNum != null ? `$${formatMoney(productionNum)}` : "—"}</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">vs ${formatMoney(productionTarget)}/mo</p>
-        </div>
-        <div className="rounded-xl p-4 shadow bg-white">
-          <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">Current Income</p>
-          <p className="text-lg font-bold mt-1" style={{ color: incomeNum != null && incomeNum >= proratedCollectionsTarget ? "#059669" : "#f59e0b" }}>{incomeNum != null ? `$${formatMoney(incomeNum)}` : "—"}</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">vs ${formatMoney(proratedCollectionsTarget)} pace (day {now.getDate()}/{daysInMonth})</p>
-        </div>
-        <div className="rounded-xl p-4 shadow bg-white">
-          <p className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">Insurance Income</p>
-          <p className="text-lg font-bold mt-1 text-slate-700">{insuranceIncome != null ? `$${formatMoney(insuranceIncome)}` : "—"}</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">calculated</p>
-        </div>
-      </div>
-
-      {latestArAging && (() => {
-        const health = computeArHealth({
-          ar0to30: latestArAging.ar0to30, ar31to60: latestArAging.ar31to60,
-          ar61to90: latestArAging.ar61to90, ar90plus: latestArAging.ar90plus,
-          woEstimate: latestArAging.woEstimate,
-        }, avgMonthlyProduction);
-        const style = health.status === "good" ? { bg: "linear-gradient(135deg, #d1fae5, #a7f3d0)", color: "#065f46", label: "A/R Healthy", icon: "💚" }
-          : health.status === "fair" ? { bg: "linear-gradient(135deg, #fff7ed, #ffedd5)", color: "#92400e", label: "A/R Needs Attention", icon: "⚠️" }
-          : { bg: "linear-gradient(135deg, #fee2e2, #fecaca)", color: "#991b1b", label: "A/R Poor", icon: "🚨" };
-        return (
-          <div className="rounded-xl p-4 shadow flex items-center justify-between flex-wrap gap-3" style={{ background: style.bg }}>
-            <div className="flex items-center gap-3">
-              <span style={{ fontSize: 24 }}>{style.icon}</span>
-              <div>
-                <p className="font-bold" style={{ color: style.color }}>{style.label}</p>
-                <p className="text-xs" style={{ color: style.color }}>
-                  True A/R: ${formatMoney(health.totalAr)}
-                  {health.daysInAr != null ? ` · Days in A/R: ${health.daysInAr.toFixed(0)}` : ""}
-                </p>
-              </div>
-            </div>
-            <button onClick={onViewArDetails} className="text-xs font-semibold underline" style={{ color: style.color }}>See details in Weekly Update →</button>
-          </div>
-        );
-      })()}
-      {incomeNum != null && productionNum != null && incomeNum < productionNum * monthProgress * 0.8 && (
-        <p className="text-xs text-amber-600">Collections are lagging materially behind production — consider reviewing insurance AR aging before discretionary spending.</p>
-      )}
-
-      {requiredCollections && (
-        <div className="rounded-xl p-4 shadow bg-white border border-slate-100">
-          <p className="text-sm font-semibold text-slate-700">
-            {productionNum != null
-              ? <>Need to collect <strong style={{ color: requiredCollections.requiredCollectionRate != null && requiredCollections.requiredCollectionRate > 100 ? "#dc2626" : "#059669" }}>${formatMoney(requiredCollections.requiredCollections)}</strong> this month — {requiredCollections.requiredCollectionRate != null ? `${requiredCollections.requiredCollectionRate.toFixed(1)}%` : "—"} of your ${formatMoney(productionNum)} projected production — to cover all obligations plus both cushions.</>
-              : <>Enter a Projected Total Production figure (Weekly Update tab) to see what collection rate is needed this month.</>}
-          </p>
-          <p className="text-xs text-slate-400 mt-1">${formatMoney(requiredCollections.totalObligations)} in obligations + ${formatMoney(requiredCollections.totalCushions)} cushions − ${formatMoney(requiredCollections.combinedCurrentBalance)} current combined balance{requiredCollections.knownInflows > 0 ? ` − $${formatMoney(requiredCollections.knownInflows)} known deposits` : ""} = ${formatMoney(requiredCollections.requiredCollections)} still needed.</p>
-          {/* Bonus money already earned is part of the obligations figure
-              above, but it's worth naming — it isn't a bill anyone sends
-              you, so it's the easiest commitment to forget. */}
-          {bonusObligations && bonusObligations.items.length > 0 && (
-            <div className="mt-2 rounded-xl p-3" style={{ background: "#FAEEDA" }}>
-              <p className="text-xs font-semibold mb-1" style={{ color: "#854F0B" }}>Bonus earned but not yet paid — included above</p>
-              {bonusObligations.items.map((item) => (
-                <div key={item.label} className="flex items-center justify-between text-xs" style={{ color: "#854F0B" }}>
-                  <span>{item.label} <span className="opacity-70">· {item.detail}</span></span>
-                  <span className="font-semibold">${formatMoney(item.amount)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {requiredCollections.requiredCollectionRate != null && requiredCollections.requiredCollectionRate > 100 && (
-            <p className="text-xs text-red-600 mt-1 font-semibold">⚠️ This exceeds projected production — even collecting everything produced this month wouldn't be enough at current obligations and cushions.</p>
-          )}
-        </div>
-      )}
-
-      {staleItems.length > 0 && (
-        <div className="rounded-xl p-4 shadow bg-amber-50 border border-amber-200">
-          <p className="text-sm font-semibold text-amber-800">⚠️ Numbers need updating:</p>
-          <ul className="text-sm text-amber-700 mt-1 list-disc list-inside">
-            {staleItems.map((it) => <li key={it.name}><strong>{it.name}</strong> — {it.warnings.join("; ")}</li>)}
-          </ul>
-          <p className="text-xs text-amber-600 mt-1">Update these on the "Weekly Update" tab.</p>
-        </div>
-      )}
-
-      {transfer && (
-        <div className="rounded-xl p-4 shadow" style={{ background: transfer.amount > 0 ? "linear-gradient(135deg, #dbeafe, #bfdbfe)" : "#f8fafc" }}>
-          {transfer.amount > 0 ? (
-            <p className="text-sm text-blue-900"><strong>Transfer ${formatMoney(transfer.amount)}</strong> from {transfer.fromAccountName} to {transfer.toAccountName}. {transfer.reason}</p>
-          ) : (
-            <p className="text-sm text-slate-500">{transfer.reason}</p>
-          )}
-        </div>
-      )}
-
-      {cardAlerts.length > 0 && (
-        <div className="space-y-2">
-          {cardAlerts.map((rec) => (
-            <div key={rec.cardId} className="rounded-xl p-4 shadow" style={{ background: rec.overLimitRisk ? "#fee2e2" : rec.urgentMinimumDue ? "#fef3c7" : "#dbeafe" }}>
-              {rec.overLimitRisk && <p className="text-sm font-semibold text-red-700">🚨 {rec.cardName}: projected to approach the credit limit within 14 days (est. ${formatMoney(rec.projectedBalance)} of available credit used).</p>}
-              {rec.urgentMinimumDue && <p className="text-sm font-semibold text-amber-800">⏰ {rec.cardName}: payment due in {rec.daysUntilDue} day{rec.daysUntilDue === 1 ? "" : "s"}.</p>}
-              {!rec.overLimitRisk && !rec.urgentMinimumDue && rec.suggestedExtraPayment > 0 && <p className="text-sm text-blue-800">💰 {rec.cardName}: spare cash flow available — consider an extra ${formatMoney(rec.suggestedExtraPayment)} paydown toward the ${formatMoney(rec.statementBalance)} statement balance.</p>}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="rounded-2xl p-5 shadow" style={{ background: "linear-gradient(135deg, #e0f2fe, #bae6fd)" }}>
-        <h2 className="font-bold text-slate-700 mb-1">Check a Bill Before Paying</h2>
-        <p className="text-xs text-slate-500 mb-4">Pick an already-scheduled transaction to see if it's still safe to pay as planned, or check a brand-new one-off payment that isn't in the system yet.</p>
-        <div className="grid gap-3 sm:grid-cols-2 mb-3">
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Account</label>
+          <label className="text-xs font-semibold text-slate-800 flex flex-col gap-0.5">Account
             <select value={checkAccountId} onChange={(e) => { setCheckAccountId(e.target.value); setCheckSelection(""); setCheckResult(null); }}
-              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-normal focus:outline-none bg-white" style={{ width: 190 }}>
               <option value="">Select an account…</option>
               {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
-          </div>
+          </label>
           {checkAccount && (
-            <div>
-              <label className="block text-sm text-slate-800 font-semibold mb-1">Which transaction?</label>
+            <label className="text-xs font-semibold text-slate-800 flex flex-col gap-0.5">Which transaction?
               <select value={checkSelection} onChange={(e) => { setCheckSelection(e.target.value); setCheckResult(null); setCheckOverrideAmount(""); }}
-                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
+                className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-normal focus:outline-none bg-white" style={{ width: 260 }}>
                 <option value="">Select…</option>
                 <option value="new">+ New one-time payment (not yet scheduled)</option>
                 {upcomingForCheck.map((o) => (
@@ -671,38 +700,32 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
                   </option>
                 ))}
               </select>
-            </div>
+            </label>
+          )}
+          {checkAccount && checkSelection === "new" && (
+            <>
+              <input type="text" value={checkNewName} onChange={(e) => setCheckNewName(e.target.value)} placeholder="What is this for?" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" style={{ width: 160 }} />
+              <input type="number" onFocus={(e) => e.target.select()} value={checkNewAmount} onChange={(e) => setCheckNewAmount(e.target.value)} placeholder="Amount $" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" style={{ width: 110 }} />
+              <input type="date" value={checkNewDate} onChange={(e) => setCheckNewDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+            </>
+          )}
+          {checkAccount && checkSelection && checkSelection !== "new" && (
+            <input type="number" onFocus={(e) => e.target.select()} value={checkOverrideAmount} onChange={(e) => setCheckOverrideAmount(e.target.value)} placeholder="Override amount $ (optional)" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" style={{ width: 200 }} />
+          )}
+          {checkAccount && checkSelection && (
+            <button onClick={handleRunCheck} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#0369a1" }}>Check</button>
           )}
         </div>
-
-        {checkAccount && checkSelection === "new" && (
-          <div className="grid gap-3 sm:grid-cols-3 mb-3">
-            <input type="text" value={checkNewName} onChange={(e) => setCheckNewName(e.target.value)} placeholder="What is this for?" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-            <input type="number" onFocus={(e) => e.target.select()} value={checkNewAmount} onChange={(e) => setCheckNewAmount(e.target.value)} placeholder="Amount" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-            <input type="date" value={checkNewDate} onChange={(e) => setCheckNewDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-        )}
-        {checkAccount && checkSelection && checkSelection !== "new" && (
-          <div className="mb-3">
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Override amount (optional — leave blank to check the scheduled estimate as-is)</label>
-            <input type="number" onFocus={(e) => e.target.select()} value={checkOverrideAmount} onChange={(e) => setCheckOverrideAmount(e.target.value)} placeholder="$" className="w-48 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-        )}
-
-        {checkAccount && checkSelection && (
-          <button onClick={handleRunCheck} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#0369a1" }}>Check</button>
-        )}
-
         {checkResult && (
-          <div className="mt-3 rounded-lg p-3" style={{ background: checkResult.safe ? "#d1fae5" : "#fee2e2" }}>
+          <div className="mt-2.5 rounded-lg p-2.5" style={{ background: checkResult.safe ? "#d1fae5" : "#fee2e2" }}>
             {checkResult.matchedExisting ? (
               <p className="text-sm" style={{ color: checkResult.safe ? "#065f46" : "#991b1b" }}>
-                {checkResult.safe ? "✅ Safe" : "⚠️ Tight"} — this is already on the schedule. Projected balance on that date: <strong>${formatMoney(checkResult.projectedBalance)}</strong> ({checkResult.safe ? "stays above" : "would fall below"} your ${formatMoney(checkAccount!.cushionTarget)} cushion).
+                {checkResult.safe ? "✓ Safe" : "⚠️ Tight"} — this is already on the schedule. Projected balance on that date: <strong>${formatMoney(checkResult.projectedBalance)}</strong> ({checkResult.safe ? "above" : "below"} the cushion).
               </p>
             ) : checkResult.safe ? (
-              <p className="text-sm text-emerald-800">✅ Safe to pay as planned. Projected balance afterward: <strong>${formatMoney(checkResult.projectedBalance)}</strong>.</p>
+              <p className="text-sm text-emerald-800">✓ Safe to pay as planned. Projected balance afterward: <strong>${formatMoney(checkResult.projectedBalance)}</strong>.</p>
             ) : checkResult.suggestedDate ? (
-              <p className="text-sm text-red-800">⚠️ Not safe on that date (would land at ${formatMoney(checkResult.projectedBalance)}). Wait until <strong>{new Date(checkResult.suggestedDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })}</strong> instead — projected balance then: ${formatMoney(checkResult.suggestedBalance ?? 0)}.</p>
+              <p className="text-sm text-red-800">⚠️ Not safe on that date (would land at ${formatMoney(checkResult.projectedBalance)}). Wait until <strong>{new Date(checkResult.suggestedDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</strong>{checkResult.suggestedBalance != null ? <> (projected ${formatMoney(checkResult.suggestedBalance)})</> : null}.</p>
             ) : (
               <p className="text-sm text-red-800">⚠️ Not safe on that date, and no safer date found in the next 60 days. This may need to wait for more cash flow.</p>
             )}
@@ -710,23 +733,153 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
         )}
       </div>
 
-      {history.length > 0 && (
-        <div className="rounded-2xl bg-white shadow p-5">
-          <h3 className="font-bold text-slate-700 text-sm mb-2">Review History</h3>
-          <div className="space-y-1">
-            {history.map((r) => (
-              <div key={r.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
-                <span className="text-slate-600">{new Date(r.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
-                <span className="text-xs text-slate-400">
-                  {r.projectedTotalProduction != null ? `Prod: $${formatMoney(r.projectedTotalProduction)}` : ""}
-                  {r.currentIncome != null ? ` · Income: $${formatMoney(r.currentIncome)}` : ""}
-                  {r.currentPatientIncome != null && r.currentIncome != null ? ` · Insurance: $${formatMoney(r.currentIncome - r.currentPatientIncome)}` : ""}
-                </span>
-              </div>
-            ))}
+      {/* 2. Needs attention — account first, then the text */}
+      <div className="rounded-2xl bg-white shadow px-5 py-3.5">
+        <div className="flex items-baseline justify-between gap-2 mb-1">
+          <h2 className="font-bold text-sm text-slate-700">Needs attention</h2>
+          <span className="text-xs text-slate-400">Most urgent first · each also appears in its own card below</span>
+        </div>
+        {leadWarns.length === 0 ? (
+          <p className="text-sm text-emerald-700 py-1">✓ Nothing needs attention right now.</p>
+        ) : leadWarns.map((w, i) => (
+          <div key={i} className="flex items-center gap-2.5 py-1.5 border-t border-slate-100 text-sm">
+            <span className="shrink-0 text-center text-[11px] font-semibold rounded-full py-0.5" style={{ width: 78, color: WARN_STYLE[w.warn.kind].fg, background: WARN_STYLE[w.warn.kind].bg }}>{WARN_STYLE[w.warn.kind].tag}</span>
+            <span className="min-w-0"><strong className="text-slate-800">{w.account}</strong> — {w.warn.text}</span>
           </div>
+        ))}
+        {staleItems.length > 0 && (
+          <p className="text-xs text-slate-400 mt-1">Update these on the Weekly Update tab.</p>
+        )}
+      </div>
+
+      {/* 3. Practice numbers strip */}
+      <div className="flex flex-wrap gap-2.5">
+        <div className={kpi}>
+          <p className={kpiLabel}>Projected production</p>
+          <p className="text-lg font-bold" style={{ color: productionNum != null && productionNum >= productionTarget ? "#059669" : "#f59e0b" }}>{productionNum != null ? `$${formatMoney(productionNum)}` : "—"}</p>
+          <p className="text-[11px] text-slate-400">vs ${formatMoney(productionTarget)}/mo</p>
+        </div>
+        <div className={kpi}>
+          <p className={kpiLabel}>Current income</p>
+          <p className="text-lg font-bold" style={{ color: incomeNum != null && incomeNum >= proratedCollectionsTarget ? "#059669" : "#f59e0b" }}>{incomeNum != null ? `$${formatMoney(incomeNum)}` : "—"}</p>
+          <p className="text-[11px] text-slate-400">vs ${formatMoney(proratedCollectionsTarget)} pace (day {now.getDate()}/{daysInMonth})</p>
+        </div>
+        <div className={kpi}>
+          <p className={kpiLabel}>Insurance income</p>
+          <p className="text-lg font-bold text-slate-700">{insuranceIncome != null ? `$${formatMoney(insuranceIncome)}` : "—"}</p>
+          <p className="text-[11px] text-slate-400">calculated</p>
+        </div>
+        <button onClick={onViewArDetails} className={`${kpi} text-left hover:opacity-90`} title="See details on the Weekly Update tab">
+          <p className={kpiLabel}>A/R health</p>
+          <p className="text-lg font-bold" style={{ color: arColor }}>{arLabel}</p>
+          <p className="text-[11px] text-slate-400">{arHealth ? `True A/R $${formatMoney(arHealth.totalAr)}${arHealth.daysInAr != null ? ` · ${arHealth.daysInAr.toFixed(0)} days` : ""}` : "no A/R entered"}</p>
+        </button>
+        <div className={kpi}>
+          <p className={kpiLabel}>Need to collect</p>
+          <p className="text-lg font-bold" style={{ color: requiredCollections?.requiredCollectionRate != null && requiredCollections.requiredCollectionRate > 100 ? "#dc2626" : "#059669" }}>{requiredCollections && productionNum != null ? `$${formatMoney(requiredCollections.requiredCollections)}` : "—"}</p>
+          <p className="text-[11px] text-slate-400">{requiredCollections?.requiredCollectionRate != null ? `${requiredCollections.requiredCollectionRate.toFixed(0)}% of projected production` : "enter projected production"}</p>
+        </div>
+      </div>
+
+      {requiredCollections && (
+        <div className="rounded-xl px-4 py-2.5 bg-white border border-slate-100 shadow-sm">
+          <p className="text-xs text-slate-500">
+            ${formatMoney(requiredCollections.totalObligations)} in obligations + ${formatMoney(requiredCollections.totalCushions)} cushions − ${formatMoney(requiredCollections.combinedCurrentBalance)} on hand{requiredCollections.knownInflows > 0 ? ` − $${formatMoney(requiredCollections.knownInflows)} already scheduled` : ""}.
+          </p>
+          {/* Bonus money already earned is part of the obligations figure above,
+              but it's worth naming — it isn't a bill anyone sends you. */}
+          {bonusObligations && bonusObligations.items.length > 0 && (
+            <div className="mt-1.5 rounded-lg px-3 py-2" style={{ background: "#FAEEDA" }}>
+              <p className="text-xs font-semibold mb-0.5" style={{ color: "#854F0B" }}>Bonus earned but not yet paid — included above</p>
+              {bonusObligations.items.map((item) => (
+                <div key={item.label} className="flex items-center justify-between text-xs" style={{ color: "#854F0B" }}>
+                  <span>{item.label} <span className="opacity-70">· {item.detail}</span></span>
+                  <span className="font-semibold">${formatMoney(item.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
+
+      {/* 4. One horizontal card per bank account and credit card */}
+      {tiles.map((t) => (
+        <Fragment key={t.key}>
+        {t.key === loanTiles[0]?.key && <h2 className="font-bold text-sm text-slate-700 pt-1">Loans</h2>}
+        <div className="rounded-2xl bg-white shadow px-5 py-4 space-y-3">
+          <div className="flex flex-wrap gap-x-6 gap-y-3">
+            <div className="flex flex-col gap-1.5 min-w-0" style={{ flex: "0 0 270px" }}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-bold text-base text-slate-800">{t.name}</h3>
+                <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 rounded-full px-2 py-0.5">{t.tag}</span>
+              </div>
+              <div>
+                <p className="text-3xl font-bold leading-tight" style={{ color: "#4A4238" }}>{t.balance != null ? `$${formatMoney(t.balance)}` : "—"}</p>
+                <p className="text-xs text-slate-500">current balance</p>
+              </div>
+              <UpdatedStamp when={t.checkedAt} warnings={t.warns.filter((w) => w.kind === "update").map((w) => w.text)} />
+              <div className="flex flex-col gap-0.5 text-xs text-slate-600 mt-0.5">
+                {t.stats.map((st) => (
+                  <div key={st.k} className="flex justify-between gap-3"><span>{st.k}</span><span className="font-semibold" style={{ color: st.color ?? "#1e293b" }}>{st.v}</span></div>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 min-w-0" style={{ flexBasis: 440 }}>
+              <BarChart series={t.series} />
+            </div>
+          </div>
+          {t.warns.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {t.warns.map((w, i) => (
+                <span key={i} className="text-xs font-medium rounded-lg px-2.5 py-1" style={{ color: WARN_STYLE[w.kind].fg, background: WARN_STYLE[w.kind].bg }}>⚠️ {w.text.charAt(0).toUpperCase() + w.text.slice(1)}</span>
+              ))}
+            </div>
+          )}
+        </div>
+        </Fragment>
+      ))}
+
+      {/* 5. Practice trends in the same compact form */}
+      <div className="flex flex-wrap gap-3">
+        {([
+          {
+            title: "Open Dental", warns: staleFor("Open Dental numbers"), when: latestReview?.reviewDate,
+            series: [
+              { label: "Net production", mode: "month", points: odSeries.production, caption: "Monthly · current month is the projection" },
+              { label: "Income", mode: "month", points: odSeries.income, caption: "Last income entry of each month (current month is month-to-date)" },
+              { label: "Patient", mode: "month", points: odSeries.patient, caption: "Last patient income entry of each month" },
+              { label: "Insurance", mode: "month", points: odSeries.insurance, caption: "Last insurance income entry of each month" },
+            ] as BarSeries[],
+          },
+          {
+            title: "Accounts receivable", warns: staleFor("A/R aging"), when: latestArAging?.entryDate,
+            series: [{ label: "Total A/R", mode: "week", points: arPoints, caption: "Total A/R · last entry each week" }] as BarSeries[],
+          },
+        ]).map((c) => (
+          <div key={c.title} className="rounded-2xl bg-white shadow px-5 py-4 space-y-2" style={{ flex: "1 1 520px", minWidth: 0 }}>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h3 className="font-bold text-sm text-slate-800">{c.title}</h3>
+              <UpdatedStamp when={c.when} warnings={c.warns.map((w) => w.text)} />
+            </div>
+            <BarChart series={c.series} />
+            {c.warns.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {c.warns.map((w, i) => (
+                  <span key={i} className="text-xs font-medium rounded-lg px-2.5 py-1" style={{ color: WARN_STYLE[w.kind].fg, background: WARN_STYLE[w.kind].bg }}>⚠️ {w.text.charAt(0).toUpperCase() + w.text.slice(1)}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* 6. Backfill and in-depth history (the old Trends tab, kept intact) */}
+      <div className="rounded-2xl bg-white shadow px-5 py-3">
+        <button onClick={() => setShowBackfill((v) => !v)} className="text-sm font-semibold text-slate-700 hover:underline w-full text-left">
+          {showBackfill ? "▾" : "▸"} Backfill past months &amp; in-depth history
+        </button>
+        {showBackfill && <div className="mt-3"><TrendsPanel cashAccounts={cashAccounts} cards={cards} refreshAll={refreshAll} /></div>}
+      </div>
     </div>
   );
 }
@@ -1267,7 +1420,7 @@ export default function CashFlowPage() {
           <div className="max-w-5xl">
             <div className="mb-4 flex flex-wrap gap-2">
               <button onClick={() => setActiveTab("overview")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
-                style={activeTab === "overview" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Overview</button>
+                style={activeTab === "overview" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Overview &amp; Trends</button>
               <button onClick={() => setActiveTab("entry")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "entry" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : updateNumbersNeedsAttention ? { backgroundColor: "#fee2e2", color: "#991b1b", borderColor: "#991b1b" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>
                 {updateNumbersNeedsAttention && activeTab !== "entry" ? "⚠️ " : ""}Weekly Update
@@ -1279,15 +1432,14 @@ export default function CashFlowPage() {
               
               <button onClick={() => setActiveTab("charges")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "charges" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Card Charges</button>
-              <button onClick={() => setActiveTab("trends")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
-                style={activeTab === "trends" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Trends</button>
+              
             </div>
 
             {cashAccounts.map((a) => activeTab === a.id && (
               <AccountPanel key={a.id} account={a} allBills={bills} allPayments={payments} latestBalances={latestBalances} cards={creditCards} refreshAll={refresh} />
             ))}
             {activeTab === "overview" && (
-              <OverviewPanel staleItems={staleItems} cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setActiveTab("entry")} />
+              <OverviewPanel refreshAll={() => refresh(true)} staleItems={staleItems} cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setActiveTab("entry")} />
             )}
             {activeTab === "entry" && (
               <WeeklyUpdatePanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={() => refresh(true)}
@@ -1297,9 +1449,7 @@ export default function CashFlowPage() {
             {activeTab === "charges" && (
               <CardChargesPanel cards={creditCards} charges={cardCharges} refreshAll={() => refresh(true)} />
             )}
-            {activeTab === "trends" && (
-              <TrendsPanel cashAccounts={cashAccounts} cards={creditCards} refreshAll={refresh} />
-            )}
+            
           </div>
         )}
       </div>
