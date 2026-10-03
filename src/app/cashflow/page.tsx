@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatUSD } from "@/lib/format";
 import WeeklyUpdatePanel from "@/components/WeeklyUpdatePanel";
 import UpdateNumbersFlow from "@/components/UpdateNumbersFlow";
 import { buildStaleItems, StaleItem, newestMonth, monthLabel as stmtMonthLabel } from "@/lib/staleness";
@@ -610,7 +610,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       ...(stmt ? [{ k: `Statement ${stmtMonthLabel(stmt.month)}`, v: `$${formatMoney(stmt.balance)}` }] : []),
       { k: "Cushion target", v: `$${formatMoney(fc.cushion)}` },
       { k: "Next 14 days", v: `+$${formatMoney(fc.expectedDeposits14d)} / −$${formatMoney(fc.obligations14d)}` },
-      { k: "Excess / (shortfall)", v: `$${formatMoney(fc.excessOrShortfall)}`, color: safeColor(fc.excessOrShortfall) },
+      { k: "Excess / (shortfall)", v: formatUSD(fc.excessOrShortfall), color: safeColor(fc.excessOrShortfall) },
     ];
     return { key: a.id, name: a.name, tag: "Bank account", balance: bal?.balance ?? null, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(a.name, "week"), stmtSeries(a.id)] };
   });
