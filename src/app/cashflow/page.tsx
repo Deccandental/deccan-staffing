@@ -956,7 +956,7 @@ export default function CashFlowPage() {
           <div className="max-w-5xl mb-4">
             <button onClick={() => setFlowOpen(true)}
               className="w-full flex items-center justify-between gap-3 rounded-2xl px-5 py-3.5 text-white shadow hover:opacity-95 transition text-left"
-              style={{ background: "#e8622a" }}>
+              style={{ background: "#0f766e" }}>
               <span className="font-bold" style={{ fontSize: 17 }}>Update Numbers Now</span>
               <span className="text-sm font-semibold rounded-full px-3 py-1" style={{ background: "rgba(255,255,255,0.22)" }}>
                 {dueCount > 0 ? `${dueCount} due` : "All up to date"}
