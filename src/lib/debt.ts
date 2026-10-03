@@ -143,3 +143,39 @@ export function computeDebtSummary(
     worstFirst: [...lines].filter((l) => l.balance > 0).sort((a, b) => (b.debt.interestRate ?? 0) - (a.debt.interestRate ?? 0)),
   };
 }
+
+// ---------------- Statement log for loans ----------------
+// Cards already keep one in card_statement_entries; loans get the same shape
+// so every debt can carry a statement balance labelled by the month it covers.
+
+export interface DebtStatementEntry {
+  id: string;
+  debtId: string;
+  month: string; // YYYY-MM
+  balance: number;
+  enteredAt: string;
+}
+
+function fromStatementRow(row: any): DebtStatementEntry {
+  return { id: row.id, debtId: row.debt_id, month: row.month, balance: row.balance, enteredAt: row.entered_at };
+}
+
+export async function loadDebtStatements(debtId: string): Promise<DebtStatementEntry[]> {
+  const { data, error } = await supabase.from("debt_statement_entries").select("*").eq("debt_id", debtId).order("month", { ascending: false });
+  if (error) { console.error("loadDebtStatements error:", error); return []; }
+  return (data ?? []).map(fromStatementRow);
+}
+
+export async function saveDebtStatement(debtId: string, month: string, balance: number): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("debt_statement_entries").upsert(
+    { debt_id: debtId, month, balance, entered_at: new Date().toISOString() },
+    { onConflict: "debt_id,month" },
+  );
+  if (error) { console.error("saveDebtStatement error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
+export async function deleteDebtStatement(id: string): Promise<void> {
+  const { error } = await supabase.from("debt_statement_entries").delete().eq("id", id);
+  if (error) console.error("deleteDebtStatement error:", error);
+}
