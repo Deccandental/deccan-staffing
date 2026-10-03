@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { formatMoney } from "@/lib/format";
-import { Debt, DebtKind, loadDebts, saveDebt, deleteDebt, computeDebtSummary } from "@/lib/debt";
+import { Debt, DebtKind, loadDebts, saveDebt, deleteDebt, computeDebtSummary, loadDebtStatements, saveDebtStatement, deleteDebtStatement } from "@/lib/debt";
 import {
-  CreditCard, BalanceCheck, CardStatementEntry,
+  CreditCard, BalanceCheck,
   addBalanceCheck, loadBalanceHistoryForAccount, deleteBalanceCheck,
   updateStatementBalance, loadStatementHistoryForCard, backfillStatementMonth, deleteStatementEntry,
 } from "@/lib/cashflow";
@@ -50,7 +50,8 @@ export default function DebtPanel({
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
 
-  const [stmtHist, setStmtHist] = useState<Record<string, CardStatementEntry[]>>({});
+  type StmtRow = { id: string; month: string; balance: number };
+  const [stmtHist, setStmtHist] = useState<Record<string, StmtRow[]>>({});
   const [edits, setEdits] = useState<Record<string, CardEdit>>({});
   const [months, setMonths] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -58,16 +59,23 @@ export default function DebtPanel({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [openHist, setOpenHist] = useState<string | null>(null);
 
-  async function loadStatements() {
-    const entries = await Promise.all(creditCards.map((c) => loadStatementHistoryForCard(c.id)));
-    const map: Record<string, CardStatementEntry[]> = {};
-    creditCards.forEach((c, i) => { map[c.id] = entries[i]; }); // already newest month first
+  // Statement logs for every debt: cards read card_statement_entries, loans
+  // read debt_statement_entries. Keyed by card id / loan id, newest first.
+  async function loadStatements(loans: Debt[] = debts.filter((x) => x.kind !== "revolving")) {
+    const [cardEntries, loanEntries] = await Promise.all([
+      Promise.all(creditCards.map((c) => loadStatementHistoryForCard(c.id))),
+      Promise.all(loans.map((l) => loadDebtStatements(l.id))),
+    ]);
+    const map: Record<string, StmtRow[]> = {};
+    creditCards.forEach((c, i) => { map[c.id] = cardEntries[i]; });
+    loans.forEach((l, i) => { map[l.id] = loanEntries[i]; });
     setStmtHist(map);
   }
 
   async function refresh() {
     setLoading(true);
-    const [d] = await Promise.all([loadDebts(), loadStatements()]);
+    const d = await loadDebts();
+    await loadStatements(d.filter((x) => x.kind !== "revolving"));
     setDebts(d);
     setLoading(false);
   }
@@ -105,37 +113,44 @@ export default function DebtPanel({
   const setEdit = (id: string, patch: CardEdit) => setEdits((e) => ({ ...e, [id]: { ...e[id], ...patch } }));
   const dirty = Object.values(edits).some((e) => Object.keys(e).length > 0);
 
-  async function handleSaveCards() {
+  async function handleSaveRows() {
     setSaving(true);
     const failures: string[] = [];
-    const num = (s?: string) => (s !== undefined && s !== "" && !isNaN(Number(s)) ? Number(s) : null);
+    const num = (v?: string) => (v !== undefined && v !== "" && !isNaN(Number(v)) ? Number(v) : null);
 
-    for (const cc of creditCards) {
-      const e = edits[cc.id];
+    // Cards and loans are saved the same way: current balance, statement
+    // balance for the chosen month, rate and payment.
+    for (const l of summary.lines) {
+      const base = l.debt;
+      const cc = base.kind === "revolving" && base.creditCardId ? creditCards.find((c) => c.id === base.creditCardId) : undefined;
+      const key = cc ? cc.id : base.id;
+      const e = edits[key];
       if (!e) continue;
 
       const cur = num(e.cur);
       if (cur != null) {
-        const r = await addBalanceCheck(cc.name, cur);
-        if (!r.ok) failures.push(`${cc.name} balance (${r.error ?? "failed"})`);
+        const r = await addBalanceCheck(base.name, cur);
+        if (!r.ok) failures.push(`${base.name} balance (${r.error ?? "failed"})`);
       }
 
       const stmt = num(e.stmt);
       if (stmt != null) {
-        const hist = stmtHist[cc.id] ?? [];
-        const month = months[cc.id] ?? hist[0]?.month ?? coveredMonthForCard(cc.approxClosingDay);
-        const r = await updateStatementBalance(cc.id, stmt, month);
-        if (!r.ok) failures.push(`${cc.name} statement (${r.error ?? "failed"})`);
+        const hist = stmtHist[key] ?? [];
+        const month = months[key] ?? hist[0]?.month ?? (cc ? coveredMonthForCard(cc.approxClosingDay) : coveredMonthForCard(1));
+        const r = cc ? await updateStatementBalance(cc.id, stmt, month) : await saveDebtStatement(base.id, month, stmt);
+        if (!r.ok) failures.push(`${base.name} statement (${r.error ?? "failed"})`);
       }
 
-      if (e.rate !== undefined || e.pay !== undefined) {
-        const base = debtForCard(cc);
+      // Rate / payment — and, for loans, the current balance — live on the debt row.
+      const needsDebtRow = e.rate !== undefined || e.pay !== undefined || (!cc && cur != null);
+      if (needsDebtRow) {
         const payload: Omit<Debt, "id"> & { id?: string } = { ...base };
         if (e.rate !== undefined) payload.interestRate = e.rate === "" ? null : (isNaN(Number(e.rate)) ? base.interestRate : Number(e.rate));
         if (e.pay !== undefined && num(e.pay) != null) payload.monthlyPayment = Number(e.pay);
+        if (!cc && cur != null) payload.currentBalance = cur;
         if (payload.id?.startsWith("card:")) delete payload.id;
         const r = await saveDebt(payload);
-        if (!r.ok) failures.push(`${cc.name} rate/payment (${r.error ?? "failed"})`);
+        if (!r.ok) failures.push(`${base.name} rate/payment (${r.error ?? "failed"})`);
       }
     }
 
@@ -216,10 +231,10 @@ export default function DebtPanel({
           <div className="flex items-center gap-2">
             {dirty && <span className="text-xs text-red-600 font-semibold">⚠️ unsaved</span>}
             {saved && <span className="text-xs text-emerald-600 font-semibold">✓ Saved</span>}
-            <button onClick={handleSaveCards} disabled={saving || !dirty}
+            <button onClick={handleSaveRows} disabled={saving || !dirty}
               className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-40"
               style={{ backgroundColor: dirty ? "#dc2626" : "#e8622a" }}>
-              {saving ? "Saving…" : "Save Cards"}
+              {saving ? "Saving…" : "Save Debts"}
             </button>
             {!showForm && (
               <button onClick={() => { setForm({ ...EMPTY }); setShowForm(true); }} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add Loan</button>
@@ -310,78 +325,63 @@ export default function DebtPanel({
               {summary.lines.map((l) => {
                 const d = l.debt;
                 const cc = d.kind === "revolving" && d.creditCardId ? creditCards.find((c) => c.id === d.creditCardId) : undefined;
-                const rowKey = d.id;
+                const key = cc ? cc.id : d.id;
+                const e = edits[key] ?? {};
+                const hist = stmtHist[key] ?? [];
+                const latestMonth = hist[0]?.month;
+                const covered = coveredMonthForCard(cc ? cc.approxClosingDay : 1);
+                const selMonth = months[key] ?? latestMonth ?? covered;
+                const entryForSel = hist.find((h) => h.month === selMonth);
+                const newerDue = latestMonth != null && covered > latestMonth && selMonth !== covered;
+                const curVal = e.cur ?? String(cc ? (latestBalances[cc.name]?.balance ?? 0) : d.currentBalance);
+                const stmtVal = e.stmt ?? (entryForSel ? String(entryForSel.balance) : "");
+                const rateVal = e.rate ?? (d.interestRate == null ? "" : String(d.interestRate));
+                const payVal = e.pay ?? String(d.monthlyPayment);
+                const histOpen = openHist === key;
 
-                // ----- Loans: read-only line, Edit for changes -----
-                if (!cc) {
-                  return (
-                    <div key={rowKey} className="grid items-center gap-x-2 text-xs border-b border-slate-50 last:border-0 py-1.5" style={{ gridTemplateColumns: GRID }}>
-                      <span className="truncate"><span className="font-medium text-slate-700">{d.name}</span><span className="text-slate-400"> · loan{d.lender ? ` · ${d.lender}` : ""}</span></span>
-                      <span className="whitespace-nowrap">${formatMoney(l.balance)}</span>
-                      <span className="text-slate-300">—</span>
-                      <span>{d.interestRate == null ? <span className="text-amber-600">not set</span> : d.interestRate === 0 ? <span style={{ color: "#3B6D11" }}>0%</span> : `${d.interestRate}%`}</span>
-                      <span className="whitespace-nowrap">${formatMoney(l.monthlyPayment)}</span>
+                return (
+                  <div key={key} className="border-b border-slate-50 last:border-0">
+                    <div className="grid items-center gap-x-2 text-xs py-1" style={{ gridTemplateColumns: GRID }}>
+                      <span className="truncate" title={`${d.name}${d.lender ? ` · ${d.lender}` : ""}`}>
+                        <span className="font-medium text-slate-700">{d.name}</span>
+                        <span className="text-slate-400"> · {cc ? "card" : "loan"}</span>
+                      </span>
+                      <input type="number" onFocus={(ev) => ev.target.select()} value={curVal} onChange={(ev) => setEdit(key, { cur: ev.target.value })} className={cell} />
+                      <span className="flex items-center gap-1">
+                        <MonthSelect value={selMonth} onChange={(m) => { setMonths((s) => ({ ...s, [key]: m })); setEdits((s) => { const { stmt, ...rest } = s[key] ?? {}; return { ...s, [key]: rest }; }); }} className="w-[74px] shrink-0" />
+                        <input type="number" onFocus={(ev) => ev.target.select()} value={stmtVal} placeholder="—" onChange={(ev) => setEdit(key, { stmt: ev.target.value })} className={cell} />
+                        {newerDue && (
+                          <button title={`A ${monthLabel(covered)} statement should be out — click to enter it`}
+                            onClick={() => setMonths((s) => ({ ...s, [key]: covered }))}
+                            className="text-[10px] font-semibold text-amber-600 whitespace-nowrap hover:underline">{monthLabel(covered).split(" ")[0]}?</button>
+                        )}
+                      </span>
+                      <input type="number" step="0.01" min="0" onFocus={(ev) => ev.target.select()} value={rateVal} placeholder="not set" onChange={(ev) => setEdit(key, { rate: ev.target.value })} className={cell} />
+                      <input type="number" onFocus={(ev) => ev.target.select()} value={payVal} onChange={(ev) => setEdit(key, { pay: ev.target.value })} className={cell} />
                       <span className="whitespace-nowrap" style={{ color: l.monthlyInterest > 0 ? "#A32D2D" : undefined }}>${formatMoney(l.monthlyInterest)}</span>
                       <span className="whitespace-nowrap" style={{ color: l.neverClears ? "#A32D2D" : "rgba(74,66,56,0.6)" }}>
                         {l.neverClears ? "⚠️ never" : fmtMonths(l.payoffMonths)}
                         {d.finalPaymentDate && !l.neverClears && <span className="text-slate-400"> · {new Date(d.finalPaymentDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "2-digit" })}</span>}
                       </span>
                       <span className="text-right whitespace-nowrap">
-                        <button onClick={() => { setForm({ ...d }); setShowForm(true); }} className="text-xs text-orange-500 hover:underline mr-2">Edit</button>
-                        <button onClick={async () => {
-                          if (!confirm(`Remove ${d.name} from the register?`)) return;
-                          await deleteDebt(d.id); refresh();
-                        }} className="text-xs text-red-400 hover:underline">Delete</button>
-                      </span>
-                    </div>
-                  );
-                }
-
-                // ----- Cards: everything on one editable line -----
-                const e = edits[cc.id] ?? {};
-                const hist = stmtHist[cc.id] ?? [];
-                const latestMonth = hist[0]?.month;
-                const covered = coveredMonthForCard(cc.approxClosingDay);
-                const selMonth = months[cc.id] ?? latestMonth ?? covered;
-                const entryForSel = hist.find((h) => h.month === selMonth);
-                const newerDue = latestMonth != null && covered > latestMonth && selMonth !== covered;
-                const curVal = e.cur ?? String(latestBalances[cc.name]?.balance ?? 0);
-                const stmtVal = e.stmt ?? (entryForSel ? String(entryForSel.balance) : "");
-                const rateVal = e.rate ?? (d.interestRate == null ? "" : String(d.interestRate));
-                const payVal = e.pay ?? String(d.monthlyPayment);
-                const histOpen = openHist === cc.id;
-
-                return (
-                  <div key={rowKey} className="border-b border-slate-50 last:border-0">
-                    <div className="grid items-center gap-x-2 text-xs py-1" style={{ gridTemplateColumns: GRID }}>
-                      <span className="truncate" title={d.name}><span className="font-medium text-slate-700">{d.name}</span><span className="text-slate-400"> · card</span></span>
-                      <input type="number" onFocus={(ev) => ev.target.select()} value={curVal} onChange={(ev) => setEdit(cc.id, { cur: ev.target.value })} className={cell} />
-                      <span className="flex items-center gap-1">
-                        <MonthSelect value={selMonth} onChange={(m) => { setMonths((s) => ({ ...s, [cc.id]: m })); setEdits((s) => { const { stmt, ...rest } = s[cc.id] ?? {}; return { ...s, [cc.id]: rest }; }); }} className="w-[74px] shrink-0" />
-                        <input type="number" onFocus={(ev) => ev.target.select()} value={stmtVal} placeholder="—" onChange={(ev) => setEdit(cc.id, { stmt: ev.target.value })} className={cell} />
-                        {newerDue && (
-                          <button title={`A ${monthLabel(covered)} statement should be out — click to enter it`}
-                            onClick={() => setMonths((s) => ({ ...s, [cc.id]: covered }))}
-                            className="text-[10px] font-semibold text-amber-600 whitespace-nowrap hover:underline">{monthLabel(covered).split(" ")[0]}?</button>
-                        )}
-                      </span>
-                      <input type="number" step="0.01" min="0" onFocus={(ev) => ev.target.select()} value={rateVal} placeholder="not set" onChange={(ev) => setEdit(cc.id, { rate: ev.target.value })} className={cell} />
-                      <input type="number" onFocus={(ev) => ev.target.select()} value={payVal} onChange={(ev) => setEdit(cc.id, { pay: ev.target.value })} className={cell} />
-                      <span className="whitespace-nowrap" style={{ color: l.monthlyInterest > 0 ? "#A32D2D" : undefined }}>${formatMoney(l.monthlyInterest)}</span>
-                      <span className="whitespace-nowrap" style={{ color: l.neverClears ? "#A32D2D" : "rgba(74,66,56,0.6)" }}>{l.neverClears ? "⚠️ never" : fmtMonths(l.payoffMonths)}</span>
-                      <span className="text-right whitespace-nowrap">
-                        <HistoryButton open={histOpen} onClick={() => setOpenHist(histOpen ? null : cc.id)} />
+                        <HistoryButton open={histOpen} onClick={() => setOpenHist(histOpen ? null : key)} />
                         <button onClick={() => { setForm({ ...d }); setShowForm(true); }} className="text-xs text-orange-500 hover:underline ml-2">Edit</button>
+                        {!cc && (
+                          <button onClick={async () => {
+                            if (!confirm(`Remove ${d.name} from the register?`)) return;
+                            await deleteDebt(d.id); refresh();
+                          }} className="text-xs text-red-400 hover:underline ml-2">✕</button>
+                        )}
                       </span>
                     </div>
                     {histOpen && (
                       <div className="pb-2">
                         <HistoryBlock
-                          onChanged={loadStatements}
+                          onChanged={() => loadStatements()}
                           columns={[
                             {
                               title: "Current balance",
-                              load: async () => (await loadBalanceHistoryForAccount(cc.name, 60)).map((b): HistRow => ({
+                              load: async () => (await loadBalanceHistoryForAccount(d.name, 60)).map((b): HistRow => ({
                                 id: b.id,
                                 label: new Date(b.checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }),
                                 value: `$${formatMoney(b.balance)}`,
@@ -390,15 +390,16 @@ export default function DebtPanel({
                             },
                             {
                               title: "Statement balance — by month covered",
-                              load: async () => (await loadStatementHistoryForCard(cc.id)).map((s): HistRow => ({
-                                id: s.id, label: monthLabel(s.month), month: s.month, value: `$${formatMoney(s.balance)}`,
+                              load: async () => (cc ? await loadStatementHistoryForCard(cc.id) : await loadDebtStatements(d.id)).map((st): HistRow => ({
+                                id: st.id, label: monthLabel(st.month), month: st.month, value: `$${formatMoney(st.balance)}`,
                                 onMonth: async (m) => {
-                                  const clash = (await loadStatementHistoryForCard(cc.id)).find((x) => x.month === m && x.id !== s.id);
-                                  if (clash && !confirm(`${monthLabel(m)} already has a statement on file ($${formatMoney(clash.balance)}). Replace it with $${formatMoney(s.balance)}?`)) return;
-                                  await backfillStatementMonth(cc.id, m, s.balance);
-                                  await deleteStatementEntry(s.id);
+                                  const all = cc ? await loadStatementHistoryForCard(cc.id) : await loadDebtStatements(d.id);
+                                  const clash = all.find((x) => x.month === m && x.id !== st.id);
+                                  if (clash && !confirm(`${monthLabel(m)} already has a statement on file ($${formatMoney(clash.balance)}). Replace it with $${formatMoney(st.balance)}?`)) return;
+                                  if (cc) { await backfillStatementMonth(cc.id, m, st.balance); await deleteStatementEntry(st.id); }
+                                  else { await saveDebtStatement(d.id, m, st.balance); await deleteDebtStatement(st.id); }
                                 },
-                                onDelete: () => deleteStatementEntry(s.id),
+                                onDelete: () => (cc ? deleteStatementEntry(st.id) : deleteDebtStatement(st.id)),
                               })),
                             },
                           ]}
@@ -420,7 +421,7 @@ export default function DebtPanel({
           </div>
         )}
         <p className="text-[11px] text-slate-400 mt-2">
-          Debt totals use each card's latest statement balance (interest is charged on it), falling back to the current balance when none is on file.
+          Card totals use the latest statement balance (interest is charged on it), falling back to current when none is on file; loans use their current balance.
         </p>
       </div>
     </div>
