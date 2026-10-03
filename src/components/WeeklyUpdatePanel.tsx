@@ -6,6 +6,7 @@ import DebtPanel from "@/components/DebtPanel";
 import { previousMonth } from "@/lib/staleness";
 import CardChargesPanel from "@/components/CardChargesPanel";
 import BackfillPanel from "@/components/BackfillPanel";
+import BonusCarryoverPanel from "@/components/BonusCarryoverPanel";
 import { Debt } from "@/lib/debt";
 import { HistoryBlock, HistoryButton, MonthSelect, NumInput, UpdatedStamp, monthLabel, HistRow } from "@/components/CashHistory";
 import {
@@ -523,6 +524,12 @@ export default function WeeklyUpdatePanel({
       <div>
         <h2 className="font-bold text-sm text-slate-700 mb-1">Card Charges</h2>
         <CardChargesPanel cards={cards} charges={charges} refreshAll={refreshAll} />
+      </div>
+
+      {/* Unpaid bonus balances carried from earlier years (a dollar figure, no calculation) */}
+      <div className={card}>
+        <h2 className="font-bold text-sm text-slate-700 mb-2">Bonus Balances From Previous Years</h2>
+        <BonusCarryoverPanel refreshAll={refreshAll} />
       </div>
 
       {/* Backfill — past statement balances and past net production */}
