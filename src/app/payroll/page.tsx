@@ -33,6 +33,7 @@ import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth, HoBonusPayment, 
 import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
 import { BonusCarryover, loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
 import BroughtForward from "@/components/BroughtForward";
+import { hygieneYear } from "@/lib/compOwed";
 import { formatMoney, byLastName } from "@/lib/format";
 import {
   loadCashAccounts, loadLatestBalances,
@@ -676,6 +677,9 @@ function PayrollPageBody() {
 const QUARTER_LABELS: Record<1 | 2 | 3 | 4, string> = { 1: "Q1 (Jan–Mar)", 2: "Q2 (Apr–Jun)", 3: "Q3 (Jul–Sep)", 4: "Q4 (Oct–Dec)" };
 
 function GrowthBonusPanel() {
+  const [growthCarry, setGrowthCarry] = useState(0);
+  function reloadGrowthCarry() { loadBonusCarryovers().then((m) => setGrowthCarry(m.get(carryKey("growth", 0))?.amount ?? 0)); }
+  useEffect(() => { reloadGrowthCarry(); }, []);
   const initial = getCurrentQuarter();
   const [year, setYear] = useState(initial.year);
   const [quarter, setQuarter] = useState<1 | 2 | 3 | 4>(initial.quarter);
@@ -837,7 +841,12 @@ function GrowthBonusPanel() {
         </div>
       </div>
 
-      <BroughtForward programme="growth" employeeId={0} />
+      <BroughtForward programme="growth" employeeId={0} onSaved={reloadGrowthCarry} />
+      {Math.abs(growthCarry) > 0.5 && (
+        <p className="text-sm text-slate-600 -mt-2">
+          Owed this year ${formatMoney(totalOwed)} + brought forward ${formatMoney(growthCarry)} = <strong className="text-amber-600">${formatMoney(totalOwed + growthCarry)}</strong> total owed
+        </p>
+      )}
 
       <div className="rounded-xl bg-white shadow-sm p-4 space-y-3">
         <h2 className="font-bold text-slate-700 text-lg">{QUARTER_LABELS[quarter]} {year} Bonus</h2>
@@ -1029,6 +1038,7 @@ function getSemiMonthlyPayPeriodsForQuarter(year: number, quarter: 1 | 2 | 3 | 4
 }
 
 function PvBonusPanel() {
+  const [pvCarry, setPvCarry] = useState<BonusCarryover | null>(null);
   const currentYear = new Date().getFullYear();
   const [staff, setStaff] = useState<Employee[]>([]);
   const [employeeId, setEmployeeId] = useState<number | null>(null);
@@ -1040,6 +1050,11 @@ function PvBonusPanel() {
   const [incomeInputs, setIncomeInputs] = useState<Record<string, string>>({}); // "year-quarter" -> string
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  function reloadPvCarry() {
+    if (employeeId == null) return;
+    loadBonusCarryovers().then((m) => setPvCarry(m.get(carryKey("pv", employeeId)) ?? null));
+  }
+  useEffect(() => { reloadPvCarry(); }, [employeeId]); // eslint-disable-line react-hooks/exhaustive-deps
   const [savedMsg, setSavedMsg] = useState<Record<string, string>>({});
   const [newYearInput, setNewYearInput] = useState("");
   const [manageKey, setManageKey] = useState<string | null>(null); // "year-quarter" currently expanded for management
@@ -1166,7 +1181,14 @@ function PvBonusPanel() {
       fullQuarterSet.push(existing ?? { employeeId: employeeId ?? 0, year: y, quarter: q, totalIncome: Number(incomeInputs[key] || 0), notes: "" });
     }
   }
-  const calcs = computePvQuarterCalcs(fullQuarterSet, payrollEntries, payments, percent);
+  // A balance brought forward starts the running balance at that amount from
+  // its year on; quarters before that year keep their own running balance.
+  const calcs = pvCarry
+    ? [
+        ...computePvQuarterCalcs(fullQuarterSet.filter((q) => q.year < pvCarry.asOfYear), payrollEntries, payments, percent),
+        ...computePvQuarterCalcs(fullQuarterSet.filter((q) => q.year >= pvCarry.asOfYear), payrollEntries, payments, percent, pvCarry.amount),
+      ]
+    : computePvQuarterCalcs(fullQuarterSet, payrollEntries, payments, percent);
   const calcByKey: Record<string, PvQuarterCalc> = {};
   for (const c of calcs) calcByKey[`${c.year}-${c.quarter}`] = c;
 
@@ -1188,7 +1210,7 @@ function PvBonusPanel() {
         </button>
       </div>
 
-      {employeeId != null && <BroughtForward programme="pv" employeeId={employeeId} />}
+      {employeeId != null && <BroughtForward programme="pv" employeeId={employeeId} onSaved={reloadPvCarry} />}
 
       {loading ? <p className="text-slate-400 text-sm">Loading…</p> : sortedYears.map((year) => {
         const isExpanded = expanded.has(year);
@@ -1600,6 +1622,9 @@ function HygieneBonusPanel() {
   const [rows, setRows] = useState<Record<string, { patientCount: number; amountPaid: number }>>({});
   // Unpaid balance typed on Cash Flow -> Numbers (carried in from earlier years).
   const [carryover, setCarryover] = useState<BonusCarryover | null>(null);
+  // Balance at the start of the selected year: the brought-forward amount, plus
+  // every earlier year since it was set, so this year's balance is the real total.
+  const [startBalance, setStartBalance] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
@@ -1627,7 +1652,17 @@ function HygieneBonusPanel() {
       loadHygieneBonusEntries(hygienistId, yearStart, yearEnd),
       loadBonusCarryovers(),
     ]);
-    setCarryover(carryMap.get(carryKey("hygiene", hygienistId)) ?? null);
+    const carry = carryMap.get(carryKey("hygiene", hygienistId)) ?? null;
+    setCarryover(carry);
+    let start = 0;
+    if (carry && year >= carry.asOfYear) {
+      start = carry.amount;
+      for (let y = carry.asOfYear; y < year; y++) {
+        const yr = await hygieneYear(hygienistId, y, `${y}-12-31`);
+        start += yr.earned - yr.paid;
+      }
+    }
+    setStartBalance(start);
     setPayrollEntries(entries);
     const overrideMap: Record<string, HygieneBonusEntry> = {};
     overrideRows.forEach((o) => { overrideMap[o.payPeriodStart] = o; });
@@ -1703,12 +1738,18 @@ function HygieneBonusPanel() {
                 </tr>
               </thead>
               <tbody>
+                {Math.abs(startBalance) > 0.5 && (
+                  <tr className="border-b border-slate-100 bg-amber-50/60">
+                    <td className="px-3 py-2 font-medium text-amber-900 whitespace-nowrap" colSpan={4}>Brought forward</td>
+                    <td className="px-2 py-2 font-semibold whitespace-nowrap text-amber-700">${formatMoney(startBalance)}</td>
+                  </tr>
+                )}
                 {periods.map((p) => {
                   const row = rows[p.start] ?? { patientCount: 0, amountPaid: 0 };
                   const earned = row.patientCount * HYGIENE_BONUS_PER_PATIENT;
                   runningEarned += earned;
                   runningPaid += row.amountPaid;
-                  const balance = runningEarned - runningPaid;
+                  const balance = startBalance + runningEarned - runningPaid;
                   return (
                     <tr key={p.start} className="border-b border-slate-50 last:border-0">
                       <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{p.label}</td>
@@ -1729,19 +1770,8 @@ function HygieneBonusPanel() {
             </button>
             {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
             <span className="text-sm text-slate-500 ml-auto">
-              {year} balance: <strong className={runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${formatMoney(runningEarned - runningPaid)}</strong>
-              {carryover && Math.abs(carryover.amount) > 0.5 && (
-                <>
-                  <span className="mx-2 text-slate-300">|</span>
-                  Carried in from before {carryover.asOfYear}: <strong className="text-slate-600">${formatMoney(carryover.amount)}</strong>
-                  {year === carryover.asOfYear && (
-                    <>
-                      <span className="mx-2 text-slate-300">|</span>
-                      Total owed: <strong className={carryover.amount + runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${formatMoney(carryover.amount + runningEarned - runningPaid)}</strong>
-                    </>
-                  )}
-                </>
-              )}
+              {year} balance: <strong className={startBalance + runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${formatMoney(startBalance + runningEarned - runningPaid)}</strong>
+              {Math.abs(startBalance) > 0.5 && <span className="text-xs text-slate-400"> (includes ${formatMoney(startBalance)} brought forward)</span>}
             </span>
           </div>
         </div>
