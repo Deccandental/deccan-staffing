@@ -8,7 +8,7 @@ import UpdateNumbersFlow from "@/components/UpdateNumbersFlow";
 import { buildStaleItems, StaleItem, newestMonth, monthLabel as stmtMonthLabel } from "@/lib/staleness";
 import BarChart, { BarPoint, BarSeries } from "@/components/BarChart";
 import { UpdatedStamp } from "@/components/CashHistory";
-import { loadDebts, loadDebtStatements, Debt, CATEGORY_SHORT } from "@/lib/debt";
+import { loadDebts, loadDebtStatements, Debt, CATEGORY_SHORT, CATEGORY_LABEL, categoryRank } from "@/lib/debt";
 import { loadStaff } from "@/lib/staffStore";
 import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
 import {
@@ -416,6 +416,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   // Chart data. Balances: every entry per account/card/loan (the chart keeps
   // the last one of each week or month). Statements: monthly. Open Dental:
   // monthly production plus the last income entry of each month. A/R: weekly.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [balanceHist, setBalanceHist] = useState<Record<string, BalanceCheck[]>>({});
   const [statementPts, setStatementPts] = useState<Record<string, BarPoint[]>>({});
   const [loans, setLoans] = useState<Debt[]>([]);
@@ -514,7 +515,10 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   const insuranceIncome = incomeNum != null && patientIncomeNum != null ? incomeNum - patientIncomeNum : null;
 
   const monthEnd = `${today.slice(0, 8)}${String(daysInMonth).padStart(2, "0")}`;
-  const fullMonthOccurrences = buildOccurrences(allBills, allPayments, monthStart, monthEnd);
+  // Only what is still unpaid. A bill marked paid has already left the bank
+  // balance, so counting it here as well would double-count it and make the
+  // number creep UP as the month goes on instead of holding steady.
+  const fullMonthOccurrences = buildOccurrences(allBills, allPayments, monthStart, monthEnd).filter((o) => !o.isPaid);
   const requiredCollections = ff && chase
     ? computeRequiredCollections(ff, chase, latestBalances[ff.name]?.balance ?? 0, latestBalances[chase.name]?.balance ?? 0, fullMonthOccurrences, productionNum, bonusObligations?.total ?? 0)
     : null;
@@ -641,7 +645,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       { k: "Rate", v: l.interestRate == null ? "not set" : `${l.interestRate}%${l.rateType ? ` ${l.rateType}` : ""}` },
       { k: "Monthly payment", v: `$${formatMoney(l.monthlyPayment)}` },
     ];
-    return { key: l.id, name: l.name, tag: CATEGORY_SHORT[l.category], balance: bal?.balance ?? l.currentBalance, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(l.name, "month"), stmtSeries(l.id)] };
+    return { key: l.id, cat: l.category, name: l.name, tag: CATEGORY_SHORT[l.category], balance: bal?.balance ?? l.currentBalance, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(l.name, "month"), stmtSeries(l.id)] };
   });
   const tiles = [...bankTiles, ...cardTiles, ...loanTiles];
 
@@ -667,6 +671,69 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
 
   const kpi = "flex-1 min-w-[190px] rounded-xl bg-white shadow px-4 py-2.5";
   const kpiLabel = "text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight";
+
+  // ---- Grouping helpers ----
+  const sumNamed = (names: string[]) => names.reduce((sum, n) => sum + (latestBalances[n]?.balance ?? 0), 0);
+  const cardsOwed = sumNamed(cards.map((c) => c.name));
+  const loansOwed = loans.reduce((sum, l) => sum + (latestBalances[l.name]?.balance ?? l.currentBalance), 0);
+  const loanGroups = [...new Set(loanTiles.map((t) => t.cat))]
+    .sort((a, b) => categoryRank(a) - categoryRank(b))
+    .map((cat) => {
+      const ls = loans.filter((l) => l.category === cat);
+      return {
+        cat, tiles: loanTiles.filter((t) => t.cat === cat),
+        owed: ls.reduce((sum, l) => sum + (latestBalances[l.name]?.balance ?? l.currentBalance), 0),
+        payment: ls.reduce((sum, l) => sum + l.monthlyPayment, 0),
+      };
+    });
+  const sectionHeader = (key: string, title: string, summary: string) => (
+    <button key={`h-${key}`} onClick={() => setCollapsed((c) => ({ ...c, [key]: !c[key] }))} aria-expanded={!collapsed[key]}
+      className="w-full flex items-center gap-2 pt-3 text-left">
+      <span className="text-slate-400 text-xs w-3">{collapsed[key] ? "▸" : "▾"}</span>
+      <h2 className="font-bold text-sm uppercase tracking-wide text-slate-700">{title}</h2>
+      <span className="text-xs text-slate-500">{summary}</span>
+      <span className="flex-1 border-t border-slate-200 ml-2" />
+    </button>
+  );
+  const subHeader = (title: string, summary: string) => (
+    <div key={`s-${title}`} className="flex items-baseline gap-2 pt-1 pl-1">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">{title}</h3>
+      <span className="text-xs text-slate-400">{summary}</span>
+    </div>
+  );
+
+  const renderTile = (t: (typeof tiles)[number]) => (
+        <div key={t.key} className="rounded-2xl bg-white shadow px-5 py-4 space-y-3">
+          <div className="flex flex-wrap gap-x-6 gap-y-3">
+            <div className="flex flex-col gap-1.5 min-w-0" style={{ flex: "0 0 270px" }}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-bold text-base text-slate-800">{t.name}</h3>
+                <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 rounded-full px-2 py-0.5">{t.tag}</span>
+              </div>
+              <div>
+                <p className="text-3xl font-bold leading-tight" style={{ color: "#4A4238" }}>{t.balance != null ? formatUSD(t.balance) : "—"}</p>
+                <p className="text-xs text-slate-500">current balance</p>
+              </div>
+              <UpdatedStamp when={t.checkedAt} warnings={t.warns.filter((w) => w.kind === "update").map((w) => w.text)} />
+              <div className="flex flex-col gap-0.5 text-xs text-slate-600 mt-0.5">
+                {t.stats.map((st) => (
+                  <div key={st.k} className="flex justify-between gap-3"><span>{st.k}</span><span className="font-semibold" style={{ color: st.color ?? "#1e293b" }}>{st.v}</span></div>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 min-w-0" style={{ flexBasis: 440 }}>
+              <BarChart series={t.series} />
+            </div>
+          </div>
+          {t.warns.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {t.warns.map((w, i) => (
+                <span key={i} className="text-xs font-medium rounded-lg px-2.5 py-1" style={{ color: WARN_STYLE[w.kind].fg, background: WARN_STYLE[w.kind].bg }}>⚠️ {w.text.charAt(0).toUpperCase() + w.text.slice(1)}</span>
+              ))}
+            </div>
+          )}
+        </div>
+  );
 
   return (
     <div className="space-y-3">
@@ -768,7 +835,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
           <p className="text-[11px] text-slate-400">{arHealth ? `True A/R $${formatMoney(arHealth.totalAr)}${arHealth.daysInAr != null ? ` · ${arHealth.daysInAr.toFixed(0)} days` : ""}` : "no A/R entered"}</p>
         </button>
         <div className={kpi}>
-          <p className={kpiLabel}>Need to collect</p>
+          <p className={kpiLabel} title="Unpaid obligations this month + both cushions − what's in the accounts now − inflows already scheduled. It falls as collections land in the accounts and rises if new obligations are added.">Need to collect</p>
           <p className="text-lg font-bold" style={{ color: requiredCollections?.requiredCollectionRate != null && requiredCollections.requiredCollectionRate > 100 ? "#dc2626" : "#059669" }}>{requiredCollections && productionNum != null ? `$${formatMoney(requiredCollections.requiredCollections)}` : "—"}</p>
           <p className="text-[11px] text-slate-400">{requiredCollections?.requiredCollectionRate != null ? `${requiredCollections.requiredCollectionRate.toFixed(0)}% of projected production` : "enter projected production"}</p>
         </div>
@@ -777,7 +844,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       {requiredCollections && (
         <div className="rounded-xl px-4 py-2.5 bg-white border border-slate-100 shadow-sm">
           <p className="text-xs text-slate-500">
-            ${formatMoney(requiredCollections.totalObligations)} in obligations + ${formatMoney(requiredCollections.totalCushions)} cushions − ${formatMoney(requiredCollections.combinedCurrentBalance)} on hand{requiredCollections.knownInflows > 0 ? ` − $${formatMoney(requiredCollections.knownInflows)} already scheduled` : ""}.
+            ${formatMoney(requiredCollections.totalObligations)} in unpaid obligations this month + ${formatMoney(requiredCollections.totalCushions)} cushions − ${formatMoney(requiredCollections.combinedCurrentBalance)} on hand{requiredCollections.knownInflows > 0 ? ` − $${formatMoney(requiredCollections.knownInflows)} already scheduled` : ""}.
           </p>
           {/* Bonus money already earned is part of the obligations figure above,
               but it's worth naming — it isn't a bill anyone sends you. */}
@@ -796,43 +863,27 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       )}
 
       {/* 4. One horizontal card per bank account and credit card */}
-      {tiles.map((t) => (
-        <Fragment key={t.key}>
-        {t.key === loanTiles[0]?.key && <h2 className="font-bold text-sm text-slate-700 pt-1">Loans</h2>}
-        <div className="rounded-2xl bg-white shadow px-5 py-4 space-y-3">
-          <div className="flex flex-wrap gap-x-6 gap-y-3">
-            <div className="flex flex-col gap-1.5 min-w-0" style={{ flex: "0 0 270px" }}>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-bold text-base text-slate-800">{t.name}</h3>
-                <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 rounded-full px-2 py-0.5">{t.tag}</span>
-              </div>
-              <div>
-                <p className="text-3xl font-bold leading-tight" style={{ color: "#4A4238" }}>{t.balance != null ? `$${formatMoney(t.balance)}` : "—"}</p>
-                <p className="text-xs text-slate-500">current balance</p>
-              </div>
-              <UpdatedStamp when={t.checkedAt} warnings={t.warns.filter((w) => w.kind === "update").map((w) => w.text)} />
-              <div className="flex flex-col gap-0.5 text-xs text-slate-600 mt-0.5">
-                {t.stats.map((st) => (
-                  <div key={st.k} className="flex justify-between gap-3"><span>{st.k}</span><span className="font-semibold" style={{ color: st.color ?? "#1e293b" }}>{st.v}</span></div>
-                ))}
-              </div>
-            </div>
-            <div className="flex-1 min-w-0" style={{ flexBasis: 440 }}>
-              <BarChart series={t.series} />
-            </div>
-          </div>
-          {t.warns.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {t.warns.map((w, i) => (
-                <span key={i} className="text-xs font-medium rounded-lg px-2.5 py-1" style={{ color: WARN_STYLE[w.kind].fg, background: WARN_STYLE[w.kind].bg }}>⚠️ {w.text.charAt(0).toUpperCase() + w.text.slice(1)}</span>
-              ))}
-            </div>
-          )}
-        </div>
-        </Fragment>
-      ))}
+      {/* 4. Cards grouped: Accounts, then Debt (credit cards, then loans by kind), then Practice */}
+      {sectionHeader("accounts", "Accounts", `${bankTiles.length} · $${formatMoney(sumNamed(cashAccounts.map((a) => a.name)))} combined`)}
+      {!collapsed.accounts && bankTiles.map(renderTile)}
 
-      {/* 5. Practice trends in the same compact form */}
+      {sectionHeader("debt", "Debt", `${cardTiles.length + loanTiles.length} · $${formatMoney(cardsOwed + loansOwed)} owed`)}
+      {!collapsed.debt && (
+        <>
+          {cardTiles.length > 0 && subHeader("Credit cards", `$${formatMoney(cardsOwed)} current balance`)}
+          {cardTiles.map(renderTile)}
+          {loanGroups.map((g) => (
+            <Fragment key={g.cat}>
+              {subHeader(CATEGORY_LABEL[g.cat], `$${formatMoney(g.owed)} owed · $${formatMoney(g.payment)}/mo`)}
+              {g.tiles.map(renderTile)}
+            </Fragment>
+          ))}
+        </>
+      )}
+
+      {sectionHeader("practice", "Practice", "Open Dental and accounts receivable")}
+
+      {!collapsed.practice && (
       <div className="flex flex-wrap gap-3">
         {([
           {
@@ -865,6 +916,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }
