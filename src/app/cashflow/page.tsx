@@ -4,7 +4,7 @@ import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { formatMoney } from "@/lib/format";
 import WeeklyUpdatePanel from "@/components/WeeklyUpdatePanel";
-import CardChargesPanel from "@/components/CardChargesPanel";
+import UpdateNumbersFlow from "@/components/UpdateNumbersFlow";
 import { buildStaleItems, StaleItem, newestMonth, monthLabel as stmtMonthLabel } from "@/lib/staleness";
 import BarChart, { BarPoint, BarSeries } from "@/components/BarChart";
 import { UpdatedStamp } from "@/components/CashHistory";
@@ -421,7 +421,6 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   const [loans, setLoans] = useState<Debt[]>([]);
   const [odSeries, setOdSeries] = useState<{ production: BarPoint[]; income: BarPoint[]; patient: BarPoint[]; insurance: BarPoint[] }>({ production: [], income: [], patient: [], insurance: [] });
   const [arPoints, setArPoints] = useState<BarPoint[]>([]);
-  const [showBackfill, setShowBackfill] = useState(false);
   useEffect(() => {
     (async () => {
       const loanList = (await loadDebts()).filter((d) => d.kind !== "revolving" && d.active);
@@ -605,7 +604,6 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     if (fc.excessOrShortfall < 0) warns.push({ kind: "act", text: `short of its $${formatMoney(fc.cushion)} cushion by $${formatMoney(-fc.excessOrShortfall)} over the next 14 days.` });
     if (transfer && transfer.amount > 0 && transfer.fromAccountName === a.name) warns.push({ kind: "suggest", text: `transfer $${formatMoney(transfer.amount)} to ${transfer.toAccountName}. ${transfer.reason}` });
     if (transfer && transfer.amount > 0 && transfer.toAccountName === a.name) warns.push({ kind: "suggest", text: `a $${formatMoney(transfer.amount)} transfer from ${transfer.fromAccountName} is suggested to cover this.`, lead: false });
-    warns.push(...staleFor(a.name));
     const stmtTop = latestOf(statementPts[a.id]);
     const stmt = stmtTop ? { month: stmtTop.date, balance: stmtTop.value } : undefined;
     const stats: { k: string; v: string; color?: string }[] = [
@@ -624,7 +622,6 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     if (rec.overLimitRisk) warns.push({ kind: "act", text: `projected to approach the credit limit within 14 days (est. $${formatMoney(rec.projectedBalance)} of $${formatMoney(c.creditLimit)}) — pay down now.` });
     if (rec.urgentMinimumDue) warns.push({ kind: "soon", text: `payment due in ${rec.daysUntilDue} day${rec.daysUntilDue === 1 ? "" : "s"} — minimum $${formatMoney(c.minimumPayment)}, autopay $${formatMoney(c.autopayAmount)}.` });
     if (!rec.overLimitRisk && !rec.urgentMinimumDue && rec.suggestedExtraPayment > 0) warns.push({ kind: "suggest", text: `spare cash flow available — consider an extra $${formatMoney(rec.suggestedExtraPayment)} payment.` });
-    warns.push(...staleFor(c.name));
     const stmtTop = latestOf(statementPts[c.id]);
     const stmt = stmtTop ? { month: stmtTop.date, balance: stmtTop.value } : undefined;
     const stats: { k: string; v: string; color?: string }[] = [
@@ -637,7 +634,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   });
   const loanTiles = loans.map((l) => {
     const bal = latestBalances[l.name];
-    const warns: Warn[] = [...staleFor(l.name)];
+    const warns: Warn[] = [];
     const stmtTop = latestOf(statementPts[l.id]);
     const stats: { k: string; v: string; color?: string }[] = [
       { k: stmtTop ? `Statement ${stmtMonthLabel(stmtTop.date)}` : "Statement", v: stmtTop ? `$${formatMoney(stmtTop.value)}` : "—" },
@@ -653,7 +650,6 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   const tileNames = new Set(tiles.map((t) => t.name));
   const leadWarns: { account: string; warn: Warn }[] = [
     ...tiles.flatMap((t) => t.warns.filter((w) => w.lead !== false).map((w) => ({ account: t.name, warn: w }))),
-    ...staleItems.filter((it) => !tileNames.has(it.name)).flatMap((it) => it.warnings.map((t) => ({ account: it.name, warn: { kind: "update" as const, text: t.charAt(0).toLowerCase() + t.slice(1) + "." } }))),
   ];
   if (incomeNum != null && productionNum != null && incomeNum < productionNum * monthProgress * 0.8) {
     leadWarns.push({ account: "Collections", warn: { kind: "soon", text: "lagging materially behind production — consider reviewing insurance A/R aging before discretionary spending." } });
@@ -747,9 +743,6 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
             <span className="min-w-0"><strong className="text-slate-800">{w.account}</strong> — {w.warn.text}</span>
           </div>
         ))}
-        {staleItems.length > 0 && (
-          <p className="text-xs text-slate-400 mt-1">Update these on the Weekly Update tab.</p>
-        )}
       </div>
 
       {/* 3. Practice numbers strip */}
@@ -769,7 +762,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
           <p className="text-lg font-bold text-slate-700">{insuranceIncome != null ? `$${formatMoney(insuranceIncome)}` : "—"}</p>
           <p className="text-[11px] text-slate-400">calculated</p>
         </div>
-        <button onClick={onViewArDetails} className={`${kpi} text-left hover:opacity-90`} title="See details on the Weekly Update tab">
+        <button onClick={onViewArDetails} className={`${kpi} text-left hover:opacity-90`} title="See details on the Numbers tab">
           <p className={kpiLabel}>A/R health</p>
           <p className="text-lg font-bold" style={{ color: arColor }}>{arLabel}</p>
           <p className="text-[11px] text-slate-400">{arHealth ? `True A/R $${formatMoney(arHealth.totalAr)}${arHealth.daysInAr != null ? ` · ${arHealth.daysInAr.toFixed(0)} days` : ""}` : "no A/R entered"}</p>
@@ -843,7 +836,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       <div className="flex flex-wrap gap-3">
         {([
           {
-            title: "Open Dental", warns: staleFor("Open Dental numbers"), when: latestReview?.reviewDate,
+            title: "Open Dental", warns: [] as Warn[], when: latestReview?.reviewDate,
             series: [
               { label: "Net production", mode: "month", points: odSeries.production, caption: "Monthly · current month is the projection" },
               { label: "Income", mode: "month", points: odSeries.income, caption: "Last income entry of each month (current month is month-to-date)" },
@@ -852,7 +845,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
             ] as BarSeries[],
           },
           {
-            title: "Accounts receivable", warns: staleFor("A/R aging"), when: latestArAging?.entryDate,
+            title: "Accounts receivable", warns: [] as Warn[], when: latestArAging?.entryDate,
             series: [{ label: "Total A/R", mode: "week", points: arPoints, caption: "Total A/R · last entry each week" }] as BarSeries[],
           },
         ]).map((c) => (
@@ -872,469 +865,11 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
           </div>
         ))}
       </div>
-
-      {/* 6. Backfill and in-depth history (the old Trends tab, kept intact) */}
-      <div className="rounded-2xl bg-white shadow px-5 py-3">
-        <button onClick={() => setShowBackfill((v) => !v)} className="text-sm font-semibold text-slate-700 hover:underline w-full text-left">
-          {showBackfill ? "▾" : "▸"} Backfill past months &amp; in-depth history
-        </button>
-        {showBackfill && <div className="mt-3"><TrendsPanel cashAccounts={cashAccounts} cards={cards} refreshAll={refreshAll} /></div>}
-      </div>
     </div>
   );
 }
 
 // ---------------- Main Page ----------------
-
-// ---------------- Trends Panel ----------------
-
-// ---------------- Lightweight SVG line chart (no external dependency) ----------------
-
-const CHART_COLORS = ["#e8622a", "#0369a1", "#059669", "#7c3aed", "#dc2626", "#0891b2"];
-
-// A/R is measured as a series of snapshots rather than a continuous value,
-// and a line chart of two nearby readings says almost nothing. Grouping the
-// readings into months and drawing each as its own bar makes both the
-// within-month movement and the month-to-month direction readable at a
-// glance, which is what actually matters when chasing balances down.
-function ArMonthlyBarChart({ entries, height = 240 }: { entries: ArAgingEntry[]; height?: number }) {
-  if (entries.length === 0) return <p className="text-sm text-slate-400">No A/R entries logged yet.</p>;
-
-  const sorted = [...entries].sort((a, b) => a.entryDate.localeCompare(b.entryDate));
-  const months: { key: string; label: string; rows: ArAgingEntry[] }[] = [];
-  for (const e of sorted) {
-    const key = e.entryDate.slice(0, 7);
-    let bucket = months.find((m) => m.key === key);
-    if (!bucket) {
-      bucket = {
-        key,
-        label: new Date(e.entryDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
-        rows: [],
-      };
-      months.push(bucket);
-    }
-    bucket.rows.push(e);
-  }
-
-  const totalOf = (e: ArAgingEntry) => e.ar0to30 + e.ar31to60 + e.ar61to90 + e.ar90plus;
-  const maxValue = Math.max(...sorted.map(totalOf), 1);
-  const barArea = height - 34; // leave room for the month labels
-
-  return (
-    <div>
-      <div className="flex items-end gap-4 overflow-x-auto pb-1" style={{ height }}>
-        {months.map((m) => (
-          <div key={m.key} className="flex flex-col items-center flex-shrink-0">
-            <div className="flex items-end gap-1" style={{ height: barArea }}>
-              {m.rows.map((e) => {
-                const total = totalOf(e);
-                const over90 = e.ar90plus;
-                const totalH = (total / maxValue) * barArea;
-                const over90H = (over90 / maxValue) * barArea;
-                const dayLabel = new Date(e.entryDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                return (
-                  <div key={e.id} className="relative rounded-t" style={{ width: 22, height: totalH, background: "#F3C9B4" }}
-                    title={`${dayLabel}\nTotal: $${formatMoney(total)}\n90+ days: $${formatMoney(over90)}`}>
-                    {/* The 90+ portion sits at the base, so the part that
-                        needs chasing is visible inside the whole. */}
-                    <div className="absolute bottom-0 left-0 right-0 rounded-b" style={{ height: over90H, background: "#D85A30" }} />
-                  </div>
-                );
-              })}
-            </div>
-            <div className="text-xs mt-1.5 whitespace-nowrap" style={{ color: "rgba(74,66,56,0.55)" }}>{m.label}</div>
-            <div className="text-[10px]" style={{ color: "rgba(74,66,56,0.35)" }}>{m.rows.length} {m.rows.length === 1 ? "reading" : "readings"}</div>
-          </div>
-        ))}
-      </div>
-      <div className="flex items-center gap-4 mt-2 text-xs" style={{ color: "rgba(74,66,56,0.6)" }}>
-        <span className="flex items-center gap-1.5"><span className="inline-block rounded" style={{ width: 10, height: 10, background: "#F3C9B4" }} /> Total A/R</span>
-        <span className="flex items-center gap-1.5"><span className="inline-block rounded" style={{ width: 10, height: 10, background: "#D85A30" }} /> of which 90+ days</span>
-        <span className="opacity-75">Hover a bar for its date and figures.</span>
-      </div>
-    </div>
-  );
-}
-
-function TrendLineChart({ series, height = 220 }: { series: { label: string; color: string; points: { date: string; value: number }[] }[]; height?: number }) {
-  const allDates = Array.from(new Set(series.flatMap((s) => s.points.map((p) => p.date)))).sort();
-  const allValues = series.flatMap((s) => s.points.map((p) => p.value));
-  if (allDates.length === 0 || allValues.length === 0) {
-    return <p className="text-sm text-slate-400 py-8 text-center">Not enough data yet to chart.</p>;
-  }
-  const rawMin = Math.min(...allValues);
-  const rawMax = Math.max(...allValues);
-  const range = rawMax - rawMin || Math.max(1, Math.abs(rawMax) * 0.1) || 1;
-  const pad = range * 0.12;
-  // Zoom into the actual data range so real differences are visible, rather
-  // than always forcing the axis down to $0 (which flattens everything when
-  // values are all large and close together). Zero is only forced onto the
-  // axis if the data genuinely straddles it.
-  const minY = rawMin >= 0 ? Math.max(0, rawMin - pad) : rawMin - pad;
-  const maxY = rawMax <= 0 ? Math.min(0, rawMax + pad) : rawMax + pad;
-  const axisIsZoomed = minY > 0 || maxY < 0;
-  const width = 700;
-  const padding = { top: 10, right: 10, bottom: 24, left: 64 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
-
-  function yScale(value: number) {
-    return padding.top + chartHeight - ((value - minY) / (maxY - minY || 1)) * chartHeight;
-  }
-  function xScale(date: string) {
-    const idx = allDates.indexOf(date);
-    return padding.left + (allDates.length <= 1 ? chartWidth / 2 : (idx / (allDates.length - 1)) * chartWidth);
-  }
-
-  const xLabelStep = Math.max(1, Math.ceil(allDates.length / 6));
-
-  return (
-    <div>
-      {axisIsZoomed && (
-        <p className="text-[11px] text-slate-400 mb-1">Axis zoomed to ${formatMoney(minY)}–${formatMoney(maxY)} to make differences visible (doesn't start at $0).</p>
-      )}
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full">
-        {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
-          const value = minY + frac * (maxY - minY);
-          const y = yScale(value);
-          return (
-            <g key={frac}>
-              <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="#e2e8f0" strokeWidth={1} />
-              <text x={padding.left - 8} y={y + 4} textAnchor="end" fontSize={10} fill="#94a3b8">${Math.round(value / 1000)}k</text>
-            </g>
-          );
-        })}
-        {series.map((s) => {
-          if (s.points.length === 0) return null;
-          const pathD = s.points.map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(p.date)} ${yScale(p.value)}`).join(" ");
-          return <path key={s.label} d={pathD} fill="none" stroke={s.color} strokeWidth={2} />;
-        })}
-        {series.map((s) => s.points.length === 1 ? s.points.map((p, i) => (
-          <circle key={`${s.label}-${i}`} cx={xScale(p.date)} cy={yScale(p.value)} r={3} fill={s.color} />
-        )) : null)}
-        {allDates.filter((_, i) => i % xLabelStep === 0).map((date) => (
-          <text key={date} x={xScale(date)} y={height - 5} textAnchor="middle" fontSize={9} fill="#94a3b8">
-            {new Date(date.length === 7 ? date + "-02" : date.slice(0, 10) + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: date.length === 7 ? undefined : "numeric" })}
-          </text>
-        ))}
-      </svg>
-      <div className="flex flex-wrap gap-3 mt-2 justify-center">
-        {series.map((s) => (
-          <span key={s.label} className="flex items-center gap-1.5 text-xs text-slate-600">
-            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: s.color }}></span>
-            {s.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ---------------- Trends Panel ----------------
-
-function TrendsPanel({ cashAccounts, cards, refreshAll }: { cashAccounts: CashAccount[]; cards: CreditCard[]; refreshAll: () => void }) {
-  const [backfillEntityKey, setBackfillEntityKey] = useState(""); // "card:<id>" or "account:<name>"
-  const [backfillMonth, setBackfillMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [backfillAmount, setBackfillAmount] = useState("");
-  const [backfillConfirmation, setBackfillConfirmation] = useState<string | null>(null);
-  const [backfillError, setBackfillError] = useState<string | null>(null);
-  const [dentalBackfillMonth, setDentalBackfillMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [dentalBackfillProduction, setDentalBackfillProduction] = useState("");
-  const [dentalBackfillConfirmation, setDentalBackfillConfirmation] = useState<string | null>(null);
-  const [dentalBackfillError, setDentalBackfillError] = useState<string | null>(null);
-  const [statementHistories, setStatementHistories] = useState<Record<string, CardStatementEntry[]>>({});
-  const [bankStatementHistories, setBankStatementHistories] = useState<Record<string, BankStatementEntry[]>>({});
-  const [dentalMonthlyHistory, setDentalMonthlyHistory] = useState<DentalMonthlyEntry[]>([]);
-  const [arAgingHistory, setArAgingHistory] = useState<ArAgingEntry[]>([]);
-  const [depthView, setDepthView] = useState<string | null>(null); // 'cardStatement' | 'dental' | 'ar' | null
-
-  async function loadAll() {
-    const [statementHists, dentalHistory, bankHists, arHistory, latestReviewForProjection] = await Promise.all([
-      Promise.all(cards.map((c) => loadStatementHistoryForCard(c.id))),
-      loadDentalMonthlyHistory(),
-      Promise.all(cashAccounts.map((a) => loadStatementHistoryForAccount(a.id))),
-      loadArAgingHistory(52),
-      loadLatestWeeklyReview(),
-    ]);
-    const stmtMap: Record<string, CardStatementEntry[]> = {};
-    cards.forEach((c, i) => { stmtMap[c.id] = statementHists[i]; });
-    setStatementHistories(stmtMap);
-    setDentalMonthlyHistory(withCurrentMonthProjection(dentalHistory, latestReviewForProjection));
-    setArAgingHistory(arHistory);
-    const bankMap: Record<string, BankStatementEntry[]> = {};
-    cashAccounts.forEach((a, i) => { bankMap[a.id] = bankHists[i]; });
-    setBankStatementHistories(bankMap);
-  }
-
-  useEffect(() => { loadAll(); }, [cashAccounts, cards]);
-
-  async function handleBackfill() {
-    const amount = Number(backfillAmount);
-    if (!backfillEntityKey || !backfillMonth || !backfillAmount || isNaN(amount)) return;
-    const [kind, ...rest] = backfillEntityKey.split(":");
-    const monthLabel = new Date(backfillMonth + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" });
-
-    if (kind === "card") {
-      const cardId = rest.join(":");
-      const card = cards.find((c) => c.id === cardId);
-      const result = await backfillStatementMonth(cardId, backfillMonth, amount);
-      if (!result.ok) {
-        setBackfillError(result.error ?? "Save failed — the card_statement_entries table may not exist yet. Check that the SQL migration has been run.");
-        setBackfillConfirmation(null);
-        return;
-      }
-      setBackfillConfirmation(`✓ Saved ${card?.name ?? "card"} — ${monthLabel} — $${formatMoney(amount)}`);
-    } else {
-      const accountId = rest.join(":");
-      const account = cashAccounts.find((a) => a.id === accountId);
-      const result = await backfillBankStatementMonth(accountId, backfillMonth, amount);
-      if (!result.ok) {
-        setBackfillError(result.error ?? "Save failed — the bank_statement_entries table may not exist yet. Check that the SQL migration has been run.");
-        setBackfillConfirmation(null);
-        return;
-      }
-      setBackfillConfirmation(`✓ Saved ${account?.name ?? "account"} — ${monthLabel} — $${formatMoney(amount)}`);
-    }
-    setBackfillError(null);
-    setBackfillAmount("");
-    setTimeout(() => setBackfillConfirmation(null), 5000);
-    await loadAll();
-    refreshAll();
-  }
-
-  async function handleDeleteEntry(id: string) {
-    if (!confirm("Delete this statement entry? This can't be undone.")) return;
-    await deleteStatementEntry(id);
-    await loadAll();
-  }
-
-  async function handleDeleteBankEntry(id: string) {
-    if (!confirm("Delete this statement entry? This can't be undone.")) return;
-    await deleteBankStatementEntry(id);
-    await loadAll();
-  }
-
-  async function handleDentalBackfill() {
-    const production = dentalBackfillProduction ? Number(dentalBackfillProduction) : null;
-    if (!dentalBackfillMonth || production == null) return;
-    const result = await backfillDentalMonth(dentalBackfillMonth, production);
-    if (!result.ok) {
-      setDentalBackfillError(result.error ?? "Save failed.");
-      setDentalBackfillConfirmation(null);
-      return;
-    }
-    setDentalBackfillError(null);
-    const monthLabel = new Date(dentalBackfillMonth + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" });
-    setDentalBackfillConfirmation(`✓ Saved Net Production for ${monthLabel}`);
-    setDentalBackfillProduction("");
-    setTimeout(() => setDentalBackfillConfirmation(null), 5000);
-    await loadAll();
-  }
-
-  async function handleDeleteDentalEntry(id: string) {
-    if (!confirm("Delete this Open Dental entry? This can't be undone.")) return;
-    await deleteDentalMonthlyEntry(id);
-    await loadAll();
-  }
-
-  async function handleDeleteArEntry(id: string) {
-    if (!confirm("Delete this A/R aging entry? This can't be undone.")) return;
-    await deleteArAgingEntry(id);
-    await loadAll();
-  }
-
-  const cardStatementSeries = cards.map((c, i) => ({
-    label: c.name, color: CHART_COLORS[i % CHART_COLORS.length],
-    points: [...(statementHistories[c.id] ?? [])].reverse().map((e) => ({ date: e.month, value: e.balance })),
-  }));
-
-  const bankAccountSeries = cashAccounts.map((a, i) => ({
-    label: a.name, color: CHART_COLORS[i % CHART_COLORS.length],
-    points: [...(bankStatementHistories[a.id] ?? [])].reverse().map((e) => ({ date: e.month, value: e.balance })),
-  }));
-
-  const sortedDentalHistory = [...dentalMonthlyHistory].sort((a, b) => a.month.localeCompare(b.month));
-  const dentalSeries = [
-    { label: "Net Production", color: CHART_COLORS[0], points: sortedDentalHistory.filter((e) => e.netProduction != null).map((e) => ({ date: e.month, value: e.netProduction as number })) },
-  ];
-
-  const sortedArHistory = [...arAgingHistory].sort((a, b) => a.entryDate.localeCompare(b.entryDate));
-  const arSeries = [
-    { label: "Total A/R", color: CHART_COLORS[0], points: sortedArHistory.map((e) => ({ date: e.entryDate, value: e.ar0to30 + e.ar31to60 + e.ar61to90 + e.ar90plus })) },
-    { label: "90+ days", color: "#dc2626", points: sortedArHistory.map((e) => ({ date: e.entryDate, value: e.ar90plus })) },
-  ];
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-2xl bg-white shadow p-5">
-        <h2 className="font-bold text-slate-700 mb-1">Add / Backfill a Monthly Balance</h2>
-        <p className="text-sm text-slate-500 mb-4">Works for any bank account or credit card — enter a balance for any month, past or present, to build out the trend history below.</p>
-        <div className="grid gap-3 sm:grid-cols-4">
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Account / Card</label>
-            <select value={backfillEntityKey} onChange={(e) => setBackfillEntityKey(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
-              <option value="">Select…</option>
-              <optgroup label="Bank Accounts">
-                {cashAccounts.map((a) => <option key={a.id} value={`account:${a.id}`}>{a.name}</option>)}
-              </optgroup>
-              <optgroup label="Credit Cards">
-                {cards.map((c) => <option key={c.id} value={`card:${c.id}`}>{c.name}</option>)}
-              </optgroup>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Month</label>
-            <input type="month" value={backfillMonth} onChange={(e) => setBackfillMonth(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Balance</label>
-            <input type="number" onFocus={(e) => e.target.select()} value={backfillAmount} onChange={(e) => setBackfillAmount(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-          <div className="flex items-end">
-            <button onClick={handleBackfill} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition w-full" style={{ backgroundColor: "#e8622a" }}>Save</button>
-          </div>
-        </div>
-        {backfillConfirmation && <span className="text-sm text-emerald-600 font-semibold mt-2 block">{backfillConfirmation}</span>}
-        {backfillError && <span className="text-sm text-red-600 font-semibold mt-2 block">⚠️ {backfillError}</span>}
-      </div>
-
-      <div className="rounded-2xl bg-white shadow p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-bold text-slate-700">Bank Accounts</h2>
-          <button onClick={() => setDepthView(depthView === "bank" ? null : "bank")} className="text-xs text-orange-500 hover:underline">{depthView === "bank" ? "Standard view" : "In-depth view"}</button>
-        </div>
-        {depthView === "bank" ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {cashAccounts.map((a, i) => (
-              <div key={a.id}>
-                <p className="text-sm font-semibold text-slate-700 mb-2">{a.name}</p>
-                <TrendLineChart series={[bankAccountSeries[i]]} height={180} />
-                <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
-                  {(bankStatementHistories[a.id] ?? []).map((entry) => (
-                    <div key={entry.id} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-3 py-1">
-                      <span className="text-slate-600">{new Date(entry.month + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
-                      <span className="flex items-center gap-2">
-                        <span className="font-semibold text-slate-700">${formatMoney(entry.balance)}</span>
-                        <button onClick={() => handleDeleteBankEntry(entry.id)} className="text-red-400 hover:underline">Delete</button>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <TrendLineChart series={bankAccountSeries} />
-        )}
-      </div>
-
-      <div className="rounded-2xl bg-white shadow p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-bold text-slate-700">Credit Cards — Statement Balance</h2>
-          <button onClick={() => setDepthView(depthView === "cardStatement" ? null : "cardStatement")} className="text-xs text-orange-500 hover:underline">{depthView === "cardStatement" ? "Standard view" : "In-depth view"}</button>
-        </div>
-        {depthView === "cardStatement" ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {cards.map((c, i) => (
-              <div key={c.id}>
-                <p className="text-sm font-semibold text-slate-700 mb-2">{c.name}</p>
-                <TrendLineChart series={[cardStatementSeries[i]]} height={180} />
-                <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
-                  {(statementHistories[c.id] ?? []).map((entry) => (
-                    <div key={entry.id} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-3 py-1">
-                      <span className="text-slate-600">{new Date(entry.month + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
-                      <span className="flex items-center gap-2">
-                        <span className="font-semibold text-slate-700">${formatMoney(entry.balance)}</span>
-                        <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-400 hover:underline">Delete</button>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <TrendLineChart series={cardStatementSeries} />
-        )}
-      </div>
-
-      <div className="rounded-2xl bg-white shadow p-5">
-        <h2 className="font-bold text-slate-700 mb-1">Add / Backfill Net Production</h2>
-        <p className="text-sm text-slate-500 mb-4">Enter the official net production figure for any month, past or present. This is a separate historical record from the day-to-day running numbers on Weekly Update — one won't overwrite the other.</p>
-        <div className="grid gap-3 sm:grid-cols-3 mb-3">
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Month</label>
-            <input type="month" value={dentalBackfillMonth} onChange={(e) => setDentalBackfillMonth(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-800 font-semibold mb-1">Net Production</label>
-            <input type="number" onFocus={(e) => e.target.select()} value={dentalBackfillProduction} onChange={(e) => setDentalBackfillProduction(e.target.value)} placeholder="$" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-          </div>
-          <div className="flex items-end">
-            <button onClick={handleDentalBackfill} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition w-full" style={{ backgroundColor: "#e8622a" }}>Save</button>
-          </div>
-        </div>
-        {dentalBackfillConfirmation && <span className="text-sm text-emerald-600 font-semibold mt-2 block">{dentalBackfillConfirmation}</span>}
-        {dentalBackfillError && <span className="text-sm text-red-600 font-semibold mt-2 block">⚠️ {dentalBackfillError}</span>}
-      </div>
-
-      <div className="rounded-2xl bg-white shadow p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-bold text-slate-700">Open Dental — Net Production</h2>
-          <button onClick={() => setDepthView(depthView === "dental" ? null : "dental")} className="text-xs text-orange-500 hover:underline">{depthView === "dental" ? "Standard view" : "In-depth view"}</button>
-        </div>
-        <TrendLineChart series={dentalSeries} />
-        {depthView === "dental" && (
-          <div className="mt-3 space-y-1 max-h-60 overflow-y-auto">
-            {[...dentalMonthlyHistory].sort((a, b) => b.month.localeCompare(a.month)).map((e) => (
-              <div key={e.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
-                <span className="text-slate-600">
-                  {new Date(e.month + "-02").toLocaleDateString("en-US", { month: "long", year: "numeric" })}
-                  {e.month === new Date().toISOString().slice(0, 7) && (
-                    <span className="ml-2 rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: "#E6F1FB", color: "#185FA5" }}>
-                      projected — month still open
-                    </span>
-                  )}
-                </span>
-                <span className="flex items-center gap-2 text-xs text-slate-400">
-                  <span>{e.netProduction != null ? `$${formatMoney(e.netProduction)}` : ""}</span>
-                  {/* A projected month has nothing stored to delete. */}
-                  {!e.id.startsWith("projected-") && (
-                    <button onClick={() => handleDeleteDentalEntry(e.id)} className="text-red-400 hover:underline">Delete</button>
-                  )}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-2xl bg-white shadow p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-bold text-slate-700">Accounts Receivable Trend</h2>
-          <button onClick={() => setDepthView(depthView === "ar" ? null : "ar")} className="text-xs text-orange-500 hover:underline">{depthView === "ar" ? "Standard view" : "In-depth view"}</button>
-        </div>
-        <ArMonthlyBarChart entries={arAgingHistory} />
-        {depthView === "ar" && (
-          <div className="mt-3 space-y-1 max-h-60 overflow-y-auto">
-            {[...arAgingHistory].sort((a, b) => b.entryDate.localeCompare(a.entryDate)).map((e) => {
-              const total = e.ar0to30 + e.ar31to60 + e.ar61to90 + e.ar90plus;
-              return (
-                <div key={e.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
-                  <span className="text-slate-600">{new Date(e.entryDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
-                  <span className="flex items-center gap-2 text-xs text-slate-400">
-                    <span>Total: ${formatMoney(total)} · 90+: ${formatMoney(e.ar90plus)}</span>
-                    <button onClick={() => handleDeleteArEntry(e.id)} className="text-red-400 hover:underline">Delete</button>
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 export default function CashFlowPage() {
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
@@ -1345,7 +880,8 @@ export default function CashFlowPage() {
   const [latestBalances, setLatestBalances] = useState<Record<string, BalanceCheck>>({});
   const [latestReviewForTabs, setLatestReviewForTabs] = useState<WeeklyCashReview | null>(null);
   // Extra data the overdue rules need: loans, every statement log, latest A/R date.
-  const [staleData, setStaleData] = useState<{ loans: Debt[]; statements: Record<string, { month: string }[]>; arDate: string | null }>({ loans: [], statements: {}, arDate: null });
+  const [staleData, setStaleData] = useState<{ loans: Debt[]; statements: Record<string, { month: string; balance: number }[]>; arDate: string | null; ar: ArAgingEntry | null }>({ loans: [], statements: {}, arDate: null, ar: null });
+  const [flowOpen, setFlowOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("");
   // Debt service is only meaningful against what the practice actually
@@ -1384,11 +920,11 @@ export default function CashFlowPage() {
         Promise.all(loans.map((l) => loadDebtStatements(l.id))),
         loadLatestArAging(),
       ]);
-      const statements: Record<string, { month: string }[]> = {};
+      const statements: Record<string, { month: string; balance: number }[]> = {};
       accounts.forEach((a, i) => { statements[a.id] = acctStmts[i]; });
       cards.forEach((c, i) => { statements[c.id] = cardStmts[i]; });
       loans.forEach((l, i) => { statements[l.id] = loanStmts[i]; });
-      setStaleData({ loans, statements, arDate: ar?.entryDate ?? null });
+      setStaleData({ loans, statements, arDate: ar?.entryDate ?? null, ar });
     }
     if (!activeTab) setActiveTab("overview");
     setLoading(false);
@@ -1405,7 +941,7 @@ export default function CashFlowPage() {
     reviewDate: latestReviewForTabs?.reviewDate ?? null,
     arDate: staleData.arDate,
   });
-  const updateNumbersNeedsAttention = staleItems.length > 0 && cashAccounts.length > 0;
+  const dueCount = cashAccounts.length > 0 ? staleItems.length : 0;
 
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
@@ -1416,24 +952,40 @@ export default function CashFlowPage() {
           <p className="text-sm text-slate-500 mt-1">Fifth Third and Chase, tracked independently, plus credit card capacity and the weekly Friday review.</p>
         </header>
 
+        {!loading && (
+          <div className="max-w-5xl mb-4">
+            <button onClick={() => setFlowOpen(true)}
+              className="w-full flex items-center justify-between gap-3 rounded-2xl px-5 py-3.5 text-white shadow hover:opacity-95 transition text-left"
+              style={{ background: "#e8622a" }}>
+              <span className="font-bold" style={{ fontSize: 17 }}>Update Numbers Now</span>
+              <span className="text-sm font-semibold rounded-full px-3 py-1" style={{ background: "rgba(255,255,255,0.22)" }}>
+                {dueCount > 0 ? `${dueCount} due` : "All up to date"}
+              </span>
+            </button>
+          </div>
+        )}
+
         {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
           <div className="max-w-5xl">
             <div className="mb-4 flex flex-wrap gap-2">
               <button onClick={() => setActiveTab("overview")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "overview" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Overview &amp; Trends</button>
               <button onClick={() => setActiveTab("entry")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
-                style={activeTab === "entry" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : updateNumbersNeedsAttention ? { backgroundColor: "#fee2e2", color: "#991b1b", borderColor: "#991b1b" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>
-                {updateNumbersNeedsAttention && activeTab !== "entry" ? "⚠️ " : ""}Weekly Update
+                style={activeTab === "entry" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>
+                Numbers
               </button>
               {cashAccounts.map((a) => (
                 <button key={a.id} onClick={() => setActiveTab(a.id)} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                   style={activeTab === a.id ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>{a.name}</button>
               ))}
               
-              <button onClick={() => setActiveTab("charges")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
-                style={activeTab === "charges" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Card Charges</button>
+
               
             </div>
+
+            <UpdateNumbersFlow open={flowOpen} onClose={() => setFlowOpen(false)} onSaved={() => refresh(true)}
+              accounts={cashAccounts} cards={creditCards} loans={staleData.loans} latestBalances={latestBalances}
+              statements={staleData.statements} review={latestReviewForTabs} ar={staleData.ar} dueNames={staleItems.map((i) => i.name)} />
 
             {cashAccounts.map((a) => activeTab === a.id && (
               <AccountPanel key={a.id} account={a} allBills={bills} allPayments={payments} latestBalances={latestBalances} cards={creditCards} refreshAll={refresh} />
@@ -1443,13 +995,9 @@ export default function CashFlowPage() {
             )}
             {activeTab === "entry" && (
               <WeeklyUpdatePanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={() => refresh(true)}
-                charges={cardCharges} allBills={bills} allPayments={payments}
+                charges={cardCharges} allBills={bills} allPayments={payments} loans={staleData.loans}
                 debtMonthlyCollections={debtMonthlyCollections} />
             )}
-            {activeTab === "charges" && (
-              <CardChargesPanel cards={creditCards} charges={cardCharges} refreshAll={() => refresh(true)} />
-            )}
-            
           </div>
         )}
       </div>
