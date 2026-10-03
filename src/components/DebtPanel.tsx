@@ -4,11 +4,13 @@ import { useState, useEffect } from "react";
 import { formatMoney } from "@/lib/format";
 import { Debt, DebtKind, loadDebts, saveDebt, deleteDebt, computeDebtSummary, loadDebtStatements, saveDebtStatement, deleteDebtStatement } from "@/lib/debt";
 import {
-  CreditCard, BalanceCheck,
+  CreditCard, BalanceCheck, CashAccount, CardCharge, RecurringBill, BillPayment,
+  addCardCharge, deleteCardCharge, buildOccurrences, addDays,
+  computeAccountForecast, computeSuggestedTransfer, computeCardRecommendation,
   addBalanceCheck, loadBalanceHistoryForAccount, deleteBalanceCheck,
   updateStatementBalance, loadStatementHistoryForCard, backfillStatementMonth, deleteStatementEntry,
 } from "@/lib/cashflow";
-import { HistoryBlock, HistoryButton, MonthSelect, monthLabel, HistRow } from "@/components/CashHistory";
+import { HistoryBlock, HistoryButton, MonthSelect, NumInput, monthLabel, HistRow } from "@/components/CashHistory";
 
 const EMPTY: Omit<Debt, "id"> = {
   name: "", kind: "installment", creditCardId: null, originalAmount: 0, currentBalance: 0,
@@ -19,7 +21,7 @@ const EMPTY: Omit<Debt, "id"> = {
 // One line per debt. Cards are edited right on the line (current balance,
 // statement balance for a chosen month, rate, payment); loans show their
 // figures and use Edit.
-const GRID = "minmax(120px,1.3fr) 92px 178px 64px 88px 78px 78px 96px";
+const GRID = "minmax(120px,1.3fr) 100px 186px 64px 96px 78px 78px 170px";
 
 // The statement that most recently closed, labelled by the month it closes
 // in — e.g. a card that closes on the 12th is, on Oct 2, still showing its
@@ -37,8 +39,12 @@ type CardEdit = { cur?: string; stmt?: string; rate?: string; pay?: string };
 const cell = "w-full rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
 
 export default function DebtPanel({
-  creditCards, latestBalances, refreshAll, monthlyCollections,
+  creditCards, latestBalances, refreshAll, monthlyCollections, cashAccounts = [], charges = [], allBills = [], allPayments = [],
 }: {
+  cashAccounts?: CashAccount[];
+  charges?: CardCharge[];
+  allBills?: RecurringBill[];
+  allPayments?: BillPayment[];
   creditCards: CreditCard[];
   latestBalances: Record<string, BalanceCheck>;
   refreshAll?: () => void;
@@ -58,6 +64,38 @@ export default function DebtPanel({
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [openHist, setOpenHist] = useState<string | null>(null);
+  const [openCharges, setOpenCharges] = useState<string | null>(null);
+  const [chargeForm, setChargeForm] = useState({ vendor: "", typicalAmount: "", approxDayOfMonth: "1" });
+
+  // ---- Card warnings (moved here from the old Credit Cards tab) ----
+  const nowD = new Date();
+  const today = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}-${String(nowD.getDate()).padStart(2, "0")}`;
+  const monthStart = today.slice(0, 8) + "01";
+  const forecastFor = (acct: CashAccount) =>
+    computeAccountForecast(acct, latestBalances[acct.name]?.balance ?? 0,
+      buildOccurrences(allBills.filter((b) => b.cashAccountId === acct.id), allPayments, monthStart, addDays(today, 60)), today, 0);
+  const ffAcct = cashAccounts.find((a) => a.name === "Fifth Third Checking");
+  const chaseAcct = cashAccounts.find((a) => a.name === "Chase");
+  const transfer = ffAcct && chaseAcct ? computeSuggestedTransfer(forecastFor(ffAcct), forecastFor(chaseAcct)) : null;
+
+  function recFor(card: CreditCard) {
+    const balance = latestBalances[card.name]?.balance ?? 0;
+    const linked = cashAccounts.find((a) => a.id === card.linkedCashAccountId);
+    let forecast = linked ? forecastFor(linked) : null;
+    if (forecast && transfer && linked && transfer.fromAccountName === linked.name) {
+      forecast = { ...forecast, excessOrShortfall: Math.max(0, forecast.excessOrShortfall - transfer.amount) };
+    }
+    return { linked, rec: computeCardRecommendation(card, balance, charges, today, forecast) };
+  }
+
+  async function handleAddCharge(cardId: string) {
+    const amount = Number(chargeForm.typicalAmount);
+    const day = Number(chargeForm.approxDayOfMonth);
+    if (!chargeForm.vendor.trim() || !amount || !day) return;
+    await addCardCharge({ creditCardId: cardId, vendor: chargeForm.vendor.trim(), typicalAmount: amount, approxDayOfMonth: day, active: true });
+    setChargeForm({ vendor: "", typicalAmount: "", approxDayOfMonth: "1" });
+    refreshAll?.();
+  }
 
   // Statement logs for every debt: cards read card_statement_entries, loans
   // read debt_statement_entries. Keyed by card id / loan id, newest first.
@@ -275,11 +313,11 @@ export default function DebtPanel({
                 <>
                   <div>
                     <label className={lbl}>Current balance</label>
-                    <input type="number" onFocus={(e) => e.target.select()} value={form.currentBalance} onChange={(e) => setForm((f) => ({ ...f, currentBalance: Number(e.target.value) }))} className={formInput} />
+                    <NumInput onFocus={(e) => e.target.select()} value={form.currentBalance} onChange={(e) => setForm((f) => ({ ...f, currentBalance: Number(e.target.value) }))} className={formInput} />
                   </div>
                   <div>
                     <label className={lbl}>Original amount (optional)</label>
-                    <input type="number" onFocus={(e) => e.target.select()} value={form.originalAmount} onChange={(e) => setForm((f) => ({ ...f, originalAmount: Number(e.target.value) }))} className={formInput} />
+                    <NumInput onFocus={(e) => e.target.select()} value={form.originalAmount} onChange={(e) => setForm((f) => ({ ...f, originalAmount: Number(e.target.value) }))} className={formInput} />
                   </div>
                   <div>
                     <label className={lbl}>Final payment (optional)</label>
@@ -290,7 +328,7 @@ export default function DebtPanel({
 
               <div>
                 <label className={lbl}>Interest rate (annual %)</label>
-                <input type="number" step="0.01" min="0" onFocus={(e) => e.target.select()}
+                <NumInput prefix="" suffix="%" step="0.01" min="0" onFocus={(e) => e.target.select()}
                   value={form.interestRate ?? ""}
                   onChange={(e) => setForm((f) => ({ ...f, interestRate: e.target.value === "" ? null : Number(e.target.value) }))}
                   placeholder="24.99 — enter 0 for an introductory 0% rate" className={formInput} />
@@ -298,7 +336,7 @@ export default function DebtPanel({
               </div>
               <div>
                 <label className={lbl}>Monthly payment</label>
-                <input type="number" onFocus={(e) => e.target.select()} value={form.monthlyPayment} onChange={(e) => setForm((f) => ({ ...f, monthlyPayment: Number(e.target.value) }))} className={formInput} />
+                <NumInput onFocus={(e) => e.target.select()} value={form.monthlyPayment} onChange={(e) => setForm((f) => ({ ...f, monthlyPayment: Number(e.target.value) }))} className={formInput} />
               </div>
               <div>
                 <label className={lbl}>Note (optional)</label>
@@ -317,9 +355,9 @@ export default function DebtPanel({
           <p className="text-sm text-slate-400">No cards or loans yet. Credit cards appear here automatically once added on the Credit Cards tab.</p>
         ) : (
           <div className="overflow-x-auto">
-            <div style={{ minWidth: 860 }}>
+            <div style={{ minWidth: 940 }}>
               <div className="grid items-end gap-x-2 text-[11px] text-slate-400 font-medium border-b border-slate-100 pb-1" style={{ gridTemplateColumns: GRID }}>
-                <span>Debt</span><span>Current bal.</span><span>Statement (month covered)</span><span>Rate %</span><span>Payment</span><span>Interest/mo</span><span>Clear in</span><span />
+                <span>Debt</span><span>Current bal.</span><span>Statement Balance</span><span>Rate %</span><span>Payment</span><span>Interest/mo</span><span>Clear in</span><span />
               </div>
 
               {summary.lines.map((l) => {
@@ -338,32 +376,41 @@ export default function DebtPanel({
                 const rateVal = e.rate ?? (d.interestRate == null ? "" : String(d.interestRate));
                 const payVal = e.pay ?? String(d.monthlyPayment);
                 const histOpen = openHist === key;
+                const cardInfo = cc ? recFor(cc) : null;
+                const rec = cardInfo?.rec;
+                const cardCharges = cc ? charges.filter((c) => c.creditCardId === cc.id && c.active) : [];
+                const chargesOpen = openCharges === key;
 
                 return (
                   <div key={key} className="border-b border-slate-50 last:border-0">
                     <div className="grid items-center gap-x-2 text-xs py-1" style={{ gridTemplateColumns: GRID }}>
-                      <span className="truncate" title={`${d.name}${d.lender ? ` · ${d.lender}` : ""}`}>
+                      <span className="truncate" title={cc && rec ? `${d.name} — $${formatMoney(rec.availableCredit)} available of $${formatMoney(cc.creditLimit)} · pays from ${cardInfo?.linked?.name ?? "—"} · closes ~day ${cc.approxClosingDay} (${rec.daysUntilClosing}d) · due day ${cc.dueDay} (${rec.daysUntilDue}d)` : `${d.name}${d.lender ? ` · ${d.lender}` : ""}`}>
                         <span className="font-medium text-slate-700">{d.name}</span>
                         <span className="text-slate-400"> · {cc ? "card" : "loan"}</span>
                       </span>
-                      <input type="number" onFocus={(ev) => ev.target.select()} value={curVal} onChange={(ev) => setEdit(key, { cur: ev.target.value })} className={cell} />
+                      <NumInput onFocus={(ev) => ev.target.select()} value={curVal} onChange={(ev) => setEdit(key, { cur: ev.target.value })} className={cell} />
                       <span className="flex items-center gap-1">
                         <MonthSelect value={selMonth} onChange={(m) => { setMonths((s) => ({ ...s, [key]: m })); setEdits((s) => { const { stmt, ...rest } = s[key] ?? {}; return { ...s, [key]: rest }; }); }} className="w-[74px] shrink-0" />
-                        <input type="number" onFocus={(ev) => ev.target.select()} value={stmtVal} placeholder="—" onChange={(ev) => setEdit(key, { stmt: ev.target.value })} className={cell} />
+                        <NumInput onFocus={(ev) => ev.target.select()} value={stmtVal} placeholder="—" onChange={(ev) => setEdit(key, { stmt: ev.target.value })} className={cell} />
                         {newerDue && (
                           <button title={`A ${monthLabel(covered)} statement should be out — click to enter it`}
                             onClick={() => setMonths((s) => ({ ...s, [key]: covered }))}
                             className="text-[10px] font-semibold text-amber-600 whitespace-nowrap hover:underline">{monthLabel(covered).split(" ")[0]}?</button>
                         )}
                       </span>
-                      <input type="number" step="0.01" min="0" onFocus={(ev) => ev.target.select()} value={rateVal} placeholder="not set" onChange={(ev) => setEdit(key, { rate: ev.target.value })} className={cell} />
-                      <input type="number" onFocus={(ev) => ev.target.select()} value={payVal} onChange={(ev) => setEdit(key, { pay: ev.target.value })} className={cell} />
+                      <NumInput prefix="" suffix="%" step="0.01" min="0" onFocus={(ev) => ev.target.select()} value={rateVal} placeholder="not set" onChange={(ev) => setEdit(key, { rate: ev.target.value })} className={cell} />
+                      <NumInput onFocus={(ev) => ev.target.select()} value={payVal} onChange={(ev) => setEdit(key, { pay: ev.target.value })} className={cell} />
                       <span className="whitespace-nowrap" style={{ color: l.monthlyInterest > 0 ? "#A32D2D" : undefined }}>${formatMoney(l.monthlyInterest)}</span>
                       <span className="whitespace-nowrap" style={{ color: l.neverClears ? "#A32D2D" : "rgba(74,66,56,0.6)" }}>
                         {l.neverClears ? "⚠️ never" : fmtMonths(l.payoffMonths)}
                         {d.finalPaymentDate && !l.neverClears && <span className="text-slate-400"> · {new Date(d.finalPaymentDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "2-digit" })}</span>}
                       </span>
                       <span className="text-right whitespace-nowrap">
+                        {cc && (
+                          <button onClick={() => setOpenCharges(chargesOpen ? null : key)} className="text-xs text-orange-500 hover:underline mr-2">
+                            {chargesOpen ? "Hide" : "Charges"} ({cardCharges.length})
+                          </button>
+                        )}
                         <HistoryButton open={histOpen} onClick={() => setOpenHist(histOpen ? null : key)} />
                         <button onClick={() => { setForm({ ...d }); setShowForm(true); }} className="text-xs text-orange-500 hover:underline ml-2">Edit</button>
                         {!cc && (
@@ -374,6 +421,47 @@ export default function DebtPanel({
                         )}
                       </span>
                     </div>
+                    {cc && rec && (rec.overLimitRisk || rec.urgentMinimumDue || (rec.suggestedExtraPayment > 0 && !rec.overLimitRisk)) && (
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 pb-1.5 text-[11px] font-semibold">
+                        {rec.overLimitRisk && (
+                          <span className="rounded px-1.5 py-0.5 bg-red-50 text-red-700 border border-red-200">
+                            🚨 Near limit in 14d — est. ${formatMoney(rec.projectedBalance)} of ${formatMoney(cc.creditLimit)}; pay down now
+                          </span>
+                        )}
+                        {rec.urgentMinimumDue && (
+                          <span className="rounded px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200">
+                            ⏰ Due in {rec.daysUntilDue}d — min ${formatMoney(cc.minimumPayment)}, autopay ${formatMoney(cc.autopayAmount)}
+                          </span>
+                        )}
+                        {rec.suggestedExtraPayment > 0 && !rec.overLimitRisk && (
+                          <span className="rounded px-1.5 py-0.5 bg-blue-50 text-blue-800 border border-blue-200">
+                            💰 {cardInfo?.linked?.name} has spare cash — extra ${formatMoney(rec.suggestedExtraPayment)} toward the ${formatMoney(rec.statementBalance)} statement avoids interest
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {cc && chargesOpen && (
+                      <div className="pb-2">
+                        <div className="rounded-lg bg-slate-50 px-3 py-2">
+                          <p className="text-[11px] font-semibold text-slate-400 mb-0.5">Recurring charges on this card (used for the near-limit warning)</p>
+                          {cardCharges.length === 0 && <p className="text-xs text-slate-400">None logged yet.</p>}
+                          {cardCharges.map((c) => (
+                            <div key={c.id} className="flex items-center gap-2 text-xs leading-5 border-b border-slate-100 last:border-0 whitespace-nowrap">
+                              <span className="text-slate-600 flex-1 truncate">{c.vendor} — ~day {c.approxDayOfMonth}{c.notes ? ` · ${c.notes}` : ""}</span>
+                              <span className="font-semibold text-slate-700">${formatMoney(c.typicalAmount)}</span>
+                              <button title="Remove" onClick={async () => { await deleteCardCharge(c.id); refreshAll?.(); }} className="text-red-400 hover:text-red-600">✕</button>
+                            </div>
+                          ))}
+                          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                            <input type="text" value={chargeForm.vendor} onChange={(e) => setChargeForm((f) => ({ ...f, vendor: e.target.value }))} placeholder="Vendor" className="rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none" style={{ width: 150 }} />
+                            <NumInput wrap="w-24" onFocus={(e) => e.target.select()} value={chargeForm.typicalAmount} onChange={(e) => setChargeForm((f) => ({ ...f, typicalAmount: e.target.value }))} placeholder="Amount" className="w-full rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none" />
+                            <span className="text-xs text-slate-400">day</span>
+                            <input type="number" onFocus={(e) => e.target.select()} value={chargeForm.approxDayOfMonth} onChange={(e) => setChargeForm((f) => ({ ...f, approxDayOfMonth: e.target.value }))} className="rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none" style={{ width: 52 }} />
+                            <button onClick={() => handleAddCharge(cc.id)} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Add</button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     {histOpen && (
                       <div className="pb-2">
                         <HistoryBlock
