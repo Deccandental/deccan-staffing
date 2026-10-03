@@ -4,6 +4,9 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { formatMoney } from "@/lib/format";
 import WeeklyUpdatePanel from "@/components/WeeklyUpdatePanel";
+import CardChargesPanel from "@/components/CardChargesPanel";
+import { buildStaleItems, StaleItem, newestMonth } from "@/lib/staleness";
+import { loadDebts, loadDebtStatements, Debt } from "@/lib/debt";
 import { loadStaff } from "@/lib/staffStore";
 import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
 import {
@@ -392,8 +395,8 @@ function AccountPanel({ account, allBills, allPayments, latestBalances, cards, r
 
 // ---------------- Weekly Review Panel ----------------
 
-function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, latestBalances, onViewArDetails }: {
-  cashAccounts: CashAccount[]; cards: CreditCard[]; charges: CardCharge[]; allBills: RecurringBill[]; allPayments: BillPayment[];
+function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, allPayments, latestBalances, onViewArDetails }: {
+  staleItems: StaleItem[]; cashAccounts: CashAccount[]; cards: CreditCard[]; charges: CardCharge[]; allBills: RecurringBill[]; allPayments: BillPayment[];
   latestBalances: Record<string, BalanceCheck>; onViewArDetails: () => void;
 }) {
   const [latestReview, setLatestReview] = useState<WeeklyCashReview | null>(null);
@@ -462,28 +465,6 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
   const requiredCollections = ff && chase
     ? computeRequiredCollections(ff, chase, latestBalances[ff.name]?.balance ?? 0, latestBalances[chase.name]?.balance ?? 0, fullMonthOccurrences, productionNum, bonusObligations?.total ?? 0)
     : null;
-
-  const STALE_DAYS = 7;
-  const reviewDaysStale = latestReview ? daysSinceDateStr(latestReview.reviewDate) : Infinity;
-  const incomeStale = reviewDaysStale >= STALE_DAYS;
-
-  // Statement balances are excluded here — they only change when a monthly
-  // statement arrives, so measuring them against a 7-day rule reported the
-  // numbers as out of date almost permanently. They're checked separately
-  // against a full statement cycle below.
-  const STATEMENT_STALE_DAYS = 40;
-  const balanceTimestamps = [
-    ...cashAccounts.map((a) => latestBalances[a.name]?.checkedAt),
-    ...cards.map((c) => latestBalances[c.name]?.checkedAt),
-  ].filter((t): t is string => !!t);
-  const oldestBalanceTimestamp = balanceTimestamps.length > 0 ? balanceTimestamps.reduce((oldest, t) => (t < oldest ? t : oldest)) : null;
-  const balanceDaysStale = oldestBalanceTimestamp ? (Date.now() - new Date(oldestBalanceTimestamp).getTime()) / 86400000 : Infinity;
-  const anyBalanceMissing = cashAccounts.some((a) => !latestBalances[a.name]) || cards.some((c) => !latestBalances[c.name]);
-  const balancesStale = balanceDaysStale >= STALE_DAYS || anyBalanceMissing;
-  const statementsStale = cards.some((c) =>
-    c.statementBalanceUpdatedAt != null &&
-    (Date.now() - new Date(c.statementBalanceUpdatedAt).getTime()) / 86400000 >= STATEMENT_STALE_DAYS
-  );
 
   const cardRecs = cards.map((card) => {
     const linkedAccount = cashAccounts.find((a) => a.id === card.linkedCashAccountId);
@@ -633,13 +614,11 @@ function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, la
         </div>
       )}
 
-      {(balancesStale || incomeStale) && (
+      {staleItems.length > 0 && (
         <div className="rounded-xl p-4 shadow bg-amber-50 border border-amber-200">
           <p className="text-sm font-semibold text-amber-800">⚠️ Numbers need updating:</p>
           <ul className="text-sm text-amber-700 mt-1 list-disc list-inside">
-            {balancesStale && <li>Account/card balances — {oldestBalanceTimestamp ? `oldest entry ${new Date(oldestBalanceTimestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "never entered"}</li>}
-            {statementsStale && <li>Credit card statement balances — last updated over a month ago</li>}
-            {incomeStale && <li>Open Dental numbers — {latestReview ? `last entered ${new Date(latestReview.reviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "never entered"}</li>}
+            {staleItems.map((it) => <li key={it.name}><strong>{it.name}</strong> — {it.warnings.join("; ")}</li>)}
           </ul>
           <p className="text-xs text-amber-600 mt-1">Update these on the "Weekly Update" tab.</p>
         </div>
@@ -1212,6 +1191,8 @@ export default function CashFlowPage() {
   const [payments, setPayments] = useState<BillPayment[]>([]);
   const [latestBalances, setLatestBalances] = useState<Record<string, BalanceCheck>>({});
   const [latestReviewForTabs, setLatestReviewForTabs] = useState<WeeklyCashReview | null>(null);
+  // Extra data the overdue rules need: loans, every statement log, latest A/R date.
+  const [staleData, setStaleData] = useState<{ loans: Debt[]; statements: Record<string, { month: string }[]>; arDate: string | null }>({ loans: [], statements: {}, arDate: null });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("");
   // Debt service is only meaningful against what the practice actually
@@ -1242,36 +1223,36 @@ export default function CashFlowPage() {
     setPayments(p);
     setLatestBalances(bal);
     setLatestReviewForTabs(review);
+    {
+      const loans = (await loadDebts()).filter((d) => d.kind !== "revolving");
+      const [acctStmts, cardStmts, loanStmts, ar] = await Promise.all([
+        Promise.all(accounts.map((a) => loadStatementHistoryForAccount(a.id))),
+        Promise.all(cards.map((c) => loadStatementHistoryForCard(c.id))),
+        Promise.all(loans.map((l) => loadDebtStatements(l.id))),
+        loadLatestArAging(),
+      ]);
+      const statements: Record<string, { month: string }[]> = {};
+      accounts.forEach((a, i) => { statements[a.id] = acctStmts[i]; });
+      cards.forEach((c, i) => { statements[c.id] = cardStmts[i]; });
+      loans.forEach((l, i) => { statements[l.id] = loanStmts[i]; });
+      setStaleData({ loans, statements, arDate: ar?.entryDate ?? null });
+    }
     if (!activeTab) setActiveTab("overview");
     setLoading(false);
   }
 
-  // Current balances move constantly, so a week without an update means the
-  // figures are genuinely out of date. Statement balances are a different
-  // animal — they only change when a statement arrives, roughly monthly —
-  // so holding them to the same 7-day rule flagged the tab red every week
-  // with nothing new to enter. They get their own, much longer window.
-  const STALE_DAYS_TABS = 7;
-  const STATEMENT_STALE_DAYS = 40;
-  const currentBalanceTimestamps = [
-    ...cashAccounts.map((a) => latestBalances[a.name]?.checkedAt),
-    ...creditCards.map((c) => latestBalances[c.name]?.checkedAt),
-  ].filter((t): t is string => !!t);
-  const oldestCurrentBalance = currentBalanceTimestamps.length > 0
-    ? currentBalanceTimestamps.reduce((oldest, t) => (t < oldest ? t : oldest))
-    : null;
-  const currentBalancesStale = (oldestCurrentBalance ? (Date.now() - new Date(oldestCurrentBalance).getTime()) / 86400000 >= STALE_DAYS_TABS : true)
-    || cashAccounts.some((a) => !latestBalances[a.name]) || creditCards.some((c) => !latestBalances[c.name]);
-  // Only flags a statement that has been entered at least once and has since
-  // aged past a full statement cycle. A card never given a statement balance
-  // isn't nagged about, since that may simply not be tracked.
-  const statementBalancesStale = creditCards.some((c) =>
-    c.statementBalanceUpdatedAt != null &&
-    (Date.now() - new Date(c.statementBalanceUpdatedAt).getTime()) / 86400000 >= STATEMENT_STALE_DAYS
-  );
-  const balancesStaleForTabs = currentBalancesStale || statementBalancesStale;
-  const incomeStaleForTabs = latestReviewForTabs ? daysSinceDateStr(latestReviewForTabs.reviewDate) >= STALE_DAYS_TABS : true;
-  const updateNumbersNeedsAttention = (balancesStaleForTabs || incomeStaleForTabs) && cashAccounts.length > 0;
+  // One set of overdue rules (src/lib/staleness.ts) drives this tab flag, the
+  // Overview banner, the lines on the Weekly Update tab and the digest email.
+  const staleItems: StaleItem[] = buildStaleItems({
+    accounts: cashAccounts.map((a) => ({ id: a.id, name: a.name })),
+    cards: creditCards.map((c) => ({ id: c.id, name: c.name, approxClosingDay: c.approxClosingDay })),
+    loans: staleData.loans.map((l) => ({ id: l.id, name: l.name })),
+    latestChecked: Object.fromEntries(Object.entries(latestBalances).map(([k, v]) => [k, v.checkedAt])),
+    statements: staleData.statements,
+    reviewDate: latestReviewForTabs?.reviewDate ?? null,
+    arDate: staleData.arDate,
+  });
+  const updateNumbersNeedsAttention = staleItems.length > 0 && cashAccounts.length > 0;
 
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
@@ -1296,6 +1277,8 @@ export default function CashFlowPage() {
                   style={activeTab === a.id ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>{a.name}</button>
               ))}
               
+              <button onClick={() => setActiveTab("charges")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
+                style={activeTab === "charges" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Card Charges</button>
               <button onClick={() => setActiveTab("trends")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "trends" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Trends</button>
             </div>
@@ -1304,12 +1287,15 @@ export default function CashFlowPage() {
               <AccountPanel key={a.id} account={a} allBills={bills} allPayments={payments} latestBalances={latestBalances} cards={creditCards} refreshAll={refresh} />
             ))}
             {activeTab === "overview" && (
-              <OverviewPanel cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setActiveTab("entry")} />
+              <OverviewPanel staleItems={staleItems} cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setActiveTab("entry")} />
             )}
             {activeTab === "entry" && (
               <WeeklyUpdatePanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={() => refresh(true)}
                 charges={cardCharges} allBills={bills} allPayments={payments}
                 debtMonthlyCollections={debtMonthlyCollections} />
+            )}
+            {activeTab === "charges" && (
+              <CardChargesPanel cards={creditCards} charges={cardCharges} refreshAll={() => refresh(true)} />
             )}
             {activeTab === "trends" && (
               <TrendsPanel cashAccounts={cashAccounts} cards={creditCards} refreshAll={refresh} />
