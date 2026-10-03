@@ -59,7 +59,7 @@ export default function CardChargesPanel({ cards, charges, refreshAll }: {
   return (
     <div className="space-y-3">
       <p className="text-xs text-slate-500">
-        Recurring charges per card. These feed the near-limit warning on each card's line in the Weekly Update tab's Debt card.
+        Recurring charges per card. These feed the near-limit warning on each card's line in the Debt card above.
       </p>
       {error && <p className="text-xs text-red-600 font-semibold">⚠️ {error}</p>}
 
