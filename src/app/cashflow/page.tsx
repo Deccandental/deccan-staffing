@@ -390,187 +390,6 @@ function AccountPanel({ account, allBills, allPayments, latestBalances, cards, r
 
 // ---------------- Credit Cards Panel ----------------
 
-function CreditCardsPanel({ cards, charges, cashAccounts, latestBalances, allBills, allPayments, refreshAll }: {
-  cards: CreditCard[]; charges: CardCharge[]; cashAccounts: CashAccount[]; latestBalances: Record<string, BalanceCheck>;
-  allBills: RecurringBill[]; allPayments: BillPayment[]; refreshAll: () => void;
-}) {
-  const [balanceInputs, setBalanceInputs] = useState<Record<string, string>>({});
-  const [stmtInputs, setStmtInputs] = useState<Record<string, string>>({});
-  const [expandedCard, setExpandedCard] = useState<string | null>(null);
-  const [chargeForm, setChargeForm] = useState({ vendor: "", typicalAmount: "", approxDayOfMonth: "1", notes: "" });
-
-  const today = todayStr();
-  const monthStart = today.slice(0, 8) + "01";
-  const ff = cashAccounts.find((a) => a.name === "Fifth Third Checking");
-  const chase = cashAccounts.find((a) => a.name === "Chase");
-  const ffOccForTransfer = ff ? buildOccurrences(allBills.filter((b) => b.cashAccountId === ff.id), allPayments, monthStart, addDays(today, WINDOW_DAYS)) : [];
-  const chaseOccForTransfer = chase ? buildOccurrences(allBills.filter((b) => b.cashAccountId === chase.id), allPayments, monthStart, addDays(today, WINDOW_DAYS)) : [];
-  const ffForecastForTransfer = ff ? computeAccountForecast(ff, latestBalances[ff.name]?.balance ?? 0, ffOccForTransfer, today, 0) : null;
-  const chaseForecastForTransfer = chase ? computeAccountForecast(chase, latestBalances[chase.name]?.balance ?? 0, chaseOccForTransfer, today, 0) : null;
-  const transfer = ffForecastForTransfer && chaseForecastForTransfer ? computeSuggestedTransfer(ffForecastForTransfer, chaseForecastForTransfer) : null;
-
-  async function handleUpdateBalance(card: CreditCard) {
-    const raw = balanceInputs[card.id];
-    const amount = Number(raw);
-    if (!raw || isNaN(amount)) return;
-    await addBalanceCheck(card.name, amount);
-    setBalanceInputs((f) => ({ ...f, [card.id]: "" }));
-    refreshAll();
-  }
-
-  async function handleUpdateStatement(card: CreditCard) {
-    const raw = stmtInputs[card.id];
-    const amount = Number(raw);
-    if (!raw || isNaN(amount)) return;
-    const result = await updateStatementBalance(card.id, amount);
-    if (!result.ok) { alert(`Failed to save statement balance for ${card.name}: ${result.error ?? "unknown error"}`); return; }
-    setStmtInputs((f) => ({ ...f, [card.id]: "" }));
-    refreshAll();
-  }
-
-  async function handleAddCharge(cardId: string) {
-    const amount = Number(chargeForm.typicalAmount);
-    const day = Number(chargeForm.approxDayOfMonth);
-    if (!chargeForm.vendor.trim() || !amount || !day) return;
-    await addCardCharge({ creditCardId: cardId, vendor: chargeForm.vendor.trim(), typicalAmount: amount, approxDayOfMonth: day, notes: chargeForm.notes.trim() || undefined, active: true });
-    setChargeForm({ vendor: "", typicalAmount: "", approxDayOfMonth: "1", notes: "" });
-    refreshAll();
-  }
-
-  async function handleRemoveCharge(id: string) {
-    await deleteCardCharge(id);
-    refreshAll();
-  }
-
-  const cardsWithRecs = cards.map((card) => {
-    const balance = latestBalances[card.name]?.balance ?? 0;
-    const linkedAccount = cashAccounts.find((a) => a.id === card.linkedCashAccountId);
-    let accountForecast = null;
-    if (linkedAccount) {
-      const accountBills = allBills.filter((b) => b.cashAccountId === linkedAccount.id);
-      const occurrences = buildOccurrences(accountBills, allPayments, today.slice(0, 8) + "01", addDays(today, WINDOW_DAYS));
-      accountForecast = computeAccountForecast(linkedAccount, latestBalances[linkedAccount.name]?.balance ?? 0, occurrences, today, 0);
-      if (accountForecast && transfer && transfer.fromAccountName === linkedAccount.name) {
-        accountForecast = { ...accountForecast, excessOrShortfall: Math.max(0, accountForecast.excessOrShortfall - transfer.amount) };
-      }
-    }
-    const rec = computeCardRecommendation(card, balance, charges, today, accountForecast);
-    const hasAlert = rec.overLimitRisk || rec.urgentMinimumDue || rec.suggestedExtraPayment > 0;
-    return { card, balance, rec, hasAlert };
-  }).sort((a, b) => (a.hasAlert === b.hasAlert ? 0 : a.hasAlert ? -1 : 1));
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-2xl bg-white shadow p-4">
-        <h2 className="font-bold text-slate-700 text-sm mb-3">Current Balances</h2>
-        <div className="flex flex-wrap gap-2">
-          {cardsWithRecs.map(({ card, balance, hasAlert }) => (
-            <div key={card.id} className="rounded-lg px-3 py-2 border-2" style={hasAlert ? { backgroundColor: "#fee2e2", borderColor: "#991b1b" } : { backgroundColor: "#f8fafc", borderColor: "#cbd5e1" }}>
-              <p className="text-xs font-semibold" style={{ color: hasAlert ? "#991b1b" : "#475569" }}>{hasAlert ? "⚠️ " : ""}{card.name}</p>
-              <p className="text-base font-bold" style={{ color: hasAlert ? "#991b1b" : "#1e293b" }}>${formatMoney(balance)}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {cardsWithRecs.map(({ card, balance, rec }) => {
-        const linkedAccount = cashAccounts.find((a) => a.id === card.linkedCashAccountId);
-        const cardCharges = charges.filter((c) => c.creditCardId === card.id && c.active);
-
-        return (
-          <div key={card.id} className="rounded-2xl bg-white shadow p-5">
-            <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
-              <div>
-                <h3 className="font-bold text-slate-700">{card.name}</h3>
-                <p className="text-xs text-slate-400">Pays from {linkedAccount?.name ?? "—"} · Closes ~day {card.approxClosingDay} ({rec.daysUntilClosing}d) · Due day {card.dueDay} ({rec.daysUntilDue}d)</p>
-              </div>
-              <div className="text-right">
-                <p className="text-2xl font-bold text-slate-700">${formatMoney(balance)}</p>
-                <p className="text-xs text-slate-500">${formatMoney(rec.availableCredit)} available of ${formatMoney(card.creditLimit)}</p>
-              </div>
-            </div>
-
-            {rec.overLimitRisk && (
-              <div className="rounded-lg p-3 mb-3 bg-red-50 border border-red-200">
-                <p className="text-sm font-semibold text-red-700">🚨 Projected to approach the credit limit within 14 days (est. ${formatMoney(rec.projectedBalance)} of ${formatMoney(card.creditLimit)}). Pay down now.</p>
-              </div>
-            )}
-            {rec.urgentMinimumDue && (
-              <div className="rounded-lg p-3 mb-3 bg-amber-50 border border-amber-200">
-                <p className="text-sm font-semibold text-amber-800">⏰ Payment due in {rec.daysUntilDue} day{rec.daysUntilDue === 1 ? "" : "s"} — minimum ${formatMoney(card.minimumPayment)}, scheduled AutoPay ${formatMoney(card.autopayAmount)}.</p>
-              </div>
-            )}
-            {rec.suggestedExtraPayment > 0 && !rec.overLimitRisk && (
-              <div className="rounded-lg p-3 mb-3 bg-blue-50 border border-blue-200">
-                <p className="text-sm text-blue-800">💰 {linkedAccount?.name} has spare cash flow — consider an extra ${formatMoney(rec.suggestedExtraPayment)} paydown toward the ${formatMoney(rec.statementBalance)} statement balance to avoid interest.</p>
-              </div>
-            )}
-
-            <div className="grid gap-3 sm:grid-cols-2 mb-3">
-              <div>
-                <label className="block text-sm text-slate-800 font-semibold mb-1">
-                  Update Current Balance
-                  <span className="block text-xs font-normal text-slate-400 mt-0.5">
-                    {latestBalances[card.name] ? `Last updated ${new Date(latestBalances[card.name].checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}
-                  </span>
-                </label>
-                <div className="flex items-center gap-2">
-                  <input type="number" onFocus={(e) => e.target.select()} value={balanceInputs[card.id] ?? String(balance)} onChange={(e) => setBalanceInputs((f) => ({ ...f, [card.id]: e.target.value }))}
-                    placeholder="New balance" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                  <button onClick={() => handleUpdateBalance(card)} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white whitespace-nowrap hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Update</button>
-                </div>
-                <BalanceHistoryList accountName={card.name} refreshAll={refreshAll} />
-              </div>
-              <div>
-                <label className="block text-sm mb-1">
-                  <span className={rec.statementStale ? "text-amber-600 font-semibold" : "text-slate-800 font-semibold"}>
-                    Statement Balance {rec.statementStale ? "⚠️ Update due" : `— $${formatMoney(card.statementBalance)}`}
-                  </span>
-                  <span className="block text-xs font-normal text-slate-400 mt-0.5">
-                    {card.statementBalanceUpdatedAt ? `Last updated ${new Date(card.statementBalanceUpdatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Never entered"}
-                  </span>
-                </label>
-                <div className="flex items-center gap-2">
-                  <input type="number" onFocus={(e) => e.target.select()} value={stmtInputs[card.id] ?? String(card.statementBalance)} onChange={(e) => setStmtInputs((f) => ({ ...f, [card.id]: e.target.value }))}
-                    placeholder="From latest statement" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
-                  <button onClick={() => handleUpdateStatement(card)} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-white whitespace-nowrap hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Update</button>
-                </div>
-              </div>
-            </div>
-
-            <button onClick={() => setExpandedCard(expandedCard === card.id ? null : card.id)} className="text-xs text-orange-500 hover:underline">
-              {expandedCard === card.id ? "Hide" : "Show"} recurring charges on this card ({cardCharges.length})
-            </button>
-
-            {expandedCard === card.id && (
-              <div className="mt-3 pt-3 border-t border-slate-100">
-                <div className="space-y-1 mb-3">
-                  {cardCharges.map((c) => (
-                    <div key={c.id} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-3 py-1.5">
-                      <span className="text-slate-600">{c.vendor} — ~day {c.approxDayOfMonth}{c.notes ? ` · ${c.notes}` : ""}</span>
-                      <span className="flex items-center gap-2">
-                        <span className="font-semibold text-slate-700">${formatMoney(c.typicalAmount)}</span>
-                        <button onClick={() => handleRemoveCharge(c.id)} className="text-red-400 hover:underline">✕</button>
-                      </span>
-                    </div>
-                  ))}
-                  {cardCharges.length === 0 && <p className="text-xs text-slate-400">No recurring charges logged for this card yet.</p>}
-                </div>
-                <div className="grid gap-2 sm:grid-cols-4">
-                  <input type="text" value={chargeForm.vendor} onChange={(e) => setChargeForm((f) => ({ ...f, vendor: e.target.value }))} placeholder="Vendor" className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" />
-                  <input type="number" onFocus={(e) => e.target.select()} value={chargeForm.typicalAmount} onChange={(e) => setChargeForm((f) => ({ ...f, typicalAmount: e.target.value }))} placeholder="Amount" className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" />
-                  <input type="number" onFocus={(e) => e.target.select()} value={chargeForm.approxDayOfMonth} onChange={(e) => setChargeForm((f) => ({ ...f, approxDayOfMonth: e.target.value }))} placeholder="Day of month" className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" />
-                  <button onClick={() => handleAddCharge(card.id)} className="rounded-lg px-2 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#e8622a" }}>Add Charge</button>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ---------------- Weekly Review Panel ----------------
 
 function OverviewPanel({ cashAccounts, cards, charges, allBills, allPayments, latestBalances, onViewArDetails }: {
@@ -1406,8 +1225,10 @@ export default function CashFlowPage() {
 
   useEffect(() => { refresh(); }, []);
 
-  async function refresh() {
-    setLoading(true);
+  // quiet = reload the data without blanking the page, so open histories and
+  // expanded rows on the Weekly Update tab stay put after a save.
+  async function refresh(quiet = false) {
+    if (!quiet) setLoading(true);
     const today = todayStr();
     const monthStart = today.slice(0, 8) + "01";
     const rangeEnd = addDays(today, WINDOW_DAYS);
@@ -1474,8 +1295,7 @@ export default function CashFlowPage() {
                 <button key={a.id} onClick={() => setActiveTab(a.id)} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                   style={activeTab === a.id ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>{a.name}</button>
               ))}
-              <button onClick={() => setActiveTab("cards")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
-                style={activeTab === "cards" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Credit Cards</button>
+              
               <button onClick={() => setActiveTab("trends")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "trends" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Trends</button>
             </div>
@@ -1483,14 +1303,12 @@ export default function CashFlowPage() {
             {cashAccounts.map((a) => activeTab === a.id && (
               <AccountPanel key={a.id} account={a} allBills={bills} allPayments={payments} latestBalances={latestBalances} cards={creditCards} refreshAll={refresh} />
             ))}
-            {activeTab === "cards" && (
-              <CreditCardsPanel cards={creditCards} charges={cardCharges} cashAccounts={cashAccounts} latestBalances={latestBalances} allBills={bills} allPayments={payments} refreshAll={refresh} />
-            )}
             {activeTab === "overview" && (
               <OverviewPanel cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setActiveTab("entry")} />
             )}
             {activeTab === "entry" && (
-              <WeeklyUpdatePanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={refresh}
+              <WeeklyUpdatePanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={() => refresh(true)}
+                charges={cardCharges} allBills={bills} allPayments={payments}
                 debtMonthlyCollections={debtMonthlyCollections} />
             )}
             {activeTab === "trends" && (
