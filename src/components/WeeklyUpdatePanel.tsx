@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatUSD } from "@/lib/format";
 import DebtPanel from "@/components/DebtPanel";
 import { previousMonth } from "@/lib/staleness";
 import CardChargesPanel from "@/components/CardChargesPanel";
@@ -10,7 +10,7 @@ import { Debt } from "@/lib/debt";
 import { HistoryBlock, HistoryButton, MonthSelect, NumInput, UpdatedStamp, monthLabel, HistRow } from "@/components/CashHistory";
 import {
   CashAccount, CreditCard, CardCharge, RecurringBill, BillPayment, BalanceCheck, WeeklyCashReview, ArAgingEntry, BankStatementEntry, GoalProgress,
-  addBalanceCheck, loadBalanceHistoryForAccount, deleteBalanceCheck,
+  addBalanceCheck, loadBalanceHistoryForAccount, deleteBalanceCheck, updateBalanceCheckAmount, updateBankStatementEntryAmount,
   updateBankStatementBalance, loadStatementHistoryForAccount, backfillBankStatementMonth, deleteBankStatementEntry,
   loadLatestWeeklyReview, loadWeeklyReviewHistory, saveWeeklyReview, deleteWeeklyReview,
   loadLatestArAging, loadArAgingHistory, saveArAgingEntry, deleteArAgingEntry,
@@ -305,14 +305,16 @@ export default function WeeklyUpdatePanel({
                             load: async () => (await loadBalanceHistoryForAccount(acct.name, 60)).map((b): HistRow => ({
                               id: b.id,
                               label: new Date(b.checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }),
-                              value: `$${formatMoney(b.balance)}`,
+                              value: formatUSD(b.balance), amount: b.balance,
+                              onAmount: (n) => updateBalanceCheckAmount(b.id, n),
                               onDelete: () => deleteBalanceCheck(b.id),
                             })),
                           },
                           {
                             title: "Statement balance — by month covered",
                             load: async () => (await loadStatementHistoryForAccount(acct.id)).map((s): HistRow => ({
-                              id: s.id, label: monthLabel(s.month), month: s.month, value: `$${formatMoney(s.balance)}`,
+                              id: s.id, label: monthLabel(s.month), month: s.month, value: formatUSD(s.balance), amount: s.balance,
+                              onAmount: (n) => updateBankStatementEntryAmount(s.id, n),
                               onMonth: async (m) => {
                                 const clash = (await loadStatementHistoryForAccount(acct.id)).find((x) => x.month === m && x.id !== s.id);
                                 if (clash && !confirm(`${monthLabel(m)} already has a statement on file ($${formatMoney(clash.balance)}). Replace it with $${formatMoney(s.balance)}?`)) return;
