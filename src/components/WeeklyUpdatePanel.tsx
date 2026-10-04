@@ -242,97 +242,10 @@ export default function WeeklyUpdatePanel({
 
   return (
     <div className="space-y-3">
-      {/* ---------- Account balances (bank accounts; cards live in Debt below) ---------- */}
-      <div className={card}>
-        <div className={hdr}>
-          <h2 className="font-bold text-sm text-slate-700">Account Balances</h2>
-          <div className="flex items-center gap-2">
-            {balancesDirty && <span className="text-xs text-red-600 font-semibold">⚠️ unsaved</span>}
-            {balancesSaved && <span className="text-xs text-emerald-600 font-semibold">✓ Saved</span>}
-            <button onClick={handleSaveBalances} disabled={savingBalances || !balancesDirty}
-              className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-40" style={saveBtn(balancesDirty)}>
-              {savingBalances ? "Saving…" : "Save Balances"}
-            </button>
-          </div>
-        </div>
-        {balancesError && <p className="text-xs text-red-600 font-semibold mb-1">{balancesError}</p>}
-        <div className="overflow-x-auto">
-          <div style={{ minWidth: 560 }}>
-            <div className="grid items-end gap-x-2 text-[11px] text-slate-400 font-medium border-b border-slate-100 pb-1" style={{ gridTemplateColumns: BANK_GRID }}>
-              <span>Account</span><span>Current bal.</span><span>Statement Balance</span><span>Last update</span><span />
-            </div>
-            {cashAccounts.map((acct) => {
-              const hist = bankHist[acct.id] ?? [];
-              const latestMonth = hist[0]?.month;
-              const covered = previousMonth();
-              const selMonth = bankMonths[acct.id] ?? latestMonth ?? covered;
-              const entryForSel = hist.find((h) => h.month === selMonth);
-              const newerDue = latestMonth != null && covered > latestMonth && selMonth !== covered;
-              const histOpen = openBankHist === acct.id;
-              const last = latestBalances[acct.name];
-              return (
-                <div key={acct.id} className="border-b border-slate-50 last:border-0">
-                  <div className="grid items-center gap-x-2 text-xs py-1" style={{ gridTemplateColumns: BANK_GRID }}>
-                    <span className="font-medium text-slate-700 truncate" title={acct.name}>{acct.name}</span>
-                    <NumInput onFocus={(e) => e.target.select()} className={inp}
-                      value={balanceInputs[acct.id] ?? String(last?.balance ?? 0)}
-                      onChange={(e) => setBalanceInputs((f) => ({ ...f, [acct.id]: e.target.value }))} />
-                    <span className="flex items-center gap-1">
-                      <MonthSelect value={selMonth} className="w-[74px] shrink-0"
-                        onChange={(m) => {
-                          setBankMonths((s) => ({ ...s, [acct.id]: m }));
-                          setStmtInputs((s) => { const c = { ...s }; delete c[acct.id]; return c; });
-                        }} />
-                      <NumInput onFocus={(e) => e.target.select()} className={inp} placeholder="—"
-                        value={stmtInputs[acct.id] ?? (entryForSel ? String(entryForSel.balance) : "")}
-                        onChange={(e) => setStmtInputs((f) => ({ ...f, [acct.id]: e.target.value }))} />
-                      {newerDue && (
-                        <button title={`A ${monthLabel(covered)} statement should be out — click to enter it`}
-                          onClick={() => setBankMonths((s) => ({ ...s, [acct.id]: covered }))}
-                          className="text-[10px] font-semibold text-amber-600 whitespace-nowrap hover:underline">{monthLabel(covered).split(" ")[0]}?</button>
-                      )}
-                    </span>
-                    <UpdatedStamp prefix="" when={bankWhen(acct.id, last?.checkedAt)} />
-                    <span className="text-right"><HistoryButton open={histOpen} onClick={() => setOpenBankHist(histOpen ? null : acct.id)} /></span>
-                  </div>
-                  {histOpen && (
-                    <div className="pb-2">
-                      <HistoryBlock
-                        onChanged={() => { loadBankStatements(); refreshAll(); }}
-                        columns={[
-                          {
-                            title: "Current balance",
-                            load: async () => (await loadBalanceHistoryForAccount(acct.name, 60)).map((b): HistRow => ({
-                              id: b.id,
-                              label: new Date(b.checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }),
-                              value: formatUSD(b.balance), amount: b.balance,
-                              onAmount: (n) => updateBalanceCheckAmount(b.id, n),
-                              onDelete: () => deleteBalanceCheck(b.id),
-                            })),
-                          },
-                          {
-                            title: "Statement balance — by month covered",
-                            load: async () => (await loadStatementHistoryForAccount(acct.id)).map((s): HistRow => ({
-                              id: s.id, label: monthLabel(s.month), month: s.month, value: formatUSD(s.balance), amount: s.balance,
-                              onAmount: (n) => updateBankStatementEntryAmount(s.id, n),
-                              onMonth: async (m) => {
-                                const clash = (await loadStatementHistoryForAccount(acct.id)).find((x) => x.month === m && x.id !== s.id);
-                                if (clash && !confirm(`${monthLabel(m)} already has a statement on file ($${formatMoney(clash.balance)}). Replace it with $${formatMoney(s.balance)}?`)) return;
-                                await backfillBankStatementMonth(acct.id, m, s.balance);
-                                await deleteBankStatementEntry(s.id);
-                              },
-                              onDelete: () => deleteBankStatementEntry(s.id),
-                            })),
-                          },
-                        ]}
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      {/* Setup and recurring numbers live here. Balances and statements are updated on the Overview cards
+          (or with Update Numbers Now), so there is one place for each. */}
+      <div className="rounded-xl px-4 py-2.5 text-sm" style={{ background: "#e6f1f9", color: "#0c4a6e" }}>
+        This tab is for setting up accounts and changing their recurring details: rates, payments, where each is paid from, original amounts. Update balances and statements on the <strong>Overview</strong> cards, or with <strong>Update Numbers Now</strong>.
       </div>
 
       {/* ---------- Open Dental numbers — one row ---------- */}
