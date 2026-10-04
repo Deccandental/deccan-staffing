@@ -1461,15 +1461,24 @@ function HoBonusPanel() {
       {loading ? <p className="text-slate-400 text-sm">Loading…</p> : sortedYears.map((year) => {
         const yearRows = rows[year] ?? [];
         const isExpanded = expanded.has(year);
+        // Paid comes from the dated payments, the same figures the month rows and Cash Flow use.
+        // (The old single "paid" column on each month can go stale once payments are logged
+        // by date, which made this header disagree with the rows below it.)
         const yearTotals = yearRows.reduce((acc, m) => ({
-          income: acc.income + m.production, owed: acc.owed + m.production * 0.4, paid: acc.paid + m.paid,
+          income: acc.income + m.production, owed: acc.owed + m.production * 0.4,
+          paid: acc.paid + hoPayments.filter((pay) => pay.datePaid.startsWith(`${m.year}-${String(m.month).padStart(2, "0")}`)).reduce((sum, pay) => sum + pay.amount, 0),
         }), { income: 0, owed: 0, paid: 0 });
+        // What is still owed after each month, carried forward. A month where more was
+        // paid than earned just draws down the earlier shortfall rather than showing as
+        // "nothing owed".
+        let runningOwed = 0;
+        const yearNet = yearTotals.owed - yearTotals.paid;
         return (
           <div key={year} className="rounded-xl bg-white shadow-sm overflow-hidden">
             <button onClick={() => toggleExpanded(year)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition">
               <span className="font-bold text-slate-700">{year}</span>
               <div className="flex items-center gap-3">
-                <span className="text-xs text-slate-400 hidden sm:inline">Income ${formatMoney(yearTotals.income)} · 40% ${formatMoney(yearTotals.owed)} · Paid ${formatMoney(yearTotals.paid)}</span>
+                <span className="text-xs text-slate-400 hidden sm:inline">Income ${formatMoney(yearTotals.income)} · 40% ${formatMoney(yearTotals.owed)} · Paid ${formatMoney(yearTotals.paid)} · {yearNet >= 0.005 ? "Owed" : yearNet <= -0.005 ? "Overpaid" : "Even"} {Math.abs(yearNet) >= 0.005 ? <strong>${formatMoney(Math.abs(yearNet))}</strong> : null}</span>
                 <span className="text-slate-300 text-xs">{isExpanded ? "▲" : "▼"}</span>
               </div>
             </button>
@@ -1483,7 +1492,8 @@ function HoBonusPanel() {
                         <th className="px-2 py-2 font-medium">Production</th>
                         <th className="px-2 py-2 font-medium">40%</th>
                         <th className="px-2 py-2 font-medium">Paid</th>
-                        <th className="px-2 py-2 font-medium">Balance</th>
+                        <th className="px-2 py-2 font-medium" title="This month's 40% minus the payments dated in this month">This month +/&minus;</th>
+                        <th className="px-2 py-2 font-medium" title="Everything earned so far minus everything paid so far">Total owed so far</th>
                         <th className="px-3 py-2 font-medium">Notes</th>
                       </tr>
                     </thead>
@@ -1496,13 +1506,15 @@ function HoBonusPanel() {
                         const monthPayments = hoPayments.filter((pay) => pay.datePaid.startsWith(`${m.year}-${String(m.month).padStart(2, "0")}`));
                         const paid = monthPayments.reduce((sum, pay) => sum + pay.amount, 0);
                         const balance = owed - paid;
+                        runningOwed += balance;
+                        const totalSoFar = runningOwed;
                         const key = `${m.year}-${m.month}`;
                         const isOpen = openHoMonth === key;
                         return (
                           <Fragment key={m.month}>
                             <tr className="border-b border-slate-50 last:border-0">
                               <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
-                              <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={m.production} onChange={(e) => updateCell(year, m.month, "production", Number(e.target.value))} className={`${cellClass} w-28`} /></td>
+                              <td className="px-2 py-2"><NumCell value={m.production} onChange={(n) => updateCell(year, m.month, "production", n)} className={`${cellClass} w-28`} /></td>
                               <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
                               <td className="px-2 py-2">
                                 <button onClick={() => setOpenHoMonth(isOpen ? null : key)} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
@@ -1510,11 +1522,12 @@ function HoBonusPanel() {
                                 </button>
                               </td>
                               <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                              <td className={`px-2 py-2 font-bold whitespace-nowrap ${totalSoFar > 0.005 ? "text-amber-700" : totalSoFar < -0.005 ? "text-red-600" : "text-slate-400"}`}>${formatMoney(totalSoFar)}</td>
                               <td className="px-2 py-2"><input type="text" value={m.notes} onChange={(e) => updateCell(year, m.month, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
                             </tr>
                             {isOpen && (
                               <tr className="bg-slate-50/60 border-b border-slate-100">
-                                <td colSpan={6} className="px-4 py-3">
+                                <td colSpan={7} className="px-4 py-3">
                                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Payments in {MONTH_NAMES[m.month - 1]} {m.year}</p>
                                   <div className="space-y-1 mb-2">
                                     {monthPayments.length === 0 && <p className="text-xs text-slate-400 italic">Nothing paid yet this month.</p>}
@@ -1601,6 +1614,15 @@ function HoBonusPanel() {
                       })}
                     </tbody>
                   </table>
+                </div>
+                <div className="px-4 py-3 border-t border-slate-100 text-sm" style={{ background: yearNet > 0.005 ? "#FAEEDA" : yearNet < -0.005 ? "#FCEBEB" : "#f1f5f9" }}>
+                  {yearNet > 0.005 ? (
+                    <span style={{ color: "#854F0B" }}>You still owe {eligibleStaff.find((e) => e.id === employeeId)?.name ?? "her"} <strong>${formatMoney(yearNet)}</strong> for {year}: ${formatMoney(yearTotals.owed)} earned (40% of production) &minus; ${formatMoney(yearTotals.paid)} paid.</span>
+                  ) : yearNet < -0.005 ? (
+                    <span style={{ color: "#A32D2D" }}>Overpaid by <strong>${formatMoney(-yearNet)}</strong> for {year}: ${formatMoney(yearTotals.owed)} earned &minus; ${formatMoney(yearTotals.paid)} paid.</span>
+                  ) : (
+                    <span className="text-slate-600">Paid up for {year}: ${formatMoney(yearTotals.owed)} earned, ${formatMoney(yearTotals.paid)} paid.</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 p-3">
                   <button onClick={() => handleSaveYear(year)} disabled={savingYear === year}
