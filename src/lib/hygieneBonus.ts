@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { Employee } from "@/types/employee";
 
 export const HYGIENE_BONUS_PER_PATIENT = 15;
 
@@ -65,4 +66,13 @@ export function getPayPeriodsInYear(year: number): { start: string; end: string;
     periods.push({ start: `${year}-${pad(month)}-16`, end: `${year}-${pad(month)}-${pad(lastDay)}`, label: `${MONTH_NAMES[month - 1]} 16–${lastDay}`, payDate: payDateFor(year, month, false) });
   }
   return periods;
+}
+
+/**
+ * Whether someone is in the hygiene bonus program: only people ticked
+ * "Eligible for Hygiene Bonus" on the Staff page, the same opt-in as the other
+ * bonus programs. Being a hygienist is not enough on its own.
+ */
+export function isHygieneBonusEligible(e: Pick<Employee, "hygieneBonusEligible">): boolean {
+  return e.hygieneBonusEligible === true;
 }
