@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { supabase } from "@/lib/supabase";
 import { getSessionToken, storeSessionToken, clearSessionToken, hasSessionToken } from "@/lib/secureData";
+import { loadRecurringBills, loadBillPayments, buildOccurrences, addDays, RecurringBill, BillPayment } from "@/lib/cashflow";
 
 /**
  * Monthly statements: a checklist of every account, card and loan against every month, with the PDF
@@ -13,7 +14,7 @@ import { getSessionToken, storeSessionToken, clearSessionToken, hasSessionToken 
 
 type Role = "finance" | "cpa";
 interface Account { kind: "bank" | "card" | "loan" | "vendor"; id: string; name: string; category?: string; startMonth?: string; active?: boolean }
-interface FileRow { dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
+interface FileRow { paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
 
 const ROLE_KEY = "dd_statements_role";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -49,8 +50,14 @@ export default function StatementsPage() {
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
   const [sAmount, setSAmount] = useState("");
+  const [cfBalances, setCfBalances] = useState<Record<string, number>>({});
+  // Invoice matching: scheduled bills to compare against, the match chosen, and the unpaid-only filter
+  const [bills, setBills] = useState<RecurringBill[]>([]);
+  const [billPayments, setBillPayments] = useState<BillPayment[]>([]);
+  const [iMatch, setIMatch] = useState<{ billId: string; dueDate: string; billName: string; amount: number } | null>(null);
+  const [unpaidOnly, setUnpaidOnly] = useState(false);
   // A possible duplicate found before filing: the person can file it anyway or cancel.
-  const [dup, setDup] = useState<{ matches: (FileRow & { reason?: string })[]; proceed: () => void } | null>(null);
+  const [dup, setDup] = useState<{ matches: (FileRow & { reason?: string })[]; note?: string; proceed: () => void } | null>(null);
   // Invoices (a separate list from the monthly statements)
   const [tab, setTab] = useState<"statements" | "invoices">("statements");
   const [invMonth, setInvMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -101,10 +108,22 @@ export default function StatementsPage() {
     setLoading(false);
     if (r.status === 401) { logout(); return; }
     if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load statements."); return; }
-    setAccounts(r.json.accounts ?? []); setFiles(r.json.files ?? []);
+    setAccounts(r.json.accounts ?? []); setFiles(r.json.files ?? []); setCfBalances(r.json.cfBalances ?? {});
   }, [role, year]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setSAmount(""); setDup(null); }, [sel]);
+  // Picking a month fills in the statement balance Cash Flow already holds for it, if there is one.
+  useEffect(() => {
+    setDup(null);
+    const a = sel ? accounts.find((x) => acctKey(x.kind, x.id) === sel.key) : null;
+    const v = a && sel ? cfBalances[`${a.kind}:${a.id}:${sel.month}`] : undefined;
+    setSAmount(v != null ? String(v) : "");
+  }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Scheduled bills, for matching invoices to what is already expected (finance only).
+  useEffect(() => {
+    if (role !== "finance" || !invAdding) return;
+    const t = new Date(); const from = addDays(t.toISOString().slice(0, 10), -75); const to = addDays(t.toISOString().slice(0, 10), 150);
+    loadRecurringBills().then(setBills); loadBillPayments(from, to).then(setBillPayments);
+  }, [role, invAdding]);
 
   // The last month whose statement should be out: last month this year, all of a past year, none of a future one.
   const now = new Date();
@@ -138,7 +157,13 @@ export default function StatementsPage() {
     setBusy(true);
     if (!ignoreDup) {
       const chk = await api("/api/statements/manage", { action: "checkDuplicate", docType: "statement", accountKind: a.kind, accountId: a.id, accountName: a.name, month, amount: sAmount });
-      if (chk.ok && (chk.json.matches ?? []).length > 0) { setBusy(false); setDup({ matches: chk.json.matches, proceed: () => upload(a, month, file, true) }); return; }
+      const cf: number | null | undefined = chk.json.cfBalance;
+      const cfDiffers = cf != null && Math.abs(cf - Number(sAmount)) > 0.004;
+      if (chk.ok && ((chk.json.matches ?? []).length > 0 || cfDiffers)) {
+        setBusy(false);
+        setDup({ matches: chk.json.matches ?? [], note: cfDiffers ? `Cash Flow already has $${Number(cf).toLocaleString("en-US", { minimumFractionDigits: 2 })} as this month's statement balance. Filing this will replace it with $${Number(sAmount).toLocaleString("en-US", { minimumFractionDigits: 2 })}.` : undefined, proceed: () => upload(a, month, file, true) });
+        return;
+      }
     }
     const slot = await api("/api/statements/upload-url", { accountKind: a.kind, accountName: a.name, month, fileName: file.name, size: file.size });
     if (!slot.ok) { setBusy(false); setMsg(slot.json.error ?? "Couldn't start the upload."); return; }
@@ -147,7 +172,7 @@ export default function StatementsPage() {
     const rec = await api("/api/statements/manage", { action: "confirm", path: slot.json.path, accountKind: a.kind, accountId: a.id, accountName: a.name, month, fileName: file.name, size: file.size, amount: sAmount, dupIgnored: ignoreDup });
     setBusy(false);
     if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't record the upload."); return; }
-    setSAmount(""); setMsg(`Filed ${file.name}.`); load();
+    setSAmount(""); setMsg(`Filed ${file.name}.${rec.json.synced ? " Saved as this month's statement balance in Cash Flow." : ""}`); load();
   }
 
   async function markNone(a: Account, month: string) {
@@ -189,11 +214,29 @@ export default function StatementsPage() {
     if (!slot.ok) { setBusy(false); setMsg(slot.json.error ?? "Couldn't start the upload."); return; }
     const up = await supabase.storage.from("statements").uploadToSignedUrl(slot.json.path, slot.json.token, file, { contentType: "application/pdf" });
     if (up.error) { setBusy(false); setMsg(`Upload failed: ${up.error.message}`); return; }
-    const rec = await api("/api/statements/manage", { action: "confirm", docType: "invoice", path: slot.json.path, accountKind: kind, accountId: vendor?.id ?? "", accountName: name, invoiceDate: iDate, invoiceNumber: iNumber, amount: iAmount, fileName: file.name, size: file.size, dupIgnored: ignoreDup });
+    const rec = await api("/api/statements/manage", { action: "confirm", docType: "invoice", path: slot.json.path, accountKind: kind, accountId: vendor?.id ?? "", accountName: name, invoiceDate: iDate, invoiceNumber: iNumber, amount: iAmount, fileName: file.name, size: file.size, dupIgnored: ignoreDup, matchedBillId: iMatch?.billId, matchedDueDate: iMatch?.dueDate });
     setBusy(false);
     if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't record the invoice."); return; }
-    setMsg(`Filed invoice ${iNumber.trim()} from ${name}.`); setINumber(""); setIAmount("");
+    setMsg(`Filed invoice ${iNumber.trim()} from ${name}.`); setINumber(""); setIAmount(""); setIMatch(null);
     if (iDate.slice(0, 7) !== invMonth) setInvMonth(iDate.slice(0, 7)); else loadInvoices();
+  }
+
+  async function setInvoicePaid(f: FileRow, paid: boolean) {
+    let paidDate = "";
+    if (paid) {
+      paidDate = window.prompt("Date paid (YYYY-MM-DD):", new Date().toISOString().slice(0, 10)) ?? "";
+      if (!paidDate) return;
+    }
+    setBusy(true);
+    const r = await api("/api/statements/manage", { action: "markInvoicePaid", id: f.id, paid, paidDate });
+    setBusy(false);
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
+    loadInvoices();
+  }
+  async function unlinkInvoice(f: FileRow) {
+    const r = await api("/api/statements/manage", { action: "matchInvoice", id: f.id, billId: null });
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
+    loadInvoices();
   }
 
   async function removeInvoice(f: FileRow) {
@@ -259,7 +302,8 @@ export default function StatementsPage() {
   const money = (n: number | null | undefined) => (n == null ? "no amount" : `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
   const dupBanner = dup && (
     <div className="rounded-xl px-4 py-3 text-sm space-y-1" style={{ background: "#FAEEDA", color: "#854F0B", border: "1px solid #f2d3a0" }}>
-      <p className="font-semibold">⚠️ Possible duplicate</p>
+      <p className="font-semibold">⚠️ {dup.matches.length > 0 ? "Possible duplicate" : "Please check"}</p>
+      {dup.note && <p>{dup.note}</p>}
       {dup.matches.map((m) => (
         <p key={m.id}>
           {m.account_name}{m.doc_type === "invoice" ? ` · invoice ${m.invoice_number || "(no number)"} · ${m.invoice_date ?? ""}` : ` · ${m.month}`} · {money(m.amount)} · filed {new Date(m.uploaded_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })} by {m.uploaded_by}
@@ -272,6 +316,25 @@ export default function StatementsPage() {
       </div>
     </div>
   );
+
+  const STOP = new Set(["the", "inc", "llc", "corp", "company", "payment", "bill", "and", "for", "dental"]);
+  const toks = (t: string) => t.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length >= 3 && !STOP.has(x));
+  const invVendorName = (invVendors.find((v) => v.id === iVendor)?.name ?? iOther).trim();
+  const suggestions = (() => {
+    if (!invAdding || !invVendorName || !iDate || bills.length === 0) return [];
+    const vt = toks(invVendorName); if (vt.length === 0) return [];
+    const amt = Number(iAmount); const target = new Date(iDate + "T00:00:00").getTime();
+    const out: { bill: RecurringBill; dueDate: string; overlap: number; diff: number | null }[] = [];
+    for (const b of bills) {
+      if (!b.active || b.direction !== "outflow" || b.linkedCreditCardId || b.linkedDebtId) continue;
+      const bt = toks(b.name); const overlap = vt.filter((t) => bt.includes(t)).length; if (!overlap) continue;
+      const occ = buildOccurrences([b], billPayments, addDays(iDate, -25), addDays(iDate, 45)).filter((o) => !o.isPaid)
+        .sort((x, y) => Math.abs(new Date(x.dueDate + "T00:00:00").getTime() - target) - Math.abs(new Date(y.dueDate + "T00:00:00").getTime() - target))[0];
+      if (!occ) continue;
+      out.push({ bill: b, dueDate: occ.dueDate, overlap, diff: amt > 0 && b.estimatedAmount > 0 ? Math.abs(amt - b.estimatedAmount) / b.estimatedAmount : null });
+    }
+    return out.sort((a, z) => z.overlap - a.overlap || (a.diff ?? 9) - (z.diff ?? 9)).slice(0, 3);
+  })();
 
   const selAccount = sel ? accounts.find((a) => acctKey(a.kind, a.id) === sel.key) : null;
   const selFiles = selAccount && sel ? filesFor(selAccount.kind, selAccount.id, sel.month) : [];
@@ -309,6 +372,7 @@ export default function StatementsPage() {
           <label className="text-sm font-semibold text-slate-600">Month</label>
           <input type="month" value={invMonth} onChange={(e) => e.target.value && setInvMonth(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
           <input value={invSearch} onChange={(e) => setInvSearch(e.target.value)} placeholder="Search vendor or invoice #…" className="w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
+          <label className="flex items-center gap-1.5 text-sm text-slate-600"><input type="checkbox" checked={unpaidOnly} onChange={(e) => setUnpaidOnly(e.target.checked)} /> Unpaid only</label>
         </div>
         {loadError && <p className="text-sm text-red-600 font-semibold">⚠️ {loadError}</p>}
 
@@ -345,6 +409,23 @@ export default function StatementsPage() {
                     <input type="number" step="0.01" value={iAmount} onChange={(e) => setIAmount(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 120 }} />
                   </div>
                 </div>
+                {iMatch ? (
+                  <div className="rounded-lg px-3 py-2 text-sm" style={{ background: "#dbeafe", color: "#1e4e8c" }}>
+                    Linked to scheduled bill <strong>{iMatch.billName}</strong> (${iMatch.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}, due {new Date(iMatch.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}). It won't be counted twice in Need to collect.
+                    <button onClick={() => setIMatch(null)} className="ml-2 underline font-semibold">Unlink</button>
+                  </div>
+                ) : suggestions.length > 0 && (
+                  <div className="rounded-lg px-3 py-2 text-sm space-y-1" style={{ background: "#eef6ff", color: "#1e4e8c" }}>
+                    <p className="font-semibold">This may be a bill you've already scheduled:</p>
+                    {suggestions.map((sg) => (
+                      <p key={sg.bill.id}>
+                        {sg.bill.name} — ${sg.bill.estimatedAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}, due {new Date(sg.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        {sg.diff != null && sg.diff <= 0.25 ? " (amount is close)" : sg.diff != null ? " (amount differs)" : ""}
+                        <button onClick={() => setIMatch({ billId: sg.bill.id, dueDate: sg.dueDate, billName: sg.bill.name, amount: sg.bill.estimatedAmount })} className="ml-2 underline font-semibold">Link this invoice to it</button>
+                      </p>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
                   <label className="rounded-lg px-4 py-2 text-sm font-semibold text-white cursor-pointer hover:opacity-90" style={{ backgroundColor: "#e8622a", opacity: busy ? 0.5 : 1 }}>
                     {busy ? "Working…" : "Choose PDF and file it"}
@@ -362,7 +443,7 @@ export default function StatementsPage() {
 
         {(() => {
           const q = invSearch.trim().toLowerCase();
-          const shown = invFiles.filter((f) => !q || f.account_name.toLowerCase().includes(q) || (f.invoice_number ?? "").toLowerCase().includes(q));
+          const shown = invFiles.filter((f) => (!unpaidOnly || !f.paid) && (!q || f.account_name.toLowerCase().includes(q) || (f.invoice_number ?? "").toLowerCase().includes(q)));
           const total = shown.reduce((n, f) => n + (f.amount ?? 0), 0);
           const withAmount = shown.filter((f) => f.amount != null).length;
           return (
@@ -371,7 +452,7 @@ export default function StatementsPage() {
                 <thead>
                   <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
                     <th className="px-4 py-2 font-medium">Date</th><th className="px-2 py-2 font-medium">Vendor</th><th className="px-2 py-2 font-medium">Invoice #</th>
-                    <th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Filed by</th><th className="px-2 py-2" />
+                    <th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2" />
                   </tr>
                 </thead>
                 <tbody>
@@ -382,7 +463,14 @@ export default function StatementsPage() {
                       <td className="px-2 py-1.5 font-medium text-slate-700">{f.account_name}</td>
                       <td className="px-2 py-1.5 text-slate-600">{f.invoice_number || "—"}{f.dup_ignored && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "#FAEEDA", color: "#854F0B" }} title="Filed even though the app warned it might be a duplicate">dup?</span>}</td>
                       <td className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{f.amount != null ? `$${Number(f.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
-                      <td className="px-2 py-1.5 text-xs text-slate-400 whitespace-nowrap">{f.uploaded_by}</td>
+                      <td className="px-2 py-1.5 text-xs whitespace-nowrap">
+                        {f.paid ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#e7f6ec", color: "#166534" }}>Paid{f.paid_date ? ` ${new Date(f.paid_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</span>
+                          : f.matched_bill_id ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#dbeafe", color: "#1e4e8c" }} title="Counted through its scheduled bill">Scheduled bill{f.matched_due_date ? ` · ${new Date(f.matched_due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</span>
+                          : <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#fef3c7", color: "#92400e" }}>Unpaid</span>}
+                        {finance && !f.paid && <button onClick={() => setInvoicePaid(f, true)} disabled={busy} className="ml-2 underline text-slate-500 hover:text-slate-700">Mark paid</button>}
+                        {finance && f.paid && <button onClick={() => setInvoicePaid(f, false)} disabled={busy} className="ml-2 underline text-slate-400 hover:text-slate-600">Undo</button>}
+                        {finance && f.matched_bill_id && !f.paid && <button onClick={() => unlinkInvoice(f)} className="ml-2 underline text-slate-400 hover:text-slate-600">Unlink</button>}
+                      </td>
                       <td className="px-2 py-1.5 text-right whitespace-nowrap">
                         <button onClick={() => download(f)} className="rounded-lg px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: "#0f766e" }}>Download</button>
                         {finance && <button onClick={() => removeInvoice(f)} disabled={busy} className="ml-3 text-xs text-red-500 hover:underline">Remove</button>}
