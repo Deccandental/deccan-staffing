@@ -14,7 +14,7 @@ import { loadRecurringBills, loadBillPayments, buildOccurrences, addDays, Recurr
 
 type Role = "finance" | "cpa";
 interface Account { kind: "bank" | "card" | "loan" | "vendor"; id: string; name: string; category?: string; startMonth?: string; active?: boolean }
-interface FileRow { category?: string; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
+interface FileRow { paid_from_name?: string; paid_note?: string; category?: string; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
 
 const ROLE_KEY = "dd_statements_role";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -60,6 +60,11 @@ export default function StatementsPage() {
   const [iMatch, setIMatch] = useState<{ billId: string; dueDate: string; billName: string; amount: number } | null>(null);
   const [unpaidOnly, setUnpaidOnly] = useState(false);
   const [iCategory, setICategory] = useState("");
+  // "Mark paid" dialog: the invoice, the date, the account it was paid from, and a note
+  const [payFor, setPayFor] = useState<FileRow | null>(null);
+  const [payDate, setPayDate] = useState("");
+  const [payFrom, setPayFrom] = useState("");
+  const [payNote, setPayNote] = useState("");
   const [pending, setPending] = useState<FileRow[]>([]);   // every unpaid invoice, across all months
   // Vendor directory
   const [vendorsAll, setVendorsAll] = useState<{ id: string; name: string; category: string; active: boolean; expectsStatement: boolean }[]>([]);
@@ -78,7 +83,7 @@ export default function StatementsPage() {
   const [invFiles, setInvFiles] = useState<FileRow[]>([]);
   const [invVendors, setInvVendors] = useState<{ id: string; name: string; category: string }[]>([]);
   const [invSearch, setInvSearch] = useState("");
-  const [invAdding, setInvAdding] = useState(false);
+  const [invAdding, setInvAdding] = useState(true);
   const [iVendor, setIVendor] = useState("");
   const [iOther, setIOther] = useState("");
   const [iDate, setIDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -148,10 +153,10 @@ export default function StatementsPage() {
   }, [iVendor, invVendors]);
   // Scheduled bills, for matching invoices to what is already expected (finance only).
   useEffect(() => {
-    if (role !== "finance" || !invAdding) return;
+    if (role !== "finance" || !invAdding || tab !== "invoices") return;
     const t = new Date(); const from = addDays(t.toISOString().slice(0, 10), -75); const to = addDays(t.toISOString().slice(0, 10), 150);
     loadRecurringBills().then(setBills); loadBillPayments(from, to).then(setBillPayments);
-  }, [role, invAdding]);
+  }, [role, invAdding, tab]);
 
   // The last month whose statement should be out: last month this year, all of a past year, none of a future one.
   const now = new Date();
@@ -266,18 +271,32 @@ export default function StatementsPage() {
     if (iDate.slice(0, 7) !== invMonth) setInvMonth(iDate.slice(0, 7)); else loadInvoices();
   }
 
-  async function setInvoicePaid(f: FileRow, paid: boolean) {
-    let paidDate = "";
-    if (paid) {
-      paidDate = window.prompt("Date paid (YYYY-MM-DD):", new Date().toISOString().slice(0, 10)) ?? "";
-      if (!paidDate) return;
-    }
+  // Marking paid opens a small dialog (date, which account, note). Undo needs no questions.
+  function openPay(f: FileRow) {
+    setPayFor(f); setPayDate(new Date().toISOString().slice(0, 10)); setPayNote("");
+    setPayFrom((cur) => cur || (() => { const first = accounts.find((a) => a.kind === "bank"); return first ? `bank:${first.id}` : "other"; })());
+  }
+  async function confirmPay() {
+    if (!payFor) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(payDate)) { setMsg("Enter the date paid."); return; }
+    const acct = accounts.find((a) => `${a.kind}:${a.id}` === payFrom);
     setBusy(true);
-    const r = await api("/api/statements/manage", { action: "markInvoicePaid", id: f.id, paid, paidDate });
+    const r = await api("/api/statements/manage", {
+      action: "markInvoicePaid", id: payFor.id, paid: true, paidDate: payDate,
+      paidFromKind: acct ? acct.kind : "other", paidFromId: acct?.id ?? "", paidFromName: acct ? acct.name : "Other", paidNote: payNote,
+    });
+    setBusy(false);
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
+    setPayFor(null); loadInvoices();
+  }
+  async function undoPaid(f: FileRow) {
+    setBusy(true);
+    const r = await api("/api/statements/manage", { action: "markInvoicePaid", id: f.id, paid: false });
     setBusy(false);
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
     loadInvoices();
   }
+
   async function newCategory(): Promise<string> {
     const c = (window.prompt("New category name:") ?? "").trim().slice(0, 40);
     if (c) setUsedCategories((u) => (u.includes(c) ? u : [...u, c]));
@@ -290,6 +309,7 @@ export default function StatementsPage() {
     const r = await api("/api/statements/manage", { action: "setInvoiceCategory", id: f.id, category });
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't save the category."); loadInvoices(); }
   }
+
   async function updateVendor(id: string, patch: Record<string, unknown>) {
     const r = await api("/api/statements/manage", { action: "updateSource", id, ...patch });
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't update the vendor."); return; }
@@ -418,6 +438,37 @@ export default function StatementsPage() {
     </div>
   );
 
+  const payOptions = accounts.filter((a) => a.kind === "bank" || a.kind === "card");
+  const payDialog = payFor && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.35)" }}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-3">
+        <h3 className="font-bold text-slate-800">Mark invoice paid</h3>
+        <p className="text-sm text-slate-500">{payFor.account_name}{payFor.invoice_number ? ` · #${payFor.invoice_number}` : ""} · {money(payFor.amount)}</p>
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">Date paid</label>
+          <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">Paid from</label>
+          <select value={payFrom} onChange={(e) => setPayFrom(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+            <optgroup label="Bank accounts">{payOptions.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
+            <optgroup label="Credit cards">{payOptions.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
+            <option value="other">Other (cash, owner, etc.)</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">Note (optional)</label>
+          <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Check number, ACH, etc." className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+        </div>
+        <p className="text-xs text-slate-400">This records where it was paid from. It doesn't change any balance, so update that account's balance as usual.</p>
+        <div className="flex items-center gap-3 pt-1">
+          <button onClick={confirmPay} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>{busy ? "Saving…" : "Mark paid"}</button>
+          <button onClick={() => setPayFor(null)} className="text-sm text-slate-400 hover:underline">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+
   const selAccount = sel ? accounts.find((a) => acctKey(a.kind, a.id) === sel.key) : null;
   const selFiles = selAccount && sel ? filesFor(selAccount.kind, selAccount.id, sel.month) : [];
   const monthLabel = (m: string) => `${MONTHS[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`;
@@ -448,6 +499,7 @@ export default function StatementsPage() {
         ))}
       </div>
 
+      {payDialog}
       {pendingBanner}
 
       {tab === "invoices" ? (
@@ -605,11 +657,11 @@ export default function StatementsPage() {
                       <td className="px-2 py-1.5 text-slate-600">{f.invoice_number || "—"}{f.dup_ignored && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "#FAEEDA", color: "#854F0B" }} title="Filed even though the app warned it might be a duplicate">dup?</span>}</td>
                       <td className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{f.amount != null ? `$${Number(f.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
                       <td className="px-2 py-1.5 text-xs whitespace-nowrap">
-                        {f.paid ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#e7f6ec", color: "#166534" }}>Paid{f.paid_date ? ` ${new Date(f.paid_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</span>
+                        {f.paid ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#e7f6ec", color: "#166534" }} title={f.paid_note || undefined}>Paid{f.paid_date ? ` ${new Date(f.paid_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}{f.paid_from_name ? ` · ${f.paid_from_name}` : ""}</span>
                           : f.matched_bill_id ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#dbeafe", color: "#1e4e8c" }} title="Counted through its scheduled bill">Scheduled bill{f.matched_due_date ? ` · ${new Date(f.matched_due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</span>
                           : <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#fef3c7", color: "#92400e" }}>Unpaid</span>}
-                        {finance && !f.paid && <button onClick={() => setInvoicePaid(f, true)} disabled={busy} className="ml-2 underline text-slate-500 hover:text-slate-700">Mark paid</button>}
-                        {finance && f.paid && <button onClick={() => setInvoicePaid(f, false)} disabled={busy} className="ml-2 underline text-slate-400 hover:text-slate-600">Undo</button>}
+                        {finance && !f.paid && <button onClick={() => openPay(f)} disabled={busy} className="ml-2 underline text-slate-500 hover:text-slate-700">Mark paid</button>}
+                        {finance && f.paid && <button onClick={() => undoPaid(f)} disabled={busy} className="ml-2 underline text-slate-400 hover:text-slate-600">Undo</button>}
                         {finance && f.matched_bill_id && !f.paid && <button onClick={() => unlinkInvoice(f)} className="ml-2 underline text-slate-400 hover:text-slate-600">Unlink</button>}
                       </td>
                       <td className="px-2 py-1.5 text-right whitespace-nowrap">
