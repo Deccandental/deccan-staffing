@@ -44,8 +44,8 @@ export async function POST(req: NextRequest) {
 
   const year = Number(body.year) || new Date().getFullYear();
   const [banks, cards, debts, sources, files, bankStm, cardStm, debtStm] = await Promise.all([
-    supabaseAdmin.from("cash_accounts").select("id, name"),
-    supabaseAdmin.from("credit_cards").select("id, name"),
+    supabaseAdmin.from("cash_accounts").select("*"),
+    supabaseAdmin.from("credit_cards").select("*"),
     supabaseAdmin.from("debts").select("id, name, kind, active"),
     supabaseAdmin.from("statement_sources").select("id, name, category, start_month, active").order("name"),
     supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "statement").like("month", `${year}-%`).order("uploaded_at", { ascending: true }),
@@ -55,9 +55,11 @@ export async function POST(req: NextRequest) {
   ]);
   if (files.error) return NextResponse.json({ error: "The statements table isn't set up yet." }, { status: 500 });
 
+  // A closed account or card is left off the checklist, except for a year in which it has statements filed.
+  const filedFor = (kind: string, id: string) => (files.data ?? []).some((f: any) => f.account_kind === kind && f.account_id === id);
   const accounts = [
-    ...(banks.data ?? []).map((a: any) => ({ kind: "bank", id: String(a.id), name: a.name })),
-    ...(cards.data ?? []).map((c: any) => ({ kind: "card", id: String(c.id), name: c.name })),
+    ...(banks.data ?? []).filter((a: any) => a.active !== false || filedFor("bank", String(a.id))).map((a: any) => ({ kind: "bank", id: String(a.id), name: a.name })),
+    ...(cards.data ?? []).filter((c: any) => c.active !== false || filedFor("card", String(c.id))).map((c: any) => ({ kind: "card", id: String(c.id), name: c.name })),
     ...(debts.data ?? []).filter((d: any) => d.kind !== "revolving" && d.active !== false).map((d: any) => ({ kind: "loan", id: String(d.id), name: d.name })),
   ];
   // Labs and other vendors. A retired one stays visible only while it has statements filed that year.
