@@ -15,14 +15,12 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
 
   if (body.docType === "invoice") {
-    if (body.unpaid) {
-      const { data, error } = await supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("paid", false).order("invoice_date", { ascending: true }).limit(1000);
-      if (error) return NextResponse.json({ error: "Invoices aren't set up yet." }, { status: 500 });
-      return NextResponse.json({ role: acc.role, files: data ?? [] });
-    }
     const month = MONTH_RE.test(String(body.month)) ? String(body.month) : new Date().toISOString().slice(0, 7);
     const [inv, sources] = await Promise.all([
-      supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("month", month).order("invoice_date", { ascending: true }),
+      // "unpaid" lists every month's unpaid invoices; otherwise one month's invoices.
+      body.unpaid
+        ? supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("paid", false).order("invoice_date", { ascending: true }).limit(1000)
+        : supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("month", month).order("invoice_date", { ascending: true }),
       supabaseAdmin.from("statement_sources").select("*").order("name"),
     ]);
     if (inv.error) return NextResponse.json({ error: "Invoices aren't set up yet (run the invoices SQL)." }, { status: 500 });
