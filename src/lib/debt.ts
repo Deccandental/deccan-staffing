@@ -86,7 +86,7 @@ export async function loadDebts(): Promise<Debt[]> {
   return (data ?? []).map(fromRow);
 }
 
-export async function saveDebt(d: Omit<Debt, "id"> & { id?: string }): Promise<{ ok: boolean; error?: string }> {
+export async function saveDebt(d: Omit<Debt, "id"> & { id?: string }): Promise<{ ok: boolean; error?: string; id?: string }> {
   const payload = {
     ...(d.id ? { id: d.id } : {}),
     name: d.name, kind: d.kind, credit_card_id: d.creditCardId,
@@ -99,9 +99,9 @@ export async function saveDebt(d: Omit<Debt, "id"> & { id?: string }): Promise<{
     prepay_penalty: d.kind === "revolving" ? false : d.prepayPenalty,
     paid_in_full: d.kind === "revolving" ? d.paidInFullMonthly : false,
   };
-  const { error } = await supabase.from("debts").upsert(payload);
+  const { data, error } = await supabase.from("debts").upsert(payload).select("id").single();
   if (error) { console.error("saveDebt error:", error); return { ok: false, error: error.message }; }
-  return { ok: true };
+  return { ok: true, id: data?.id ?? d.id };
 }
 
 export async function deleteDebt(id: string): Promise<void> {
