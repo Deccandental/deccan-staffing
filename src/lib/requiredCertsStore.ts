@@ -256,9 +256,23 @@ export function computeRequiredCertStatuses(
       seenTitles.add(t.title);
       return true;
     });
-  const certsByTitle = new Map(allCerts.map((c) => [c.title, c]));
-  // For ce_hours/total_ce_hours items, find this role's license expiration to anchor the window.
-  const licenseType = types.find((t) => t.kind === "license" && role.includes(t.appliesToRole));
+  // When a title appears more than once, keep the record that has the latest expiration date, so a
+  // blank duplicate can't hide a real, current one.
+  const certsByTitle = new Map<string, (typeof allCerts)[number]>();
+  for (const c of allCerts) {
+    const prev = certsByTitle.get(c.title);
+    if (!prev || (c.expirationDate && (!prev.expirationDate || c.expirationDate > prev.expirationDate))) certsByTitle.set(c.title, c);
+  }
+  // For ce_hours/total_ce_hours items, find this role's professional license to anchor the CE window.
+  // More than one requirement can be of the "license" kind for a role (a newly added item such as
+  // Workplace Violence Prevention, say). Taking simply the first one meant a license-kind item that
+  // isn't on file yet made every CE requirement say "Add license first", even with the real license
+  // current. So prefer a license-kind item that has an expiration date on file, and among those one
+  // actually named like a license.
+  const licenseTypes = types.filter((t) => t.kind === "license" && role.includes(t.appliesToRole));
+  const licenseWithDate = licenseTypes.filter((t) => certsByTitle.get(t.title)?.expirationDate);
+  const looksLikeLicense = (t: RequiredCertType) => /licens/i.test(t.title);
+  const licenseType = licenseWithDate.find(looksLikeLicense) ?? licenseWithDate[0] ?? licenseTypes.find(looksLikeLicense) ?? licenseTypes[0];
   const licenseExpiration = licenseType ? certsByTitle.get(licenseType.title)?.expirationDate ?? null : null;
 
   return relevant.map((type) => {
