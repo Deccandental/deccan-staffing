@@ -5,7 +5,7 @@ import { statementsAccess, whoIs, BUCKET, KINDS, MONTH_RE, CATEGORIES } from "@/
 // Records an uploaded statement or invoice, checks for duplicates, marks "no statement this month",
 // manages vendors, or removes a file. Finance users only.
 
-const COLS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date";
+const COLS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category";
 
 // What Cash Flow holds as this account's statement balance for a month (null if nothing).
 async function cashFlowBalance(kind: string, id: string, month: string): Promise<number | null> {
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
         file_path: path, file_name: String(b.fileName ?? base).slice(0, 200), size_bytes: Number(b.size) || null, uploaded_by: by,
         amount, dup_ignored: b.dupIgnored === true,
         ...(isInvoice ? {
-          doc_type: "invoice", invoice_date: invoiceDate, invoice_number: invoiceNumber,
+          doc_type: "invoice", invoice_date: invoiceDate, invoice_number: invoiceNumber, category: String(b.category ?? "").trim().slice(0, 40),
           ...(b.matchedBillId && /^\d{4}-\d{2}-\d{2}$/.test(String(b.matchedDueDate ?? "")) ? { matched_bill_id: String(b.matchedBillId), matched_due_date: b.matchedDueDate } : {}),
         } : {}),
       }).select(COLS).single();
@@ -133,6 +133,12 @@ export async function POST(req: NextRequest) {
       if (MONTH_RE.test(String(b.startMonth ?? ""))) patch.start_month = b.startMonth;
       if (Object.keys(patch).length === 0) return NextResponse.json({ error: "Nothing to change." }, { status: 400 });
       const { error } = await supabaseAdmin.from("statement_sources").update(patch).eq("id", String(b.id));
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data: null });
+    }
+
+    if (b.action === "setInvoiceCategory") {
+      const { error } = await supabaseAdmin.from("statement_files").update({ category: String(b.category ?? "").trim().slice(0, 40) }).eq("id", String(b.id)).eq("doc_type", "invoice");
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
       return NextResponse.json({ data: null });
     }
