@@ -698,6 +698,20 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   if (incomeNum != null && productionNum != null && incomeNum < productionNum * monthProgress * 0.8) {
     leadWarns.push({ account: "Collections", warn: { kind: "soon", text: "lagging materially behind production — consider reviewing insurance A/R aging before discretionary spending." } });
   }
+  // Vendor invoices still waiting to be paid. Older than 30 days is flagged as urgent.
+  {
+    const pending = unpaidInvoices.filter((i: any) => !i.paid);
+    if (pending.length > 0) {
+      const cutoff = addDays(today, -30);
+      const old = pending.filter((i: any) => i.invoice_date && i.invoice_date < cutoff).sort((a: any, b: any) => String(a.invoice_date).localeCompare(String(b.invoice_date)));
+      const total = pending.reduce((sum: number, i: any) => sum + (Number(i.amount) || 0), 0);
+      const oldest = old[0] ? `${old[0].account_name} ${new Date(old[0].invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "";
+      leadWarns.push({
+        account: "Vendor invoices",
+        warn: { kind: old.length > 0 ? "act" : "soon", text: `${pending.length} unpaid ($${formatMoney(total)})${old.length > 0 ? `, ${old.length} older than 30 days (oldest: ${oldest})` : ""}. Pay them, or link them to a scheduled bill, on the Statements page.` },
+      });
+    }
+  }
   if (requiredCollections && requiredCollections.requiredCollectionRate != null && requiredCollections.requiredCollectionRate > 100) {
     leadWarns.push({ account: "Required collections", warn: { kind: "act", text: "exceed projected production — even collecting everything produced this month wouldn't cover obligations and cushions." } });
   }
