@@ -60,6 +60,8 @@ export interface Debt {
   rateType: RateType | null;       // fixed or variable rate (loans)
   prepayPenalty: boolean;          // paying early costs a penalty (loans)
   paidInFullMonthly: boolean;      // cards: balance is cleared every month, so it isn't carried debt
+  extraMonthly: number;            // loans: a charge paid with the loan but not part of it (insurance, fees)
+  extraLabel: string;              // what that charge is, e.g. "Insurance"
 }
 
 function fromRow(row: any): Debt {
@@ -77,6 +79,8 @@ function fromRow(row: any): Debt {
     rateType: (row.rate_type as RateType) ?? null,
     prepayPenalty: row.prepay_penalty ?? false,
     paidInFullMonthly: row.paid_in_full ?? false,
+    extraMonthly: row.extra_monthly ?? 0,
+    extraLabel: row.extra_label ?? "",
   };
 }
 
@@ -98,6 +102,8 @@ export async function saveDebt(d: Omit<Debt, "id"> & { id?: string }): Promise<{
     rate_type: d.kind === "revolving" ? null : d.rateType,
     prepay_penalty: d.kind === "revolving" ? false : d.prepayPenalty,
     paid_in_full: d.kind === "revolving" ? d.paidInFullMonthly : false,
+    extra_monthly: d.kind === "revolving" ? 0 : (d.extraMonthly ?? 0),
+    extra_label: d.kind === "revolving" ? "" : (d.extraLabel ?? ""),
   };
   const { data, error } = await supabase.from("debts").upsert(payload).select("id").single();
   if (error) { console.error("saveDebt error:", error); return { ok: false, error: error.message }; }
@@ -136,6 +142,7 @@ export interface DebtSummary {
   fixedServiceMonthly: number;    // acquisition + real estate + equipment payments
   fixedServiceRate: number | null;// …as a % of monthly collections
   paidMonthlyBalance: number;     // cards cleared every month — informational, not debt
+  extraMonthlyTotal: number;      // insurance/fees paid alongside loans — a cost, not debt service
 }
 
 /**
@@ -214,6 +221,7 @@ export function computeDebtSummary(
     fixedServiceMonthly,
     fixedServiceRate: rateOf(fixedServiceMonthly),
     paidMonthlyBalance: lines.filter((l) => !l.counted).reduce((s, l) => s + l.balance, 0),
+    extraMonthlyTotal: counted.reduce((s, l) => s + (l.debt.kind === "revolving" ? 0 : (l.debt.extraMonthly ?? 0)), 0),
   };
 }
 
