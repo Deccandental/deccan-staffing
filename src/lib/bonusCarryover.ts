@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData"; // financial data goes through the secure server gateway, not the public key
 
 /**
  * An unpaid bonus balance carried in from before the app's own records begin.
@@ -9,7 +9,7 @@ import { supabase } from "./supabase";
  * employeeId is 0 for programmes that aren't per person (staff growth bonus).
  */
 
-export type CarryProgramme = "hygiene" | "growth" | "pv";
+export type CarryProgramme = "hygiene" | "growth" | "pv" | "retirement";
 
 export interface BonusCarryover {
   programme: CarryProgramme;
