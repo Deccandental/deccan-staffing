@@ -11,6 +11,7 @@ import { UpdatedStamp, MonthSelect, NumInput, HistoryBlock, HistColumn, HistRow 
 import { updateBalanceCheckAmount, updateStatementEntryAmount, updateBankStatementEntryAmount } from "@/lib/cashflow";
 import { loadDebts, loadDebtStatements, Debt, CATEGORY_SHORT, CATEGORY_LABEL, categoryRank, saveDebt, saveDebtStatement, deleteDebtStatement, updateDebtStatementAmount } from "@/lib/debt";
 import { loadStaff } from "@/lib/staffStore";
+import { getSessionToken } from "@/lib/secureData";
 import { loadCompOwed, CompOwedResult } from "@/lib/compOwed";
 import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
 import {
@@ -399,6 +400,14 @@ function AccountPanel({ account, allBills, allPayments, latestBalances, cards, r
 
 // ---------------- Weekly Review Panel ----------------
 
+// Calls one of the statements routes with the logged-in session. Only used for finance users on this page.
+async function statementsPost(path: string, body: Record<string, unknown>): Promise<{ ok: boolean; json: any }> {
+  try {
+    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "x-session-token": getSessionToken() }, body: JSON.stringify(body) });
+    return { ok: res.ok, json: await res.json().catch(() => ({})) };
+  } catch { return { ok: false, json: {} }; }
+}
+
 function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, allPayments, latestBalances, onViewArDetails, refreshAll }: {
   refreshAll: () => void; staleItems: StaleItem[]; cashAccounts: CashAccount[]; cards: CreditCard[]; charges: CardCharge[]; allBills: RecurringBill[]; allPayments: BillPayment[];
   latestBalances: Record<string, BalanceCheck>; onViewArDetails: () => void;
@@ -420,9 +429,15 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   // monthly production plus the last income entry of each month. A/R: weekly.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   // Quick entry on each card: balance, statement, and logging a payment, without the guided flow.
-  type Quick = { open: boolean; hist: boolean; bal: string; month: string; stmt: string; payAmt: string; payDate: string; msg: string };
-  const blankQuick = (month: string): Quick => ({ open: false, hist: false, bal: "", month, stmt: "", payAmt: "", payDate: todayStr(), msg: "" });
+  type Quick = { open: boolean; hist: boolean; stm: boolean; bal: string; month: string; stmt: string; payAmt: string; payDate: string; msg: string };
+  const blankQuick = (month: string): Quick => ({ open: false, hist: false, stm: false, bal: "", month, stmt: "", payAmt: "", payDate: todayStr(), msg: "" });
   const [quick, setQuick] = useState<Record<string, Quick>>({});
+  // Filed statements per card (loaded when its Statements view is opened) and unpaid vendor invoices.
+  const [tileStatements, setTileStatements] = useState<Record<string, any[] | null>>({});
+  const [unpaidInvoices, setUnpaidInvoices] = useState<any[]>([]);
+  useEffect(() => {
+    statementsPost("/api/statements/list", { docType: "invoice", unpaid: true }).then((r) => { if (r.ok) setUnpaidInvoices(r.json.files ?? []); });
+  }, [cashAccounts, cards]);
   const [balanceHist, setBalanceHist] = useState<Record<string, BalanceCheck[]>>({});
   const [statementPts, setStatementPts] = useState<Record<string, BarPoint[]>>({});
   const [loans, setLoans] = useState<Debt[]>([]);
@@ -522,8 +537,19 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     .filter((c) => c.minimumPayment > 0 && !monthAllOccurrences.some((o) => o.direction === "outflow" && o.linkedCreditCardId === c.id))
     .map((c) => ({ name: c.name, amount: c.minimumPayment }));
   const cardMinTotal = unscheduledCardMins.reduce((sum, c) => sum + c.amount, 0);
+  // Vendor invoices not yet paid and not already covered by a scheduled bill. Invoices linked to a scheduled
+  // bill are counted through that bill, so they are left out here to avoid counting them twice.
+  const openInvoices = unpaidInvoices.filter((i) => !i.paid && !i.matched_bill_id && Number.isFinite(Number(i.amount)));
+  const invoiceTotal = openInvoices.reduce((sum, i) => sum + Number(i.amount), 0);
+  const coveredCount = unpaidInvoices.filter((i) => !i.paid && i.matched_bill_id).length;
+  const invoiceByVendor = Object.entries(openInvoices.reduce<Record<string, number>>((m, i) => { m[i.account_name] = (m[i.account_name] ?? 0) + Number(i.amount); return m; }, {}));
   const owedItems = [
     ...(bonusObligations?.items ?? []),
+    ...(invoiceTotal > 0 ? [{
+      label: "Unpaid vendor invoices",
+      detail: `${openInvoices.length} invoice${openInvoices.length === 1 ? "" : "s"}: ${invoiceByVendor.map(([v, a]) => `${v} $${formatMoney(a)}`).join(", ")}${coveredCount > 0 ? ` (${coveredCount} more covered by scheduled bills)` : ""}. Mark them paid, or link them to a scheduled bill, on the Statements page.`,
+      amount: invoiceTotal,
+    }] : []),
     ...(cardMinTotal > 0 ? [{ label: "Card minimums not scheduled as bills", detail: unscheduledCardMins.map((c) => `${c.name} $${formatMoney(c.amount)}`).join(", "), amount: cardMinTotal }] : []),
   ];
   const owedTotal = owedItems.reduce((sum, i) => sum + i.amount, 0);
@@ -849,8 +875,33 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
                   </div>
                 )}
                 <button onClick={() => setQ(t, { hist: !q.hist })} className="text-xs font-semibold text-orange-500 hover:underline pb-1">{q.hist ? "Hide history" : "History"}</button>
+                <button onClick={async () => {
+                  const opening = !q.stm; setQ(t, { stm: opening });
+                  if (opening) { setTileStatements((m) => ({ ...m, [t.key]: null })); const r = await statementsPost("/api/statements/list", { accountKind: t.kind, accountId: t.key }); setTileStatements((m) => ({ ...m, [t.key]: r.ok ? (r.json.files ?? []) : [] })); }
+                }} className="text-xs font-semibold text-orange-500 hover:underline pb-1">{q.stm ? "Hide statements" : "Statements"}</button>
                 {q.msg && <p className="text-xs font-semibold text-slate-600 basis-full">{q.msg}</p>}
                 {q.hist && <div className="basis-full"><HistoryBlock columns={historyColumns(t)} onChanged={() => refreshAll()} /></div>}
+                {q.stm && (
+                  <div className="basis-full rounded-lg bg-white px-3 py-2">
+                    <p className="text-[11px] font-semibold text-slate-400 mb-1">Filed statements</p>
+                    {tileStatements[t.key] == null ? <p className="text-xs text-slate-400">Loading…</p> : tileStatements[t.key]!.length === 0 ? <p className="text-xs text-slate-400">No statements filed for this account yet.</p> : (
+                      <div className="max-h-48 overflow-y-auto">
+                        {tileStatements[t.key]!.map((f: any) => (
+                          <div key={f.id} className="flex items-center gap-3 text-xs leading-6 border-b border-slate-100 last:border-0">
+                            <span className="w-16 text-slate-500">{stmtMonthLabel(f.month)}</span>
+                            <span className="flex-1 min-w-0 truncate text-slate-700">{f.file_name}</span>
+                            <span className="font-semibold text-slate-700 w-24 text-right">{f.amount != null ? formatUSD(Number(f.amount)) : "—"}</span>
+                            <button onClick={async () => {
+                              const r = await statementsPost("/api/statements/download-url", { id: f.id });
+                              if (r.ok && r.json.url) { const a = document.createElement("a"); a.href = r.json.url; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); } else setQ(t, { msg: r.json.error ?? "Couldn't open the statement." });
+                            }} className="rounded px-2 py-0.5 text-[11px] font-semibold text-white" style={{ backgroundColor: "#0f766e" }}>Download</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <a href="/statements" className="text-xs font-semibold text-orange-500 hover:underline">File a statement →</a>
+                  </div>
+                )}
               </div>
             );
           })()}
