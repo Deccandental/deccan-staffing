@@ -145,25 +145,35 @@ export async function loadCompOwed(staff: Employee[], today: string = new Date()
   return { items, total: items.reduce((sum, i) => sum + i.amount, 0) };
 }
 
+export interface HygienePeriodRow { start: string; label: string; patients: number; earned: number; paid: number }
+
 /**
- * One hygienist's earned and paid for one calendar year: patients x $15 for
- * each pay period that has started by `cutoff`, and everything paid against
- * the year. The same sums the Hygiene Bonus sheet shows.
+ * One hygienist's pay periods for one calendar year, as the Hygiene Bonus
+ * sheet works them out: patients (a saved count, else the Payroll row's hygiene
+ * count), earned = patients x $15, and what has been paid against the period.
  */
-export async function hygieneYear(employeeId: number, y: number, cutoff: string): Promise<{ earned: number; paid: number }> {
+export async function hygieneYearDetail(employeeId: number, y: number): Promise<HygienePeriodRow[]> {
   const [payroll, overrides] = await Promise.all([
     loadPayrollEntriesInRange(`${y}-01-01`, `${y}-12-31`),
     loadHygieneBonusEntries(employeeId, `${y}-01-01`, `${y}-12-31`),
   ]);
   const byStart = new Map(overrides.map((o) => [o.payPeriodStart, o]));
-  let earned = 0, paid = 0;
-  for (const p of getPayPeriodsInYear(y).filter((pp) => pp.start <= cutoff)) {
+  return getPayPeriodsInYear(y).map((p) => {
     const o = byStart.get(p.start);
     const row = payroll.find((r) => r.personKey === `staff:${employeeId}` && r.payPeriodStart === p.start);
-    earned += (o?.patientCount ?? row?.hygienePatientCount ?? 0) * HYGIENE_BONUS_PER_PATIENT;
-    paid += o?.amountPaid ?? 0;
+    const patients = o?.patientCount ?? row?.hygienePatientCount ?? 0;
+    return { start: p.start, label: p.label, patients, earned: patients * HYGIENE_BONUS_PER_PATIENT, paid: o?.amountPaid ?? 0 };
+  });
+}
+
+/** Earned and paid for one year, counting periods that have started by `cutoff`. */
+export async function hygieneYear(employeeId: number, y: number, cutoff: string): Promise<{ earned: number; paid: number }> {
+  const rows = await hygieneYearDetail(employeeId, y);
+  let earned = 0, paid = 0;
+  for (const r of rows) {
+    if (r.start <= cutoff) earned += r.earned;
+    // Payments logged against a period that hasn't started yet still count as paid.
+    paid += r.paid;
   }
-  // Payments logged against a period that hasn't started yet still count as paid.
-  for (const o of overrides) if (o.payPeriodStart > cutoff) paid += o.amountPaid;
   return { earned, paid };
 }
