@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { statementsAccess, MONTH_RE, KINDS } from "@/lib/statementsAuth";
 
-const COLUMNS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date";
+const COLUMNS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category";
 
 // Statements: the accounts that should have one each month, what's filed for a year, and what Cash Flow
 // already records as each month's statement balance.
@@ -27,7 +27,10 @@ export async function POST(req: NextRequest) {
     ]);
     if (inv.error) return NextResponse.json({ error: "Invoices aren't set up yet (run the invoices SQL)." }, { status: 500 });
     const vendors = (sources.data ?? []).filter((v: any) => v.active).map((v: any) => ({ id: String(v.id), name: v.name, category: v.category }));
-    return NextResponse.json({ role: acc.role, month, files: inv.data ?? [], vendors });
+    // Every category already used on an invoice, so a new one typed once shows up in the list from then on.
+    const { data: used } = await supabaseAdmin.from("statement_files").select("category").eq("doc_type", "invoice").neq("category", "").limit(3000);
+    const categories = [...new Set((used ?? []).map((r: any) => String(r.category)))].sort();
+    return NextResponse.json({ role: acc.role, month, files: inv.data ?? [], vendors, categories });
   }
 
   // One account's filed statements, newest month first.
