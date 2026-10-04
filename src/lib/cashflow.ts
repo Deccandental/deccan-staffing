@@ -43,19 +43,21 @@ export interface CashAccount {
   sortOrder: number;
   statementBalance: number;
   statementBalanceUpdatedAt: string | null;
+  active: boolean;           // false once the account has been closed
 }
 
 function fromCashAccountRow(row: any): CashAccount {
   return {
     id: row.id, name: row.name, cushionTarget: row.cushion_target, sortOrder: row.sort_order ?? 0,
     statementBalance: row.statement_balance ?? 0, statementBalanceUpdatedAt: row.statement_balance_updated_at ?? null,
+    active: row.active !== false,
   };
 }
 
-export async function loadCashAccounts(): Promise<CashAccount[]> {
+export async function loadCashAccounts(includeClosed = false): Promise<CashAccount[]> {
   const { data, error } = await supabase.from("cash_accounts").select("*").order("sort_order");
   if (error) { console.error("loadCashAccounts error:", error); return []; }
-  const accounts: CashAccount[] = (data ?? []).map(fromCashAccountRow);
+  const accounts: CashAccount[] = (data ?? []).map(fromCashAccountRow).filter((a: CashAccount) => includeClosed || a.active);
   const { data: latestEntries, error: entriesError } = await supabase
     .from("bank_statement_entries").select("*").order("month", { ascending: false });
   if (entriesError) { console.error("loadCashAccounts (statement entries) error:", entriesError); return accounts; }
@@ -137,6 +139,7 @@ export interface CreditCard {
   statementBalance: number;
   statementBalanceUpdatedAt: string | null;
   sortOrder: number;
+  active: boolean;           // false once the card has been closed
 }
 
 function fromCreditCardRow(row: any): CreditCard {
@@ -145,13 +148,14 @@ function fromCreditCardRow(row: any): CreditCard {
     approxClosingDay: row.approx_closing_day, dueDay: row.due_day, minimumPayment: row.minimum_payment,
     autopayAmount: row.autopay_amount ?? 0, statementBalance: row.statement_balance ?? 0,
     statementBalanceUpdatedAt: row.statement_balance_updated_at, sortOrder: row.sort_order ?? 0,
+    active: row.active !== false,
   };
 }
 
-export async function loadCreditCards(): Promise<CreditCard[]> {
+export async function loadCreditCards(includeClosed = false): Promise<CreditCard[]> {
   const { data, error } = await supabase.from("credit_cards").select("*").order("sort_order");
   if (error) { console.error("loadCreditCards error:", error); return []; }
-  const cards: CreditCard[] = (data ?? []).map(fromCreditCardRow);
+  const cards: CreditCard[] = (data ?? []).map(fromCreditCardRow).filter((c: CreditCard) => includeClosed || c.active);
   // Derive "current" statement balance from the most recent entry in the
   // history table, rather than trusting a separately-maintained field —
   // this is the only way to guarantee it can never drift out of sync with
@@ -170,8 +174,11 @@ export async function loadCreditCards(): Promise<CreditCard[]> {
   });
 }
 
-export async function updateCreditCard(id: string, updates: Partial<{ creditLimit: number; approxClosingDay: number; dueDay: number; minimumPayment: number; autopayAmount: number }>): Promise<void> {
+export async function updateCreditCard(id: string, updates: Partial<{ name: string; creditLimit: number; approxClosingDay: number; dueDay: number; minimumPayment: number; autopayAmount: number; linkedCashAccountId: string | null; active: boolean }>): Promise<void> {
   const payload: any = {};
+  if (updates.name !== undefined) payload.name = updates.name;
+  if (updates.linkedCashAccountId !== undefined) payload.linked_cash_account_id = updates.linkedCashAccountId;
+  if (updates.active !== undefined) payload.active = updates.active;
   if (updates.creditLimit !== undefined) payload.credit_limit = updates.creditLimit;
   if (updates.approxClosingDay !== undefined) payload.approx_closing_day = updates.approxClosingDay;
   if (updates.dueDay !== undefined) payload.due_day = updates.dueDay;
@@ -1165,3 +1172,72 @@ async function updateAmount(table: string, id: string, balance: number): EditRes
 export const updateBalanceCheckAmount = (id: string, balance: number): EditResult => updateAmount("balance_checks", id, balance);
 export const updateStatementEntryAmount = (id: string, balance: number): EditResult => updateAmount("card_statement_entries", id, balance);
 export const updateBankStatementEntryAmount = (id: string, balance: number): EditResult => updateAmount("bank_statement_entries", id, balance);
+
+// ---------------- Adding, editing and closing accounts ----------------
+
+export async function addCashAccount(name: string, cushionTarget: number): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const { data: last } = await supabase.from("cash_accounts").select("sort_order").order("sort_order", { ascending: false }).limit(1);
+  const nextOrder = ((last ?? [])[0]?.sort_order ?? 0) + 1;
+  const { data, error } = await supabase.from("cash_accounts").insert({ name: name.trim(), cushion_target: cushionTarget, sort_order: nextOrder }).select().single();
+  if (error) { console.error("addCashAccount error:", error); return { ok: false, error: error.message }; }
+  return { ok: true, id: data?.id };
+}
+
+export async function updateCashAccount(id: string, updates: Partial<{ name: string; cushionTarget: number; active: boolean }>): Promise<{ ok: boolean; error?: string }> {
+  const payload: any = {};
+  if (updates.name !== undefined) payload.name = updates.name.trim();
+  if (updates.cushionTarget !== undefined) payload.cushion_target = updates.cushionTarget;
+  if (updates.active !== undefined) payload.active = updates.active;
+  const { error } = await supabase.from("cash_accounts").update(payload).eq("id", id);
+  if (error) { console.error("updateCashAccount error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
+export async function addCreditCard(card: { name: string; creditLimit: number; approxClosingDay: number; dueDay: number; minimumPayment: number; autopayAmount: number; linkedCashAccountId: string | null }): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const { data: last } = await supabase.from("credit_cards").select("sort_order").order("sort_order", { ascending: false }).limit(1);
+  const nextOrder = ((last ?? [])[0]?.sort_order ?? 0) + 1;
+  const { data, error } = await supabase.from("credit_cards").insert({
+    name: card.name.trim(), credit_limit: card.creditLimit, approx_closing_day: card.approxClosingDay, due_day: card.dueDay,
+    minimum_payment: card.minimumPayment, autopay_amount: card.autopayAmount, linked_cash_account_id: card.linkedCashAccountId, sort_order: nextOrder,
+  }).select().single();
+  if (error) { console.error("addCreditCard error:", error); return { ok: false, error: error.message }; }
+  return { ok: true, id: data?.id };
+}
+
+// ---------------- Any number of bank accounts ----------------
+// The cash-needed and transfer figures used to be written for exactly two named accounts. These work for
+// however many accounts are open, so closing one and opening another changes nothing about how they work.
+
+export function computeRequiredCollectionsMulti(
+  accounts: CashAccount[], balanceOf: (a: CashAccount) => number,
+  monthOccurrences: Occurrence[], projectedProduction: number | null, outstandingBonuses: number = 0
+): RequiredCollectionsResult {
+  const scheduledOutflows = monthOccurrences.filter((o) => o.direction === "outflow").reduce((sum, o) => sum + o.amount, 0);
+  const totalObligations = scheduledOutflows + Math.max(0, outstandingBonuses);
+  const knownInflows = monthOccurrences.filter((o) => o.direction === "inflow").reduce((sum, o) => sum + o.amount, 0);
+  const totalCushions = accounts.reduce((sum, a) => sum + a.cushionTarget, 0);
+  const combinedCurrentBalance = accounts.reduce((sum, a) => sum + balanceOf(a), 0);
+  const requiredCollections = Math.max(0, totalObligations + totalCushions - combinedCurrentBalance - knownInflows);
+  const requiredCollectionRate = projectedProduction && projectedProduction > 0 ? (requiredCollections / projectedProduction) * 100 : null;
+  return { totalObligations, totalCushions, combinedCurrentBalance, knownInflows, requiredCollections, requiredCollectionRate, outstandingBonuses: Math.max(0, outstandingBonuses) };
+}
+
+export function computeSuggestedTransferMulti(forecasts: AccountForecast[]): TransferSuggestion | null {
+  if (forecasts.length < 2) return null;
+  const short = forecasts.filter((f) => f.excessOrShortfall < 0).sort((a, b) => a.excessOrShortfall - b.excessOrShortfall);
+  const rich = forecasts.filter((f) => f.excessOrShortfall > 0).sort((a, b) => b.excessOrShortfall - a.excessOrShortfall);
+  if (short.length > 0 && rich.length > 0) {
+    const to = short[0], from = rich[0];
+    const amount = Math.min(-to.excessOrShortfall, from.excessOrShortfall);
+    return { fromAccountName: from.accountName, toAccountName: to.accountName, amount: Math.round(amount), reason: `${to.accountName} is projected short; ${from.accountName} has excess above its own requirement.` };
+  }
+  if (short.length > 0) return { fromAccountName: null, toAccountName: null, amount: 0, reason: "Every account is projected short -- this is a genuine cash shortfall, not a transfer situation." };
+  return { fromAccountName: null, toAccountName: null, amount: 0, reason: "No transfer needed -- every account covers its own requirement." };
+}
+
+// A balance history is filed under the account's name, so renaming an account moves its history with it.
+export async function renameBalanceHistory(oldName: string, newName: string): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("balance_checks").update({ account_name: newName.trim() }).eq("account_name", oldName);
+  if (error) { console.error("renameBalanceHistory error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
