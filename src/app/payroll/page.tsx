@@ -1769,7 +1769,11 @@ function HygieneBonusPanel() {
               {saving ? "Saving…" : "Save All"}
             </button>
             {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
-            <span className="text-sm text-slate-500 ml-auto">
+            <span className="text-sm text-slate-500 ml-auto text-right">
+              <strong className="text-slate-700">Totals</strong> {periods.reduce((sum, p) => sum + (rows[p.start]?.patientCount ?? 0), 0)} patients
+              <span className="mx-2 text-slate-300">|</span>Earned <strong className="text-slate-700">${formatMoney(runningEarned)}</strong>
+              <span className="mx-2 text-slate-300">|</span>Paid <strong className="text-slate-700">${formatMoney(runningPaid)}</strong>
+              <span className="mx-2 text-slate-300">|</span>
               {year} balance: <strong className={startBalance + runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${formatMoney(startBalance + runningEarned - runningPaid)}</strong>
               {Math.abs(startBalance) > 0.5 && <span className="text-xs text-slate-400"> (includes ${formatMoney(startBalance)} brought forward)</span>}
             </span>
