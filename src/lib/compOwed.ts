@@ -145,7 +145,7 @@ export async function loadCompOwed(staff: Employee[], today: string = new Date()
   return { items, total: items.reduce((sum, i) => sum + i.amount, 0) };
 }
 
-export interface HygienePeriodRow { start: string; label: string; patients: number; earned: number; paid: number }
+export interface HygienePeriodRow { start: string; label: string; payDate: string; patients: number; earned: number; paid: number }
 
 /**
  * One hygienist's pay periods for one calendar year, as the Hygiene Bonus
@@ -162,7 +162,7 @@ export async function hygieneYearDetail(employeeId: number, y: number): Promise<
     const o = byStart.get(p.start);
     const row = payroll.find((r) => r.personKey === `staff:${employeeId}` && r.payPeriodStart === p.start);
     const patients = o?.patientCount ?? row?.hygienePatientCount ?? 0;
-    return { start: p.start, label: p.label, patients, earned: patients * HYGIENE_BONUS_PER_PATIENT, paid: o?.amountPaid ?? 0 };
+    return { start: p.start, label: p.label, payDate: p.payDate, patients, earned: patients * HYGIENE_BONUS_PER_PATIENT, paid: o?.amountPaid ?? 0 };
   });
 }
 
