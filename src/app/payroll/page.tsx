@@ -1725,24 +1725,24 @@ function HygieneBonusPanel() {
       {hygienistId != null && <BroughtForward programme="hygiene" employeeId={hygienistId} onSaved={refresh} />}
 
       {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
-        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
-          <div className="overflow-x-auto max-h-[32rem]">
-            <table className="w-full text-sm border-collapse min-w-[700px]">
-              <thead className="sticky top-0 bg-white">
+        <div className="rounded-xl bg-white shadow-sm overflow-clip">
+          <div>
+            <table className="w-full text-sm border-collapse">
+              <thead>
                 <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
-                  <th className="px-3 py-2 font-medium">Pay Period</th>
-                  <th className="px-2 py-2 font-medium">Pay Date</th>
-                  <th className="px-2 py-2 font-medium">Patients</th>
-                  <th className="px-2 py-2 font-medium">Earned</th>
-                  <th className="px-2 py-2 font-medium">Paid</th>
-                  <th className="px-2 py-2 font-medium">Balance</th>
+                  <th className="px-3 py-1 font-medium">Pay Period</th>
+                  <th className="px-2 py-1 font-medium">Pay Date</th>
+                  <th className="px-2 py-1 font-medium">Patients</th>
+                  <th className="px-2 py-1 font-medium">Earned</th>
+                  <th className="px-2 py-1 font-medium">Paid</th>
+                  <th className="px-2 py-1 font-medium">Balance</th>
                 </tr>
               </thead>
               <tbody>
                 {Math.abs(startBalance) > 0.5 && (
                   <tr className="border-b border-slate-100 bg-amber-50/60">
-                    <td className="px-3 py-2 font-medium text-amber-900 whitespace-nowrap" colSpan={5}>Brought forward</td>
-                    <td className="px-2 py-2 font-semibold whitespace-nowrap text-amber-700">${formatMoney(startBalance)}</td>
+                    <td className="px-3 py-1 font-medium text-amber-900 whitespace-nowrap" colSpan={5}>Brought forward</td>
+                    <td className="px-2 py-1 font-semibold whitespace-nowrap text-amber-700">${formatMoney(startBalance)}</td>
                   </tr>
                 )}
                 {periods.map((p) => {
@@ -1753,24 +1753,24 @@ function HygieneBonusPanel() {
                   const balance = startBalance + runningEarned - runningPaid;
                   return (
                     <tr key={p.start} className="border-b border-slate-50 last:border-0">
-                      <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{p.label}</td>
-                      <td className="px-2 py-2 text-slate-500 whitespace-nowrap">{formatPayDate(p.payDate)}</td>
-                      <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={row.patientCount} onChange={(e) => updateRow(p.start, "patientCount", Number(e.target.value))} className={`${cellClass} w-16`} /></td>
-                      <td className="px-2 py-2 text-slate-500">${formatMoney(earned)}</td>
-                      <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={row.amountPaid} onChange={(e) => updateRow(p.start, "amountPaid", Number(e.target.value))} className={`${cellClass} w-20`} /></td>
-                      <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
+                      <td className="px-3 py-1 font-medium text-slate-700 whitespace-nowrap">{p.label}</td>
+                      <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{formatPayDate(p.payDate)}</td>
+                      <td className="px-2 py-1"><input type="number" onFocus={(e) => e.target.select()} value={row.patientCount} onChange={(e) => updateRow(p.start, "patientCount", Number(e.target.value))} className={`${cellClass} w-16`} /></td>
+                      <td className="px-2 py-1 text-slate-500">${formatMoney(earned)}</td>
+                      <td className="px-2 py-1"><input type="number" onFocus={(e) => e.target.select()} value={row.amountPaid} onChange={(e) => updateRow(p.start, "amountPaid", Number(e.target.value))} className={`${cellClass} w-20`} /></td>
+                      <td className={`px-2 py-1 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
                     </tr>
                   );
                 })}
               </tbody>
-              <tfoot className="sticky bottom-0 bg-white">
-                <tr className="border-t-2 border-slate-200 font-semibold text-slate-700">
-                  <td className="px-3 py-2">Total</td>
-                  <td className="px-2 py-2" />
-                  <td className="px-2 py-2">{periods.reduce((sum, p) => sum + (rows[p.start]?.patientCount ?? 0), 0)}</td>
-                  <td className="px-2 py-2">${formatMoney(runningEarned)}</td>
-                  <td className="px-2 py-2">${formatMoney(runningPaid)}</td>
-                  <td className={`px-2 py-2 whitespace-nowrap ${startBalance + runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}`}>${formatMoney(startBalance + runningEarned - runningPaid)}</td>
+              <tfoot>
+                <tr className="text-slate-700">
+                  <td className="px-3 py-2 sticky bottom-0 z-10 bg-white font-semibold" style={{ boxShadow: "0 -2px 0 #e2e8f0" }}>Total</td>
+                  <td className="px-2 py-2 sticky bottom-0 z-10 bg-white font-semibold" style={{ boxShadow: "0 -2px 0 #e2e8f0" }} />
+                  <td className="px-2 py-2 sticky bottom-0 z-10 bg-white font-semibold" style={{ boxShadow: "0 -2px 0 #e2e8f0" }}>{periods.reduce((sum, p) => sum + (rows[p.start]?.patientCount ?? 0), 0)}</td>
+                  <td className="px-2 py-2 sticky bottom-0 z-10 bg-white font-semibold" style={{ boxShadow: "0 -2px 0 #e2e8f0" }}>${formatMoney(runningEarned)}</td>
+                  <td className="px-2 py-2 sticky bottom-0 z-10 bg-white font-semibold" style={{ boxShadow: "0 -2px 0 #e2e8f0" }}>${formatMoney(runningPaid)}</td>
+                  <td className={`px-2 py-2 whitespace-nowrap sticky bottom-0 z-10 bg-white font-semibold ${startBalance + runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}`} style={{ boxShadow: "0 -2px 0 #e2e8f0" }}>${formatMoney(startBalance + runningEarned - runningPaid)}</td>
                 </tr>
               </tfoot>
             </table>
