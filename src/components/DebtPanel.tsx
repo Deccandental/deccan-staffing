@@ -284,7 +284,7 @@ export default function DebtPanel({
     <div className="rounded-2xl bg-white shadow p-3">
       <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
         <h2 className="font-bold text-slate-700 text-sm">
-          Debt <span className="font-normal text-xs text-slate-400">· cards appear automatically, with their warnings</span>
+          Debt <span className="font-normal text-xs text-slate-400">· set up and edit rates, payments and where each is paid from here; update balances and statements on the Overview cards</span>
         </h2>
         <div className="flex items-center gap-2">
           {dirty && <span className="text-xs text-red-600 font-semibold">⚠️ unsaved</span>}
@@ -525,7 +525,7 @@ export default function DebtPanel({
           <div className="overflow-x-auto">
             <div style={{ minWidth: 1010 }}>
               <div className="grid items-end gap-x-2 text-[11px] text-slate-400 font-medium border-b border-slate-100 pb-1" style={{ gridTemplateColumns: GRID }}>
-                <span>Debt</span><span>Current bal.</span><span>Statement Balance</span><span>Rate %</span><span>Payment</span><span>Interest/mo</span><span>Clear in</span><span>Last update</span><span />
+                <span>Debt</span><span>Current bal.</span><span>Latest statement</span><span>Rate %</span><span>Payment</span><span>Interest/mo</span><span>Clear in</span><span>Last update</span><span />
               </div>
 
               {summary.lines.map((l) => {
@@ -560,16 +560,8 @@ export default function DebtPanel({
                         {!cc && (d.extraMonthly ?? 0) > 0 && <span className="text-slate-400" title={`${d.extraLabel || "Additional charge"}: $${formatMoney(d.extraMonthly)}/mo, paid with the loan but not part of it`}> · +${formatMoney(d.extraMonthly)} {(d.extraLabel || "extra").toLowerCase()}</span>}
                         {!cc && (() => { const lb = linkedBillFor(d.id); const acct = lb ? cashAccounts.find((a) => a.id === lb.cashAccountId)?.name : null; return lb ? <span className="text-slate-400" title={`Scheduled payment: ${lb.name}`}> · {acct ?? "scheduled"}</span> : null; })()}
                       </span>
-                      <NumInput onFocus={(ev) => ev.target.select()} value={curVal} onChange={(ev) => setEdit(key, { cur: ev.target.value })} className={cell} />
-                      <span className="flex items-center gap-1">
-                        <MonthSelect value={selMonth} onChange={(m) => { setMonths((s) => ({ ...s, [key]: m })); setEdits((s) => { const { stmt, ...rest } = s[key] ?? {}; return { ...s, [key]: rest }; }); }} className="w-[74px] shrink-0" />
-                        <NumInput onFocus={(ev) => ev.target.select()} value={stmtVal} placeholder="—" onChange={(ev) => setEdit(key, { stmt: ev.target.value })} className={cell} />
-                        {newerDue && (
-                          <button title={`A ${monthLabel(covered)} statement should be out — click to enter it`}
-                            onClick={() => setMonths((s) => ({ ...s, [key]: covered }))}
-                            className="text-[10px] font-semibold text-amber-600 whitespace-nowrap hover:underline">{monthLabel(covered).split(" ")[0]}?</button>
-                        )}
-                      </span>
+                      <span className="text-slate-700 whitespace-nowrap" title="Update balances on the Overview cards">${formatMoney(Number(curVal) || 0)}</span>
+                      <span className="text-slate-600 whitespace-nowrap" title="Update statements on the Overview cards">{hist[0] ? `${monthLabel(hist[0].month)} $${formatMoney(hist[0].balance)}` : "—"}</span>
                       <NumInput prefix="" suffix="%" step="0.01" min="0" onFocus={(ev) => ev.target.select()} value={rateVal} placeholder="not set" onChange={(ev) => setEdit(key, { rate: ev.target.value })} className={cell} />
                       <NumInput onFocus={(ev) => ev.target.select()} value={payVal} onChange={(ev) => setEdit(key, { pay: ev.target.value })} className={cell} />
                       <span className="whitespace-nowrap" style={{ color: l.monthlyInterest > 0 ? "#A32D2D" : undefined }}>{l.counted ? `$${formatMoney(l.monthlyInterest)}` : "—"}</span>
@@ -579,8 +571,7 @@ export default function DebtPanel({
                       </span>
                       <UpdatedStamp when={status.when} prefix="" />
                       <span className="text-right whitespace-nowrap">
-                        <HistoryButton open={histOpen} onClick={() => setOpenHist(histOpen ? null : key)} />
-                        <button onClick={() => openForm({ ...d })} className="text-xs text-orange-500 hover:underline ml-2">Edit</button>
+                        <button onClick={() => openForm({ ...d })} className="text-xs text-orange-500 hover:underline">Edit</button>
                         {!cc && (
                           <button onClick={async () => {
                             if (!confirm(`Remove ${d.name} from the register?`)) return;
