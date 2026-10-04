@@ -7,8 +7,9 @@ import WeeklyUpdatePanel from "@/components/WeeklyUpdatePanel";
 import UpdateNumbersFlow from "@/components/UpdateNumbersFlow";
 import { buildStaleItems, StaleItem, newestMonth, monthLabel as stmtMonthLabel, coveredMonth, previousMonth } from "@/lib/staleness";
 import BarChart, { BarPoint, BarSeries } from "@/components/BarChart";
-import { UpdatedStamp, MonthSelect, NumInput } from "@/components/CashHistory";
-import { loadDebts, loadDebtStatements, Debt, CATEGORY_SHORT, CATEGORY_LABEL, categoryRank, saveDebt, saveDebtStatement } from "@/lib/debt";
+import { UpdatedStamp, MonthSelect, NumInput, HistoryBlock, HistColumn, HistRow } from "@/components/CashHistory";
+import { updateBalanceCheckAmount, updateStatementEntryAmount, updateBankStatementEntryAmount } from "@/lib/cashflow";
+import { loadDebts, loadDebtStatements, Debt, CATEGORY_SHORT, CATEGORY_LABEL, categoryRank, saveDebt, saveDebtStatement, deleteDebtStatement, updateDebtStatementAmount } from "@/lib/debt";
 import { loadStaff } from "@/lib/staffStore";
 import { loadCompOwed, CompOwedResult } from "@/lib/compOwed";
 import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
@@ -419,8 +420,8 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   // monthly production plus the last income entry of each month. A/R: weekly.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   // Quick entry on each card: balance, statement, and logging a payment, without the guided flow.
-  type Quick = { open: boolean; bal: string; month: string; stmt: string; payAmt: string; payDate: string; msg: string };
-  const blankQuick = (month: string): Quick => ({ open: false, bal: "", month, stmt: "", payAmt: "", payDate: todayStr(), msg: "" });
+  type Quick = { open: boolean; hist: boolean; bal: string; month: string; stmt: string; payAmt: string; payDate: string; msg: string };
+  const blankQuick = (month: string): Quick => ({ open: false, hist: false, bal: "", month, stmt: "", payAmt: "", payDate: todayStr(), msg: "" });
   const [quick, setQuick] = useState<Record<string, Quick>>({});
   const [balanceHist, setBalanceHist] = useState<Record<string, BalanceCheck[]>>({});
   const [statementPts, setStatementPts] = useState<Record<string, BarPoint[]>>({});
@@ -721,6 +722,39 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   const setQ = (t: { key: string; defaultMonth: string }, patch: Partial<Quick>) =>
     setQuick((st) => ({ ...st, [t.key]: { ...(st[t.key] ?? blankQuick(t.defaultMonth)), ...patch } }));
 
+  // Past balance and statement entries for a card, so a typo can be fixed or an entry removed here.
+  const historyColumns = (t: (typeof tiles)[number]): HistColumn[] => [
+    {
+      title: "Current balance",
+      load: async () => (await loadBalanceHistoryForAccount(t.name, 60)).map((b): HistRow => ({
+        id: b.id,
+        label: new Date(b.checkedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }),
+        value: formatUSD(b.balance), amount: b.balance,
+        onAmount: (n) => updateBalanceCheckAmount(b.id, n),
+        onDelete: () => deleteBalanceCheck(b.id),
+      })),
+    },
+    {
+      title: "Statement balance - by month covered",
+      load: async () => {
+        const list = t.kind === "bank" ? await loadStatementHistoryForAccount(t.key) : t.kind === "card" ? await loadStatementHistoryForCard(t.key) : await loadDebtStatements(t.key);
+        return list.map((st): HistRow => ({
+          id: st.id, label: stmtMonthLabel(st.month), month: st.month, value: formatUSD(st.balance), amount: st.balance,
+          onAmount: (n) => (t.kind === "bank" ? updateBankStatementEntryAmount(st.id, n) : t.kind === "card" ? updateStatementEntryAmount(st.id, n) : updateDebtStatementAmount(st.id, n)),
+          onMonth: async (m) => {
+            const all = t.kind === "bank" ? await loadStatementHistoryForAccount(t.key) : t.kind === "card" ? await loadStatementHistoryForCard(t.key) : await loadDebtStatements(t.key);
+            const clash = all.find((x) => x.month === m && x.id !== st.id);
+            if (clash && !confirm(`${stmtMonthLabel(m)} already has a statement on file ($${formatMoney(clash.balance)}). Replace it with $${formatMoney(st.balance)}?`)) return;
+            if (t.kind === "bank") { await backfillBankStatementMonth(t.key, m, st.balance); await deleteBankStatementEntry(st.id); }
+            else if (t.kind === "card") { await backfillStatementMonth(t.key, m, st.balance); await deleteStatementEntry(st.id); }
+            else { await saveDebtStatement(t.key, m, st.balance); await deleteDebtStatement(st.id); }
+          },
+          onDelete: () => (t.kind === "bank" ? deleteBankStatementEntry(st.id) : t.kind === "card" ? deleteStatementEntry(st.id) : deleteDebtStatement(st.id)),
+        }));
+      },
+    },
+  ];
+
   async function quickBalance(t: (typeof tiles)[number]) {
     const q = getQ(t); const n = Number(q.bal);
     if (q.bal === "" || isNaN(n)) return;
@@ -755,7 +789,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-base text-slate-800">{t.name}</h3>
                 <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 rounded-full px-2 py-0.5">{t.tag}</span>
-                <button onClick={() => setQ(t, { open: !getQ(t).open })} className="text-xs font-semibold text-orange-500 hover:underline">{getQ(t).open ? "Close" : "Quick update"}</button>
+                <button onClick={() => setQ(t, { open: !getQ(t).open })} className="text-xs font-semibold text-orange-500 hover:underline">{getQ(t).open ? "Close" : "Update"}</button>
               </div>
               <div>
                 <p className="text-3xl font-bold leading-tight" style={{ color: "#4A4238" }}>{t.balance != null ? formatUSD(t.balance) : "—"}</p>
@@ -814,7 +848,9 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
                     )}
                   </div>
                 )}
+                <button onClick={() => setQ(t, { hist: !q.hist })} className="text-xs font-semibold text-orange-500 hover:underline pb-1">{q.hist ? "Hide history" : "History"}</button>
                 {q.msg && <p className="text-xs font-semibold text-slate-600 basis-full">{q.msg}</p>}
+                {q.hist && <div className="basis-full"><HistoryBlock columns={historyColumns(t)} onChanged={() => refreshAll()} /></div>}
               </div>
             );
           })()}
