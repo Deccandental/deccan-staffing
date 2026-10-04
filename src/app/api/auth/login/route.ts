@@ -19,6 +19,17 @@ export async function POST(req: NextRequest) {
 
   const isSuper = !!process.env.SUPER_PASSCODE && code === process.env.SUPER_PASSCODE;
 
+  // The CPA has their own passcode (CPA_PASSCODE, set on the server). It opens the statements page and
+  // nothing else: the token carries no permissions, so the financial gateway and every admin route refuse it.
+  const cpaCode = process.env.CPA_PASSCODE;
+  if (!isSuper && cpaCode && cpaCode.length >= 8 && code === cpaCode) {
+    const cpaToken = createSessionToken({
+      mode: "cpa", employeeName: "CPA",
+      canAdmin: false, canManageLeave: false, canManageEvents: false, canManageCerts: false, canManagePayroll: false,
+    });
+    return NextResponse.json({ ok: true, cpa: true, isSuper: false, employee: null, token: cpaToken });
+  }
+
   const { data, error } = await supabaseAdmin
     .from("staff")
     .select(
