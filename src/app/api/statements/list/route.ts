@@ -23,14 +23,20 @@ export async function POST(req: NextRequest) {
     const month = MONTH_RE.test(String(body.month)) ? String(body.month) : new Date().toISOString().slice(0, 7);
     const [inv, sources] = await Promise.all([
       supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("month", month).order("invoice_date", { ascending: true }),
-      supabaseAdmin.from("statement_sources").select("id, name, category, active").order("name"),
+      supabaseAdmin.from("statement_sources").select("*").order("name"),
     ]);
     if (inv.error) return NextResponse.json({ error: "Invoices aren't set up yet (run the invoices SQL)." }, { status: 500 });
     const vendors = (sources.data ?? []).filter((v: any) => v.active).map((v: any) => ({ id: String(v.id), name: v.name, category: v.category }));
+    // The whole directory (including retired ones) for the Vendors panel.
+    const vendorsAll = (sources.data ?? []).map((v: any) => ({ id: String(v.id), name: v.name, category: v.category, active: v.active, expectsStatement: v.expects_statement !== false }));
     // Every category already used on an invoice, so a new one typed once shows up in the list from then on.
     const { data: used } = await supabaseAdmin.from("statement_files").select("category").eq("doc_type", "invoice").neq("category", "").limit(3000);
     const categories = [...new Set((used ?? []).map((r: any) => String(r.category)))].sort();
-    return NextResponse.json({ role: acc.role, month, files: inv.data ?? [], vendors, categories });
+    // Names typed on earlier invoices that aren't saved as vendors, offered as suggestions so they aren't retyped.
+    const { data: typed } = await supabaseAdmin.from("statement_files").select("account_name").eq("doc_type", "invoice").eq("account_kind", "other").limit(3000);
+    const known = new Set(vendorsAll.map((v: any) => String(v.name).trim().toLowerCase()));
+    const usedNames = [...new Set((typed ?? []).map((r: any) => String(r.account_name).trim()))].filter((n) => n && !known.has(n.toLowerCase())).sort();
+    return NextResponse.json({ role: acc.role, month, files: inv.data ?? [], vendors, vendorsAll, usedNames, categories });
   }
 
   // One account's filed statements, newest month first.
@@ -47,7 +53,7 @@ export async function POST(req: NextRequest) {
     supabaseAdmin.from("cash_accounts").select("*"),
     supabaseAdmin.from("credit_cards").select("*"),
     supabaseAdmin.from("debts").select("id, name, kind, active"),
-    supabaseAdmin.from("statement_sources").select("id, name, category, start_month, active").order("name"),
+    supabaseAdmin.from("statement_sources").select("*").order("name"),
     supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "statement").like("month", `${year}-%`).order("uploaded_at", { ascending: true }),
     supabaseAdmin.from("bank_statement_entries").select("cash_account_id, month, balance").like("month", `${year}-%`),
     supabaseAdmin.from("card_statement_entries").select("credit_card_id, month, balance").like("month", `${year}-%`),
@@ -65,7 +71,7 @@ export async function POST(req: NextRequest) {
   // Labs and other vendors. A retired one stays visible only while it has statements filed that year.
   const fileRows = files.data ?? [];
   const vendors = (sources.data ?? [])
-    .filter((v: any) => v.active || fileRows.some((f: any) => f.account_kind === "vendor" && f.account_id === String(v.id)))
+    .filter((v: any) => (v.active && v.expects_statement !== false) || fileRows.some((f: any) => f.account_kind === "vendor" && f.account_id === String(v.id)))
     .map((v: any) => ({ kind: "vendor", id: String(v.id), name: v.name, category: v.category, startMonth: v.start_month, active: v.active }));
 
   // What Cash Flow already holds as each month's statement balance, so the amount can be filled in for you.
