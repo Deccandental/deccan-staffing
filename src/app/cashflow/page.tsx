@@ -31,7 +31,7 @@ import {
   loadDentalMonthlyHistory, backfillDentalMonth, deleteDentalMonthlyEntry, DentalMonthlyEntry,
   loadDentalMonthlySummaries, saveDentalMonthlySummary, deleteDentalMonthlySummary, DentalMonthlySummary,
   buildOccurrences, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
-  computeAccountForecast, computeSuggestedTransfer, computeCardRecommendation, computeRequiredCollections,
+  computeAccountForecast, computeSuggestedTransfer, computeCardRecommendation, computeRequiredCollectionsMulti, computeSuggestedTransferMulti,
 } from "@/lib/cashflow";
 
 const FREQ_LABELS: Record<BillFrequency, string> = { weekly: "Weekly", biweekly: "Biweekly", monthly: "Monthly", once: "One-time" };
@@ -504,11 +504,9 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   const today = todayStr();
   const monthStart = today.slice(0, 8) + "01";
   const occurrences = buildOccurrences(allBills, allPayments, monthStart, addDays(today, 14));
-  const ff = cashAccounts.find((a) => a.name === "Fifth Third Checking");
-  const chase = cashAccounts.find((a) => a.name === "Chase");
-  const ffForecast = ff ? computeAccountForecast(ff, latestBalances[ff.name]?.balance ?? 0, occurrences, today, 0) : null;
-  const chaseForecast = chase ? computeAccountForecast(chase, latestBalances[chase.name]?.balance ?? 0, occurrences, today, 0) : null;
-  const transfer = ffForecast && chaseForecast ? computeSuggestedTransfer(ffForecast, chaseForecast) : null;
+  // Works for however many bank accounts are open (it used to assume exactly Fifth Third and Chase).
+  const forecasts = cashAccounts.map((a) => computeAccountForecast(a, latestBalances[a.name]?.balance ?? 0, occurrences, today, 0));
+  const transfer = computeSuggestedTransferMulti(forecasts);
 
   // The goal was hardcoded here; it now comes from whatever is set for the
   // year on the Weekly Update tab, falling back to the old figure only
@@ -553,8 +551,8 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     ...(cardMinTotal > 0 ? [{ label: "Card minimums not scheduled as bills", detail: unscheduledCardMins.map((c) => `${c.name} $${formatMoney(c.amount)}`).join(", "), amount: cardMinTotal }] : []),
   ];
   const owedTotal = owedItems.reduce((sum, i) => sum + i.amount, 0);
-  const requiredCollections = ff && chase
-    ? computeRequiredCollections(ff, chase, latestBalances[ff.name]?.balance ?? 0, latestBalances[chase.name]?.balance ?? 0, fullMonthOccurrences, productionNum, owedTotal)
+  const requiredCollections = cashAccounts.length > 0
+    ? computeRequiredCollectionsMulti(cashAccounts, (a) => latestBalances[a.name]?.balance ?? 0, fullMonthOccurrences, productionNum, owedTotal)
     : null;
 
   const cardRecs = cards.map((card) => {
