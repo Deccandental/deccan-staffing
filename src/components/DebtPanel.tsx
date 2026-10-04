@@ -5,7 +5,7 @@ import { formatMoney, formatUSD } from "@/lib/format";
 import { Debt, DebtKind, DebtCategory, CATEGORY_LABEL, CATEGORY_SHORT, LOAN_CATEGORIES, categoryRank, loadDebts, saveDebt, deleteDebt, computeDebtSummary, loadDebtStatements, saveDebtStatement, deleteDebtStatement, updateDebtStatementAmount } from "@/lib/debt";
 import {
   CreditCard, BalanceCheck, CashAccount, CardCharge, RecurringBill, BillPayment,
-  buildOccurrences, addDays, updateBalanceCheckAmount, updateStatementEntryAmount,
+  buildOccurrences, addDays, addRecurringBill, updateRecurringBill, updateBalanceCheckAmount, updateStatementEntryAmount,
   computeAccountForecast, computeSuggestedTransfer, computeCardRecommendation,
   addBalanceCheck, loadBalanceHistoryForAccount, deleteBalanceCheck,
   updateStatementBalance, loadStatementHistoryForCard, backfillStatementMonth, deleteStatementEntry,
@@ -55,6 +55,15 @@ export default function DebtPanel({
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [openHist, setOpenHist] = useState<string | null>(null);
+  // Scheduled payment for the loan being added/edited: none, link an existing bill, or create one.
+  type PayLink = { mode: "none" | "existing" | "create"; billId: string; accountId: string; day: string };
+  const [payLink, setPayLink] = useState<PayLink>({ mode: "none", billId: "", accountId: "", day: "1" });
+  const linkedBillFor = (debtId?: string) => (debtId ? allBills.find((b) => b.linkedDebtId === debtId && b.active) : undefined);
+  function openForm(base: Omit<Debt, "id"> & { id?: string }) {
+    const b = linkedBillFor(base.id);
+    setPayLink(b ? { mode: "existing", billId: b.id, accountId: b.cashAccountId ?? "", day: "1" } : { mode: "none", billId: "", accountId: cashAccounts[0]?.id ?? "", day: "1" });
+    setForm({ ...base }); setShowForm(true);
+  }
   // ---- Card warnings (moved here from the old Credit Cards tab) ----
   const nowD = new Date();
   const today = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}-${String(nowD.getDate()).padStart(2, "0")}`;
@@ -116,7 +125,9 @@ export default function DebtPanel({
 
   const cardDebts: Debt[] = creditCards.map(debtForCard);
   const installmentDebts = debts.filter((d) => d.kind !== "revolving").sort((a, b) => categoryRank(a.category) - categoryRank(b.category));
-  const allDebts = [...cardDebts, ...installmentDebts];
+  // A loan with a linked scheduled payment takes its payment amount from that bill, so
+  // the amount is only ever entered once.
+  const allDebts = [...cardDebts, ...installmentDebts].map((d) => { const b = d.kind !== "revolving" ? linkedBillFor(d.id) : undefined; return b ? { ...d, monthlyPayment: b.estimatedAmount } : d; });
 
   // Interest is charged on the statement balance, so that's the figure the
   // debt totals use; a card with no statement on file falls back to current.
@@ -165,7 +176,11 @@ export default function DebtPanel({
       if (needsDebtRow) {
         const payload: Omit<Debt, "id"> & { id?: string } = { ...base };
         if (e.rate !== undefined) payload.interestRate = e.rate === "" ? null : (isNaN(Number(e.rate)) ? base.interestRate : Number(e.rate));
-        if (e.pay !== undefined && num(e.pay) != null) payload.monthlyPayment = Number(e.pay);
+        if (e.pay !== undefined && num(e.pay) != null) {
+          payload.monthlyPayment = Number(e.pay);
+          const lb = !cc ? linkedBillFor(base.id) : undefined;
+          if (lb) await updateRecurringBill(lb.id, { estimatedAmount: Number(e.pay) });
+        }
         if (!cc && cur != null) payload.currentBalance = cur;
         if (payload.id?.startsWith("card:")) delete payload.id;
         const r = await saveDebt(payload);
@@ -196,8 +211,40 @@ export default function DebtPanel({
     if (payload.id?.startsWith("card:")) delete payload.id;
     const res = await saveDebt(payload);
     if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
+    const debtId = res.id ?? payload.id;
+
+    if (payload.kind !== "revolving") {
+      // The balance typed in the form is a real balance: log it, so the chart, the
+      // "Updated" date and everything that reads balances see it too.
+      const last = latestBalances[payload.name]?.balance;
+      if (payload.currentBalance > 0 && (last == null || Math.abs(last - payload.currentBalance) > 0.004)) {
+        await addBalanceCheck(payload.name, payload.currentBalance);
+      }
+      // Scheduled payment: entered once, as a bill, and linked to the loan.
+      if (debtId) {
+        const prior = linkedBillFor(debtId);
+        if (payLink.mode === "none") {
+          if (prior) await updateRecurringBill(prior.id, { linkedDebtId: null });
+        } else if (payLink.mode === "existing" && payLink.billId) {
+          if (prior && prior.id !== payLink.billId) await updateRecurringBill(prior.id, { linkedDebtId: null });
+          await updateRecurringBill(payLink.billId, { linkedDebtId: debtId, estimatedAmount: payload.monthlyPayment });
+        } else if (payLink.mode === "create" && payLink.accountId) {
+          const day = Math.min(28, Math.max(1, Number(payLink.day) || 1));
+          const now = new Date();
+          let due = new Date(now.getFullYear(), now.getMonth(), day);
+          if (due < new Date(now.getFullYear(), now.getMonth(), now.getDate())) due = new Date(now.getFullYear(), now.getMonth() + 1, day);
+          const anchorDate = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`;
+          if (prior) await updateRecurringBill(prior.id, { linkedDebtId: null });
+          await addRecurringBill({
+            name: `${payload.name} payment`, estimatedAmount: payload.monthlyPayment, frequency: "monthly", anchorDate,
+            category: "bill", active: true, cashAccountId: payLink.accountId, direction: "outflow", essential: true, linkedDebtId: debtId,
+          });
+        }
+      }
+    }
     setError(""); setShowForm(false); setForm({ ...EMPTY });
     refresh();
+    refreshAll?.();
   }
 
   const fmtMonths = (m: number | null) => {
@@ -248,7 +295,7 @@ export default function DebtPanel({
             {saving ? "Saving…" : "Save Debts"}
           </button>
           {!showForm && (
-            <button onClick={() => { setForm({ ...EMPTY }); setShowForm(true); }} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add Loan</button>
+            <button onClick={() => openForm({ ...EMPTY })} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add Loan</button>
           )}
         </div>
       </div>
@@ -400,6 +447,51 @@ export default function DebtPanel({
                 <label className={lbl}>Note (optional)</label>
                 <input value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className={formInput} />
               </div>
+              {form.kind !== "revolving" && (
+                <div className="sm:col-span-3 rounded-lg bg-slate-50 px-3 py-2.5">
+                  <label className={lbl}>Scheduled payment <span className="font-normal text-slate-400">— so it's entered once, not twice</span></label>
+                  <select
+                    value={payLink.mode === "existing" ? payLink.billId : payLink.mode === "create" ? "__create" : ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "") setPayLink((p) => ({ ...p, mode: "none", billId: "" }));
+                      else if (v === "__create") setPayLink((p) => ({ ...p, mode: "create", billId: "", accountId: p.accountId || cashAccounts[0]?.id || "" }));
+                      else {
+                        const b = allBills.find((x) => x.id === v);
+                        setPayLink((p) => ({ ...p, mode: "existing", billId: v, accountId: b?.cashAccountId ?? p.accountId }));
+                        if (b) setForm((f) => ({ ...f, monthlyPayment: b.estimatedAmount }));
+                      }
+                    }}
+                    className={`${formInput} bg-white`}>
+                    <option value="">Not scheduled in a bank account</option>
+                    <optgroup label="Link a payment that's already scheduled">
+                      {allBills.filter((b) => b.active && b.direction === "outflow" && !b.linkedCreditCardId && (!b.linkedDebtId || b.linkedDebtId === form.id)).map((b) => (
+                        <option key={b.id} value={b.id}>{b.name} — ${formatMoney(b.estimatedAmount)} — {cashAccounts.find((a) => a.id === b.cashAccountId)?.name ?? "no account"}</option>
+                      ))}
+                    </optgroup>
+                    <option value="__create">Create the scheduled payment for me…</option>
+                  </select>
+                  {payLink.mode === "existing" && (() => {
+                    const b = allBills.find((x) => x.id === payLink.billId);
+                    return b ? <p className="text-xs text-slate-500 mt-1">Paid from <strong>{cashAccounts.find((a) => a.id === b.cashAccountId)?.name ?? "no account"}</strong>. This bill and the loan's monthly payment are kept equal, and it's counted once in Need to collect.</p> : null;
+                  })()}
+                  {payLink.mode === "create" && (
+                    <div className="flex flex-wrap items-end gap-3 mt-2">
+                      <div>
+                        <label className={lbl}>Paid from</label>
+                        <select value={payLink.accountId} onChange={(e) => setPayLink((p) => ({ ...p, accountId: e.target.value }))} className={`${formInput} bg-white`} style={{ width: 200 }}>
+                          {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={lbl}>Due day of the month</label>
+                        <input type="number" min={1} max={28} value={payLink.day} onChange={(e) => setPayLink((p) => ({ ...p, day: e.target.value }))} className={formInput} style={{ width: 90 }} />
+                      </div>
+                      <p className="text-xs text-slate-400 pb-2">A monthly bill for the payment above is added to that account.</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {error && <p className="text-sm text-red-600 font-semibold mt-2">⚠️ {error}</p>}
             <div className="flex items-center gap-2 mt-3">
@@ -447,6 +539,7 @@ export default function DebtPanel({
                         {cc && d.paidInFullMonthly && <span className="text-emerald-600" title="Paid in full every month — not counted as debt or interest"> · paid monthly</span>}
                         {!cc && d.rateType === "variable" && <span className="text-blue-600" title="Variable rate"> · var</span>}
                         {!cc && d.prepayPenalty && <span className="text-red-600" title="Prepayment penalty — paying early costs extra"> · PP</span>}
+                        {!cc && (() => { const lb = linkedBillFor(d.id); const acct = lb ? cashAccounts.find((a) => a.id === lb.cashAccountId)?.name : null; return lb ? <span className="text-slate-400" title={`Scheduled payment: ${lb.name}`}> · {acct ?? "scheduled"}</span> : null; })()}
                       </span>
                       <NumInput onFocus={(ev) => ev.target.select()} value={curVal} onChange={(ev) => setEdit(key, { cur: ev.target.value })} className={cell} />
                       <span className="flex items-center gap-1">
@@ -468,7 +561,7 @@ export default function DebtPanel({
                       <UpdatedStamp when={status.when} prefix="" />
                       <span className="text-right whitespace-nowrap">
                         <HistoryButton open={histOpen} onClick={() => setOpenHist(histOpen ? null : key)} />
-                        <button onClick={() => { setForm({ ...d }); setShowForm(true); }} className="text-xs text-orange-500 hover:underline ml-2">Edit</button>
+                        <button onClick={() => openForm({ ...d })} className="text-xs text-orange-500 hover:underline ml-2">Edit</button>
                         {!cc && (
                           <button onClick={async () => {
                             if (!confirm(`Remove ${d.name} from the register?`)) return;
