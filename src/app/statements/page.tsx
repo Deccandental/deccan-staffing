@@ -60,6 +60,13 @@ export default function StatementsPage() {
   const [iMatch, setIMatch] = useState<{ billId: string; dueDate: string; billName: string; amount: number } | null>(null);
   const [unpaidOnly, setUnpaidOnly] = useState(false);
   const [iCategory, setICategory] = useState("");
+  // Vendor directory
+  const [vendorsAll, setVendorsAll] = useState<{ id: string; name: string; category: string; active: boolean; expectsStatement: boolean }[]>([]);
+  const [usedNames, setUsedNames] = useState<string[]>([]);
+  const [showVendors, setShowVendors] = useState(false);
+  const [iSave, setISave] = useState(true);       // save a newly typed vendor to the list
+  const [iType, setIType] = useState("Other");    // its type
+  const [vExpects, setVExpects] = useState(true); // new vendor on the Monthly statements tab: sends a statement?
   const [usedCategories, setUsedCategories] = useState<string[]>([]);
   const [catFilter, setCatFilter] = useState("");
   // A possible duplicate found before filing: the person can file it anyway or cancel.
@@ -211,24 +218,32 @@ export default function StatementsPage() {
     setLoading(false);
     if (r.status === 401) { logout(); return; }
     if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load invoices."); return; }
-    setInvFiles(r.json.files ?? []); setInvVendors(r.json.vendors ?? []); setUsedCategories(r.json.categories ?? []);
+    setInvFiles(r.json.files ?? []); setInvVendors(r.json.vendors ?? []); setUsedCategories(r.json.categories ?? []); setVendorsAll(r.json.vendorsAll ?? []); setUsedNames(r.json.usedNames ?? []);
   }, [role, invMonth]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (tab === "invoices") loadInvoices(); }, [tab, loadInvoices]);
 
   async function addInvoice(file: File, ignoreDup = false) {
     setMsg(""); setDup(null);
-    const vendor = invVendors.find((v) => v.id === iVendor);
-    const name = vendor ? vendor.name : iOther.trim();
+    let vendor = invVendors.find((v) => v.id === iVendor);
+    const typed = iOther.trim();
+    // A typed name that matches a saved vendor is that vendor, so one company never ends up listed twice.
+    if (!vendor && typed) vendor = invVendors.find((v) => v.name.trim().toLowerCase() === typed.toLowerCase());
+    const name = vendor ? vendor.name : typed;
     if (!name) { setMsg("Choose a vendor or type a name."); return; }
     if (!iDate) { setMsg("Enter the invoice date."); return; }
     if (!iNumber.trim()) { setMsg("Enter the invoice number."); return; }
     if (iAmount.trim() === "" || isNaN(Number(iAmount))) { setMsg("Enter the invoice amount."); return; }
     if (!/\.pdf$/i.test(file.name)) { setMsg("Only PDF files can be uploaded."); return; }
-    const kind = vendor ? "vendor" : "other";
     setBusy(true);
+    let kind = vendor ? "vendor" : "other";
     if (!ignoreDup) {
       const chk = await api("/api/statements/manage", { action: "checkDuplicate", docType: "invoice", accountKind: kind, accountId: vendor?.id ?? "", accountName: name, invoiceDate: iDate, invoiceNumber: iNumber, amount: iAmount });
       if (chk.ok && (chk.json.matches ?? []).length > 0) { setBusy(false); setDup({ matches: chk.json.matches, proceed: () => addInvoice(file, true) }); return; }
+    }
+    // Only now, once the invoice is really going ahead, save a new vendor to the list (invoice-only: no monthly statement expected).
+    if (!vendor && iSave) {
+      const saved = await api("/api/statements/manage", { action: "addSource", name, category: iType, startMonth: new Date().toISOString().slice(0, 7), expectsStatement: false });
+      if (saved.ok && saved.json.data?.id) { vendor = { id: String(saved.json.data.id), name, category: iType }; kind = "vendor"; setInvVendors((v) => [...v, vendor!]); }
     }
     const slot = await api("/api/statements/upload-url", { docType: "invoice", accountKind: kind, accountName: name, month: iDate.slice(0, 7), fileName: file.name, size: file.size });
     if (!slot.ok) { setBusy(false); setMsg(slot.json.error ?? "Couldn't start the upload."); return; }
@@ -265,6 +280,15 @@ export default function StatementsPage() {
     const r = await api("/api/statements/manage", { action: "setInvoiceCategory", id: f.id, category });
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't save the category."); loadInvoices(); }
   }
+  async function updateVendor(id: string, patch: Record<string, unknown>) {
+    const r = await api("/api/statements/manage", { action: "updateSource", id, ...patch });
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update the vendor."); return; }
+    loadInvoices();
+  }
+  async function renameDirVendor(v: { id: string; name: string }) {
+    const name = window.prompt("Rename:", v.name);
+    if (name && name.trim() && name.trim() !== v.name) updateVendor(v.id, { name });
+  }
   async function unlinkInvoice(f: FileRow) {
     const r = await api("/api/statements/manage", { action: "matchInvoice", id: f.id, billId: null });
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
@@ -283,7 +307,7 @@ export default function StatementsPage() {
   async function addVendor() {
     if (!vName.trim()) { setMsg("Enter a name."); return; }
     setBusy(true);
-    const r = await api("/api/statements/manage", { action: "addSource", name: vName, category: vCategory, startMonth: vStart });
+    const r = await api("/api/statements/manage", { action: "addSource", name: vName, category: vCategory, startMonth: vStart, expectsStatement: vExpects });
     setBusy(false);
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't add it."); return; }
     setVName(""); setAdding(false); setMsg(`Added ${vName.trim()}.`); load();
@@ -409,9 +433,29 @@ export default function StatementsPage() {
             <option value="">All categories</option>
             {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+          {finance && <button onClick={() => setShowVendors((v) => !v)} className="text-sm font-semibold text-orange-500 hover:underline">{showVendors ? "Hide vendors" : "Vendors"}</button>}
           <label className="flex items-center gap-1.5 text-sm text-slate-600"><input type="checkbox" checked={unpaidOnly} onChange={(e) => setUnpaidOnly(e.target.checked)} /> Unpaid only</label>
         </div>
         {loadError && <p className="text-sm text-red-600 font-semibold">⚠️ {loadError}</p>}
+
+        {finance && showVendors && (
+          <div className="rounded-2xl bg-white shadow px-5 py-3 space-y-1">
+            <h3 className="font-bold text-sm text-slate-700">Vendors</h3>
+            <p className="text-xs text-slate-500">Everyone you've saved. Tick "Monthly statement" only for vendors that send one each month, since those appear on the monthly checklist and in the Friday reminder.</p>
+            {vendorsAll.length === 0 && <p className="text-xs text-slate-400 pt-1">No vendors saved yet. File an invoice and tick "Save to my vendor list".</p>}
+            {vendorsAll.map((v) => (
+              <div key={v.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm border-t border-slate-100 pt-1.5" style={{ opacity: v.active ? 1 : 0.5 }}>
+                <span className="font-medium text-slate-700 w-48 truncate">{v.name}{!v.active && <span className="ml-1 text-xs font-normal text-slate-400">retired</span>}</span>
+                <select value={v.category} onChange={(e) => updateVendor(v.id, { category: e.target.value })} className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none">
+                  <option>Lab</option><option>Supplier</option><option>Insurance</option><option>Other</option>
+                </select>
+                <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={v.expectsStatement} onChange={(e) => updateVendor(v.id, { expectsStatement: e.target.checked })} /> Monthly statement</label>
+                <button onClick={() => renameDirVendor(v)} className="text-xs text-slate-400 hover:text-slate-600" title="Rename">✎ Rename</button>
+                <button onClick={() => updateVendor(v.id, { active: !v.active })} className="text-xs text-slate-400 hover:text-slate-600">{v.active ? "Retire" : "Restore"}</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {finance && (
           <div className="rounded-2xl bg-white shadow px-5 py-3">
@@ -428,10 +472,24 @@ export default function StatementsPage() {
                     </select>
                   </div>
                   {!iVendor && (
-                    <div style={{ flex: "1 1 180px" }}>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Vendor name</label>
-                      <input value={iOther} onChange={(e) => setIOther(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-                    </div>
+                    <>
+                      <div style={{ flex: "1 1 180px" }}>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Vendor name</label>
+                        <input value={iOther} onChange={(e) => setIOther(e.target.value)} list="usedVendorNames" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+                        <datalist id="usedVendorNames">{usedNames.map((n) => <option key={n} value={n} />)}</datalist>
+                      </div>
+                      {iOther.trim() && !invVendors.some((v) => v.name.trim().toLowerCase() === iOther.trim().toLowerCase()) && (
+                        <>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1">Type</label>
+                            <select value={iType} onChange={(e) => setIType(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+                              <option>Lab</option><option>Supplier</option><option>Insurance</option><option>Other</option>
+                            </select>
+                          </div>
+                          <label className="flex items-center gap-1.5 text-sm text-slate-600 pb-2"><input type="checkbox" checked={iSave} onChange={(e) => setISave(e.target.checked)} /> Save to my vendor list</label>
+                        </>
+                      )}
+                    </>
                   )}
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Invoice date</label>
@@ -647,6 +705,7 @@ export default function StatementsPage() {
                 <label className="block text-xs font-semibold text-slate-500 mb-1">First statement month</label>
                 <input type="month" value={vStart} onChange={(e) => setVStart(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
               </div>
+              <label className="flex items-center gap-1.5 text-sm text-slate-600 pb-2"><input type="checkbox" checked={vExpects} onChange={(e) => setVExpects(e.target.checked)} /> Sends a monthly statement</label>
               <button onClick={addVendor} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>Add</button>
               <button onClick={() => setAdding(false)} className="text-sm text-slate-400 hover:underline pb-2">Cancel</button>
             </div>
