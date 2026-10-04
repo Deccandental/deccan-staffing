@@ -14,11 +14,14 @@ import { loadRecurringBills, loadBillPayments, buildOccurrences, addDays, Recurr
 
 type Role = "finance" | "cpa";
 interface Account { kind: "bank" | "card" | "loan" | "vendor"; id: string; name: string; category?: string; startMonth?: string; active?: boolean }
-interface FileRow { paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
+interface FileRow { category?: string; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
 
 const ROLE_KEY = "dd_statements_role";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const KIND_LABEL: Record<string, string> = { bank: "Bank accounts", card: "Credit cards", loan: "Loans" };
+const DEFAULT_CATEGORIES = ["CAM", "Rent", "Supplies", "Lab", "Utilities", "Insurance", "Equipment & repairs", "Marketing", "Professional fees", "Other"];
+// A vendor's type suggests a starting category for its invoices.
+const VENDOR_TYPE_CATEGORY: Record<string, string> = { Lab: "Lab", Supplier: "Supplies", Insurance: "Insurance" };
 const VENDOR_LABEL: Record<string, string> = { Lab: "Labs", Supplier: "Suppliers", Insurance: "Insurance", Other: "Other vendors" };
 const acctKey = (kind: string, id: string) => `${kind}:${id}`;
 const mkey = (year: number, m: number) => `${year}-${String(m).padStart(2, "0")}`;
@@ -56,6 +59,9 @@ export default function StatementsPage() {
   const [billPayments, setBillPayments] = useState<BillPayment[]>([]);
   const [iMatch, setIMatch] = useState<{ billId: string; dueDate: string; billName: string; amount: number } | null>(null);
   const [unpaidOnly, setUnpaidOnly] = useState(false);
+  const [iCategory, setICategory] = useState("");
+  const [usedCategories, setUsedCategories] = useState<string[]>([]);
+  const [catFilter, setCatFilter] = useState("");
   // A possible duplicate found before filing: the person can file it anyway or cancel.
   const [dup, setDup] = useState<{ matches: (FileRow & { reason?: string })[]; note?: string; proceed: () => void } | null>(null);
   // Invoices (a separate list from the monthly statements)
@@ -118,6 +124,11 @@ export default function StatementsPage() {
     const v = a && sel ? cfBalances[`${a.kind}:${a.id}:${sel.month}`] : undefined;
     setSAmount(v != null ? String(v) : "");
   }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Choosing a vendor suggests a category from its type (a lab -> Lab); it can still be changed.
+  useEffect(() => {
+    const v = invVendors.find((x) => x.id === iVendor);
+    if (v && VENDOR_TYPE_CATEGORY[v.category]) setICategory(VENDOR_TYPE_CATEGORY[v.category]);
+  }, [iVendor, invVendors]);
   // Scheduled bills, for matching invoices to what is already expected (finance only).
   useEffect(() => {
     if (role !== "finance" || !invAdding) return;
@@ -191,7 +202,7 @@ export default function StatementsPage() {
     setLoading(false);
     if (r.status === 401) { logout(); return; }
     if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load invoices."); return; }
-    setInvFiles(r.json.files ?? []); setInvVendors(r.json.vendors ?? []);
+    setInvFiles(r.json.files ?? []); setInvVendors(r.json.vendors ?? []); setUsedCategories(r.json.categories ?? []);
   }, [role, invMonth]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (tab === "invoices") loadInvoices(); }, [tab, loadInvoices]);
 
@@ -214,7 +225,7 @@ export default function StatementsPage() {
     if (!slot.ok) { setBusy(false); setMsg(slot.json.error ?? "Couldn't start the upload."); return; }
     const up = await supabase.storage.from("statements").uploadToSignedUrl(slot.json.path, slot.json.token, file, { contentType: "application/pdf" });
     if (up.error) { setBusy(false); setMsg(`Upload failed: ${up.error.message}`); return; }
-    const rec = await api("/api/statements/manage", { action: "confirm", docType: "invoice", path: slot.json.path, accountKind: kind, accountId: vendor?.id ?? "", accountName: name, invoiceDate: iDate, invoiceNumber: iNumber, amount: iAmount, fileName: file.name, size: file.size, dupIgnored: ignoreDup, matchedBillId: iMatch?.billId, matchedDueDate: iMatch?.dueDate });
+    const rec = await api("/api/statements/manage", { action: "confirm", docType: "invoice", path: slot.json.path, accountKind: kind, accountId: vendor?.id ?? "", accountName: name, invoiceDate: iDate, invoiceNumber: iNumber, amount: iAmount, fileName: file.name, size: file.size, dupIgnored: ignoreDup, matchedBillId: iMatch?.billId, matchedDueDate: iMatch?.dueDate, category: iCategory });
     setBusy(false);
     if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't record the invoice."); return; }
     setMsg(`Filed invoice ${iNumber.trim()} from ${name}.`); setINumber(""); setIAmount(""); setIMatch(null);
@@ -232,6 +243,18 @@ export default function StatementsPage() {
     setBusy(false);
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
     loadInvoices();
+  }
+  async function newCategory(): Promise<string> {
+    const c = (window.prompt("New category name:") ?? "").trim().slice(0, 40);
+    if (c) setUsedCategories((u) => (u.includes(c) ? u : [...u, c]));
+    return c;
+  }
+  async function changeCategory(f: FileRow, value: string) {
+    let category = value;
+    if (value === "__new") { category = await newCategory(); if (!category) return; }
+    setInvFiles((list) => list.map((x) => (x.id === f.id ? { ...x, category } : x)));
+    const r = await api("/api/statements/manage", { action: "setInvoiceCategory", id: f.id, category });
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't save the category."); loadInvoices(); }
   }
   async function unlinkInvoice(f: FileRow) {
     const r = await api("/api/statements/manage", { action: "matchInvoice", id: f.id, billId: null });
@@ -299,6 +322,7 @@ export default function StatementsPage() {
     );
   }
 
+  const categoryOptions = [...new Set([...DEFAULT_CATEGORIES, ...usedCategories])];
   const money = (n: number | null | undefined) => (n == null ? "no amount" : `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
   const dupBanner = dup && (
     <div className="rounded-xl px-4 py-3 text-sm space-y-1" style={{ background: "#FAEEDA", color: "#854F0B", border: "1px solid #f2d3a0" }}>
@@ -372,6 +396,10 @@ export default function StatementsPage() {
           <label className="text-sm font-semibold text-slate-600">Month</label>
           <input type="month" value={invMonth} onChange={(e) => e.target.value && setInvMonth(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
           <input value={invSearch} onChange={(e) => setInvSearch(e.target.value)} placeholder="Search vendor or invoice #…" className="w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
+          <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+            <option value="">All categories</option>
+            {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
           <label className="flex items-center gap-1.5 text-sm text-slate-600"><input type="checkbox" checked={unpaidOnly} onChange={(e) => setUnpaidOnly(e.target.checked)} /> Unpaid only</label>
         </div>
         {loadError && <p className="text-sm text-red-600 font-semibold">⚠️ {loadError}</p>}
@@ -408,6 +436,15 @@ export default function StatementsPage() {
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Amount (required)</label>
                     <input type="number" step="0.01" value={iAmount} onChange={(e) => setIAmount(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 120 }} />
                   </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Category</label>
+                    <select value={iCategory} onChange={async (e) => { if (e.target.value === "__new") { const c = await newCategory(); if (c) setICategory(c); } else setICategory(e.target.value); }}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" style={{ minWidth: 150 }}>
+                      <option value="">None</option>
+                      {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                      <option value="__new">+ New category…</option>
+                    </select>
+                  </div>
                 </div>
                 {iMatch ? (
                   <div className="rounded-lg px-3 py-2 text-sm" style={{ background: "#dbeafe", color: "#1e4e8c" }}>
@@ -443,7 +480,7 @@ export default function StatementsPage() {
 
         {(() => {
           const q = invSearch.trim().toLowerCase();
-          const shown = invFiles.filter((f) => (!unpaidOnly || !f.paid) && (!q || f.account_name.toLowerCase().includes(q) || (f.invoice_number ?? "").toLowerCase().includes(q)));
+          const shown = invFiles.filter((f) => (!unpaidOnly || !f.paid) && (!catFilter || (f.category ?? "") === catFilter) && (!q || f.account_name.toLowerCase().includes(q) || (f.invoice_number ?? "").toLowerCase().includes(q)));
           const total = shown.reduce((n, f) => n + (f.amount ?? 0), 0);
           const withAmount = shown.filter((f) => f.amount != null).length;
           return (
@@ -451,16 +488,25 @@ export default function StatementsPage() {
               <table className="w-full text-sm border-collapse" style={{ minWidth: 640 }}>
                 <thead>
                   <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
-                    <th className="px-4 py-2 font-medium">Date</th><th className="px-2 py-2 font-medium">Vendor</th><th className="px-2 py-2 font-medium">Invoice #</th>
+                    <th className="px-4 py-2 font-medium">Date</th><th className="px-2 py-2 font-medium">Vendor</th><th className="px-2 py-2 font-medium">Category</th><th className="px-2 py-2 font-medium">Invoice #</th>
                     <th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2" />
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-slate-400">{loading ? "Loading…" : "No invoices filed for this month."}</td></tr>}
+                  {shown.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-slate-400">{loading ? "Loading…" : "No invoices filed for this month."}</td></tr>}
                   {shown.map((f) => (
                     <tr key={f.id} className="border-b border-slate-50">
                       <td className="px-4 py-1.5 text-slate-600 whitespace-nowrap">{f.invoice_date ? new Date(f.invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}</td>
                       <td className="px-2 py-1.5 font-medium text-slate-700">{f.account_name}</td>
+                      <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">
+                        {finance ? (
+                          <select value={f.category ?? ""} onChange={(e) => changeCategory(f, e.target.value)} className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none">
+                            <option value="">—</option>
+                            {[...new Set([...categoryOptions, ...(f.category ? [f.category] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
+                            <option value="__new">+ New…</option>
+                          </select>
+                        ) : (f.category || "—")}
+                      </td>
                       <td className="px-2 py-1.5 text-slate-600">{f.invoice_number || "—"}{f.dup_ignored && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "#FAEEDA", color: "#854F0B" }} title="Filed even though the app warned it might be a duplicate">dup?</span>}</td>
                       <td className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{f.amount != null ? `$${Number(f.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
                       <td className="px-2 py-1.5 text-xs whitespace-nowrap">
@@ -481,12 +527,22 @@ export default function StatementsPage() {
                 {shown.length > 0 && (
                   <tfoot>
                     <tr className="border-t-2 border-slate-200 font-semibold text-slate-700">
-                      <td className="px-4 py-2" colSpan={3}>{shown.length} invoice{shown.length === 1 ? "" : "s"}</td>
+                      <td className="px-4 py-2" colSpan={4}>{shown.length} invoice{shown.length === 1 ? "" : "s"}</td>
                       <td className="px-2 py-2 whitespace-nowrap" colSpan={3}>{withAmount > 0 ? `$${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""}{withAmount > 0 && withAmount < shown.length ? ` (${withAmount} with amounts)` : ""}</td>
                     </tr>
                   </tfoot>
                 )}
               </table>
+              {(() => {
+                const by = shown.reduce<Record<string, number>>((m, f) => { const k = f.category || "Uncategorized"; m[k] = (m[k] ?? 0) + (f.amount ?? 0); return m; }, {});
+                const entries = Object.entries(by).filter(([, v]) => v !== 0).sort((a, z) => z[1] - a[1]);
+                return entries.length > 0 ? (
+                  <div className="flex flex-wrap gap-x-5 gap-y-1 px-4 py-2.5 border-t border-slate-100 text-xs text-slate-500">
+                    <span className="font-semibold text-slate-400">By category</span>
+                    {entries.map(([k, v]) => <span key={k}><span className="font-semibold text-slate-600">{k}</span> {money(v)}</span>)}
+                  </div>
+                ) : null;
+              })()}
             </div>
           );
         })()}
