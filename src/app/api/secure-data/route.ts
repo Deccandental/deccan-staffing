@@ -28,6 +28,9 @@ const ALLOWED_TABLES = new Set([
   "ar_aging_entries", "cash_accounts", "credit_cards", "card_charges",
   "recurring_bills", "bill_payments", "balance_checks",
   "card_statement_entries", "bank_statement_entries",
+  "debts", "debt_statement_entries", "bonus_carryover", "off_cycle_payments",
+  "production_goals", "cashflow_settings", "ho_bonus_payments",
+  "retirement_accruals", "retirement_deposits",
 ]);
 
 // Tables holding an individual's own compensation. A staff member without
@@ -38,6 +41,7 @@ const OWN_ROW_READABLE = new Set([
   "pv_bonus_quarters", "pv_bonus_payroll_entries", "pv_bonus_payments",
   "ho_bonus_months", "growth_bonus_quarters", "growth_bonus_entries",
   "growth_bonus_payments", "hygiene_bonus_entries", "payroll_entries",
+  "ho_bonus_payments", "bonus_carryover",
 ]);
 
 interface SecureDataRequest {
@@ -97,10 +101,11 @@ export async function POST(req: NextRequest) {
       for (const f of body.filters ?? []) {
         // Ignore any client-supplied employee_id filter when we're forcing
         // one — otherwise a staff user could ask for someone else's rows.
-        if (forcedEmployeeId != null && f.column === "employee_id") continue;
+        if (forcedEmployeeId != null && (f.column === "employee_id" || f.column === "person_key")) continue;
         query = applyFilter(query, f);
       }
-      if (forcedEmployeeId != null) query = query.eq("employee_id", forcedEmployeeId);
+      // payroll_entries identifies people by person_key ("staff:<id>"); the other tables by employee_id.
+      if (forcedEmployeeId != null) query = table === "payroll_entries" ? query.eq("person_key", `staff:${forcedEmployeeId}`) : query.eq("employee_id", forcedEmployeeId);
       for (const o of body.order ?? []) query = query.order(o.column, { ascending: o.ascending ?? true });
       if (body.limit != null) query = query.limit(body.limit);
 
@@ -114,16 +119,18 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "insert") {
-      const { data, error } = await supabaseAdmin.from(table).insert(body.payload as never).select();
+      const q = supabaseAdmin.from(table).insert(body.payload as never).select();
+      const { data, error } = body.single === "single" ? await q.single() : body.single === "maybeSingle" ? await q.maybeSingle() : await q;
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
       return NextResponse.json({ data });
     }
 
     if (action === "upsert") {
-      const { data, error } = await supabaseAdmin
+      const q = supabaseAdmin
         .from(table)
         .upsert(body.payload as never, body.onConflict ? { onConflict: body.onConflict } : undefined)
         .select();
+      const { data, error } = body.single === "single" ? await q.single() : body.single === "maybeSingle" ? await q.maybeSingle() : await q;
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
       return NextResponse.json({ data });
     }
