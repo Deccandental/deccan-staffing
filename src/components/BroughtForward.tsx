@@ -42,7 +42,7 @@ export default function BroughtForward({ programme, employeeId, onSaved }: { pro
       <span className="relative inline-block" style={{ width: 130 }}>
         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
         <input type="number" onFocus={(e) => e.target.select()} value={value} onChange={(e) => setValue(e.target.value)} placeholder="0.00"
-          className="w-full rounded border border-amber-300 bg-white py-1 text-sm focus:outline-none" style={{ paddingLeft: 18 }} />
+          className="w-full rounded border border-sky-300 bg-sky-50 py-1 text-sm font-semibold text-slate-900 focus:border-orange-400 focus:bg-white focus:outline-none" style={{ paddingLeft: 18 }} />
       </span>
       <button onClick={save} className="rounded-lg px-3 py-1 text-sm font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Save</button>
       {saved && <span className="text-xs text-emerald-600 font-semibold">✓ Saved</span>}
