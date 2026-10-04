@@ -5,7 +5,7 @@ import { statementsAccess, whoIs, BUCKET, KINDS, MONTH_RE, CATEGORIES } from "@/
 // Records an uploaded statement or invoice, checks for duplicates, marks "no statement this month",
 // manages vendors, or removes a file. Finance users only.
 
-const COLS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category";
+const COLS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category, paid_from_name, paid_note";
 
 // What Cash Flow holds as this account's statement balance for a month (null if nothing).
 async function cashFlowBalance(kind: string, id: string, month: string): Promise<number | null> {
@@ -147,7 +147,14 @@ export async function POST(req: NextRequest) {
     if (b.action === "markInvoicePaid") {
       const paid = b.paid === true;
       const paidDate = paid && /^\d{4}-\d{2}-\d{2}$/.test(String(b.paidDate ?? "")) ? b.paidDate : paid ? new Date().toISOString().slice(0, 10) : null;
-      const { error } = await supabaseAdmin.from("statement_files").update({ paid, paid_date: paidDate }).eq("id", String(b.id)).eq("doc_type", "invoice");
+      // Which account it was paid from, and an optional note. Both are cleared if the payment is undone.
+      const from = paid ? {
+        paid_from_kind: ["bank", "card", "other"].includes(b.paidFromKind) ? b.paidFromKind : null,
+        paid_from_id: b.paidFromId ? String(b.paidFromId) : null,
+        paid_from_name: String(b.paidFromName ?? "").trim().slice(0, 80),
+        paid_note: String(b.paidNote ?? "").trim().slice(0, 120),
+      } : { paid_from_kind: null, paid_from_id: null, paid_from_name: "", paid_note: "" };
+      const { error } = await supabaseAdmin.from("statement_files").update({ paid, paid_date: paidDate, ...from }).eq("id", String(b.id)).eq("doc_type", "invoice");
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
       return NextResponse.json({ data: null });
     }
