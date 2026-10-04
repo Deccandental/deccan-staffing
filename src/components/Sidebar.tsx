@@ -50,6 +50,7 @@ const navItems: { label: string; href: string; icon: string; permission: Permiss
   { label: "Events", href: "/events", icon: "📌", permission: "canManageEvents", group: "Admin" },
   { label: "Payroll Dashboard", href: "/payroll", icon: "💵", permission: "canManagePayroll", group: "Finances" },
   { label: "Cash Flow", href: "/cashflow", icon: "📊", permission: "canManagePayroll", group: "Finances" },
+  { label: "Statements", href: "/statements", icon: "🗄️", permission: "canManagePayroll", group: "Finances" },
 ];
 
 // Quick-access tabs in the mobile toolbar — a handful of the most-used
