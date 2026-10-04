@@ -570,8 +570,12 @@ function PayrollPageBody() {
           <div className={viewMode === "table" ? "space-y-6" : "space-y-6 max-w-3xl"}>
             {viewMode === "table" ? (
               <>
-                <TableSection title="Employees" people={employeeRows} />
-                <TableSection title="Temps" people={tempRows} />
+                {/* Called as a function, not rendered as <TableSection />: it is defined inside
+                    this page, so as a component it would be a brand-new type on every keystroke,
+                    React would rebuild the whole table, and the box you're typing in would lose
+                    focus after each character. */}
+                {TableSection({ title: "Employees", people: employeeRows })}
+                {TableSection({ title: "Temps", people: tempRows })}
                 <div className="flex items-center gap-3">
                   <button onClick={handleSaveAll} disabled={savingAll}
                     className="rounded-lg px-5 py-2 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50"
