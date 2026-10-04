@@ -22,7 +22,7 @@ import {
   PvBonusQuarter, loadAllPvBonusQuarters, PvBonusPayrollEntry, loadPvBonusPayrollEntries,
   PvBonusPayment, loadPvBonusPayments, computePvQuarterCalcs, getPvQuarterDateRange,
 } from "@/lib/pvBonus";
-import { HoBonusMonth, loadHoBonusPayoutYear } from "@/lib/hoBonus";
+import { HoBonusMonth, loadHoBonusPayoutYear, HoBonusPayment, loadHoBonusPayments } from "@/lib/hoBonus";
 import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT, formatPayDate } from "@/lib/hygieneBonus";
 import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
 import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsStore";
@@ -151,6 +151,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [profileError, setProfileError] = useState<string | null>(null);
   const [hygieneEntries, setHygieneEntries] = useState<HygieneBonusEntry[]>([]);
   const [hoMonths, setHoMonths] = useState<HoBonusMonth[]>([]);
+  // Dated payments are the source of truth for what has been paid (the month rows' own
+  // "paid" column is an older single figure that can be out of date).
+  const [hoPaymentList, setHoPaymentList] = useState<HoBonusPayment[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [showCertForm, setShowCertForm] = useState(false);
@@ -164,6 +167,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
   useEffect(() => { loadStaff().then(setStaff); }, []);
   useEffect(() => { loadWishlistItems(selectedId).then(setWishlistItems); }, [selectedId]);
+  useEffect(() => { if (selectedId == null) { setHoPaymentList([]); return; } loadHoBonusPayments(selectedId).then(setHoPaymentList); }, [selectedId]);
 
   useEffect(() => {
     if (selectedId == null) return;
@@ -1171,41 +1175,70 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
-            {canSeeThisPersonsPay && selectedEmployee?.hoBonusEligible && (
-              <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
-                <div className="p-4 pb-2">
-                  <h2 className="font-bold text-slate-700">💰 {bonusYear} Compensation — 40% of Production, paid the following month</h2>
+            {canSeeThisPersonsPay && selectedEmployee?.hoBonusEligible && (() => {
+              const monthKey = (m: HoBonusMonth) => `${m.year}-${String(m.month).padStart(2, "0")}`;
+              const paidIn = (m: HoBonusMonth) => hoPaymentList.filter((pay) => pay.datePaid.startsWith(monthKey(m))).reduce((sum, pay) => sum + pay.amount, 0);
+              const totalProduction = hoMonths.reduce((sum, m) => sum + m.production, 0);
+              const totalEarned = totalProduction * 0.4;
+              const totalPaid = hoMonths.reduce((sum, m) => sum + paidIn(m), 0);
+              const net = totalEarned - totalPaid;
+              const isSelf = identity.employeeId != null && identity.employeeId === selectedId;
+              const who = isSelf ? "You are" : `${selectedEmployee?.name ?? "She"} is`;
+              let running = 0;
+              return (
+                <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
+                  <div className="p-4 pb-2">
+                    <h2 className="font-bold text-slate-700">{"\ud83d\udcb5"} {bonusYear} Compensation {"\u2014"} 40% of Production, paid the following month</h2>
+                  </div>
+                  <div className="px-4 py-3 text-sm" style={{ background: net > 0.005 ? "#FAEEDA" : net < -0.005 ? "#FCEBEB" : "#f1f5f9" }}>
+                    {net > 0.005 ? (
+                      <span style={{ color: "#854F0B" }}>{who} owed <strong>${formatMoney(net)}</strong> for {bonusYear}: ${formatMoney(totalEarned)} earned (40% of ${formatMoney(totalProduction)} production) {"\u2212"} ${formatMoney(totalPaid)} paid.</span>
+                    ) : net < -0.005 ? (
+                      <span style={{ color: "#A32D2D" }}>Paid ahead by <strong>${formatMoney(-net)}</strong> for {bonusYear}: ${formatMoney(totalEarned)} earned {"\u2212"} ${formatMoney(totalPaid)} paid.</span>
+                    ) : (
+                      <span className="text-slate-600">Paid up for {bonusYear}: ${formatMoney(totalEarned)} earned, ${formatMoney(totalPaid)} paid.</span>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm border-collapse min-w-[600px]">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                          <th className="px-5 py-2 font-medium">Month</th>
+                          <th className="px-2 py-2 font-medium">Production</th>
+                          <th className="px-2 py-2 font-medium">40%</th>
+                          <th className="px-2 py-2 font-medium">Paid</th>
+                          <th className="px-5 py-2 font-medium" title="Everything earned so far minus everything paid so far">Total owed so far</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {hoMonths.map((m) => {
+                          const owed = m.production * 0.4;
+                          const paid = paidIn(m);
+                          running += owed - paid;
+                          const soFar = running;
+                          return (
+                            <tr key={`${m.year}-${m.month}`} className="border-b border-slate-50 last:border-0">
+                              <td className="px-5 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(m.production)}</td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(paid)}</td>
+                              <td className={`px-5 py-2 font-bold whitespace-nowrap ${soFar > 0.005 ? "text-amber-700" : soFar < -0.005 ? "text-red-600" : "text-slate-400"}`}>${formatMoney(soFar)}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr className="border-t-2 border-slate-200 font-semibold text-slate-700">
+                          <td className="px-5 py-2">Total</td>
+                          <td className="px-2 py-2">${formatMoney(totalProduction)}</td>
+                          <td className="px-2 py-2">${formatMoney(totalEarned)}</td>
+                          <td className="px-2 py-2">${formatMoney(totalPaid)}</td>
+                          <td className="px-5 py-2" style={{ color: net > 0.005 ? "#b45309" : net < -0.005 ? "#dc2626" : "#64748b" }}>${formatMoney(net)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm border-collapse min-w-[600px]">
-                    <thead>
-                      <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
-                        <th className="px-5 py-2 font-medium">Month</th>
-                        <th className="px-2 py-2 font-medium">Production</th>
-                        <th className="px-2 py-2 font-medium">40%</th>
-                        <th className="px-2 py-2 font-medium">Paid</th>
-                        <th className="px-5 py-2 font-medium">Balance</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {hoMonths.map((m) => {
-                        const owed = m.production * 0.4;
-                        const balance = owed - m.paid;
-                        return (
-                          <tr key={`${m.year}-${m.month}`} className="border-b border-slate-50 last:border-0">
-                            <td className="px-5 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
-                            <td className="px-2 py-2 text-slate-500">${formatMoney(m.production)}</td>
-                            <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
-                            <td className="px-2 py-2 text-slate-500">${formatMoney(m.paid)}</td>
-                            <td className={`px-5 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
           </div>
         )}
