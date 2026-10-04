@@ -23,7 +23,7 @@ import {
   PvBonusPayment, loadPvBonusPayments, computePvQuarterCalcs, getPvQuarterDateRange,
 } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusPayoutYear } from "@/lib/hoBonus";
-import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
+import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT, formatPayDate } from "@/lib/hygieneBonus";
 import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
 import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsStore";
 import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry, computeRequiredCertStatuses, deleteCeCourseEntry } from "@/lib/requiredCertsStore";
@@ -797,6 +797,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                         <thead>
                           <tr className="text-left text-xs text-slate-400">
                             <th className="py-1 pr-3 font-medium">Pay period</th>
+                            <th className="py-1 pr-3 font-medium">Pay date</th>
                             <th className="py-1 pr-3 font-medium">Patients</th>
                             <th className="py-1 pr-3 font-medium">Earned (patients {"\u00d7"} ${HYGIENE_BONUS_PER_PATIENT})</th>
                             <th className="py-1 pr-3 font-medium">Paid</th>
@@ -806,7 +807,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                         <tbody>
                           {Math.abs(hygieneStart) > 0.5 && (
                             <tr className="border-t border-slate-100 bg-amber-50/60">
-                              <td className="py-1.5 pr-3 font-medium text-amber-900" colSpan={4}>Brought forward from earlier years</td>
+                              <td className="py-1.5 pr-3 font-medium text-amber-900" colSpan={5}>Brought forward from earlier years</td>
                               <td className="py-1.5 font-semibold text-amber-700">${formatMoney(hygieneStart)}</td>
                             </tr>
                           )}
@@ -815,6 +816,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                             return (
                               <tr key={r.start} className="border-t border-slate-100">
                                 <td className="py-1.5 pr-3 text-slate-600 whitespace-nowrap">{r.label}</td>
+                                <td className="py-1.5 pr-3 text-slate-500 whitespace-nowrap">{formatPayDate(r.payDate)}</td>
                                 <td className="py-1.5 pr-3">{r.patients}</td>
                                 <td className="py-1.5 pr-3">${formatMoney(r.earned)}</td>
                                 <td className="py-1.5 pr-3">${formatMoney(r.paid)}</td>
@@ -824,6 +826,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                           })}
                           <tr className="border-t-2 border-slate-200 font-semibold text-slate-700">
                             <td className="py-1.5 pr-3">Total</td>
+                            <td className="py-1.5 pr-3" />
                             <td className="py-1.5 pr-3">{shown.reduce((sum, r) => sum + r.patients, 0)}</td>
                             <td className="py-1.5 pr-3">${formatMoney(hygieneEarned)}</td>
                             <td className="py-1.5 pr-3">${formatMoney(hygienePaid)}</td>
