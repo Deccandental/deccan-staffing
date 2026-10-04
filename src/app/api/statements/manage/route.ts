@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
     if (b.action === "addSource") {
       const name = String(b.name ?? "").trim().slice(0, 80);
       if (!name || !CATEGORIES.has(b.category) || !MONTH_RE.test(String(b.startMonth))) return NextResponse.json({ error: "Enter a name, a type and a first month." }, { status: 400 });
-      const { data, error } = await supabaseAdmin.from("statement_sources").insert({ name, category: b.category, start_month: b.startMonth }).select("id").single();
+      const { data, error } = await supabaseAdmin.from("statement_sources").insert({ name, category: b.category, start_month: b.startMonth, expects_statement: b.expectsStatement !== false }).select("id").single();
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
       return NextResponse.json({ data });
     }
@@ -130,6 +130,7 @@ export async function POST(req: NextRequest) {
       if (typeof b.name === "string" && b.name.trim()) patch.name = b.name.trim().slice(0, 80);
       if (CATEGORIES.has(b.category)) patch.category = b.category;
       if (typeof b.active === "boolean") patch.active = b.active;
+      if (typeof b.expectsStatement === "boolean") patch.expects_statement = b.expectsStatement;
       if (MONTH_RE.test(String(b.startMonth ?? ""))) patch.start_month = b.startMonth;
       if (Object.keys(patch).length === 0) return NextResponse.json({ error: "Nothing to change." }, { status: 400 });
       const { error } = await supabaseAdmin.from("statement_sources").update(patch).eq("id", String(b.id));
