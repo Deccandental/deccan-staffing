@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { Employee } from "@/types/employee";
+import { isHygieneBonusEligible } from "./hygieneBonus";
 
 /**
  * Sends bonus money paid through payroll to the bonus programme it belongs
@@ -26,7 +27,7 @@ export const PROGRAMME_LABELS: Record<BonusProgramme, string> = {
 };
 
 function isHygienist(emp: Employee): boolean {
-  return emp.role === "Hygienist" || (emp.skills ?? []).includes("Hygienist");
+  return isHygieneBonusEligible(emp);
 }
 
 /** Every programme this person could receive a bonus under. */
