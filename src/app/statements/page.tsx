@@ -85,6 +85,15 @@ export default function StatementsPage() {
       const stored = sessionStorage.getItem(ROLE_KEY);
       if ((stored === "finance" || stored === "cpa") && hasSessionToken()) setRole(stored);
       else if (stored) sessionStorage.removeItem(ROLE_KEY);
+      else if (hasSessionToken()) {
+        // Already signed in elsewhere in the app (the Payroll or Cash Flow login, or the app-wide login)? Then
+        // don't ask again. This only picks which screen to show: the server still checks the same login on every
+        // request, and anyone without access is sent back to the login box.
+        const payrollUnlock = sessionStorage.getItem("dd_payroll_unlocked");
+        let identityOk = false;
+        try { const id = JSON.parse(sessionStorage.getItem("dd_identity") ?? "null"); identityOk = !!id && (id.mode === "super" || id.canManagePayroll === true); } catch {}
+        if (payrollUnlock === "super" || payrollUnlock === "staff" || identityOk) { sessionStorage.setItem(ROLE_KEY, "finance"); setRole("finance"); }
+      }
     } catch {}
     setChecked(true);
   }, []);
