@@ -65,6 +65,9 @@ export interface Employee {
   // Separate opt-in for a PV-style bonus (a flat % of that person's own
   // income/production, tracked independently of the shared Growth Bonus
   // pool — e.g. Dr. PV, who is explicitly exempt from the Growth Bonus).
+  // In the hygiene bonus program ($15 per patient). Opt-in, like the other bonus
+  // programs: only people ticked on the Staff page are included.
+  hygieneBonusEligible?: boolean;
   pvBonusEligible?: boolean;
   // The flat percentage of that person's own net production/income they're
   // paid as a bonus (e.g. 30 for 30%). Only meaningful when pvBonusEligible
