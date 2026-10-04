@@ -1,5 +1,6 @@
 import { Employee } from "@/types/employee";
 import { supabase } from "./supabase";
+import { getSessionToken } from "./secureData";
 
 export type DentistPrefs = Record<number, number[]>;
 
@@ -60,8 +61,25 @@ export async function loadStaff(): Promise<Employee[]> {
   return (data ?? []).map(rowToEmployee);
 }
 
+// Every change to the staff table goes through the server (/api/staff-write), which checks who is
+// asking. The table holds login PINs and permission flags, so the browser's public key may not write to it.
+async function staffWrite(body: Record<string, unknown>): Promise<{ ok: boolean; data?: any; error?: string }> {
+  try {
+    const res = await fetch("/api/staff-write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-session-token": getSessionToken() },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: json.error ?? "Request failed." };
+    return { ok: true, data: json.data };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "Network error." };
+  }
+}
+
 export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee | null> {
-  const { data, error } = await supabase.from("staff").insert({
+  const payload = {
     name: emp.name, role: emp.role, specialty: emp.specialty ?? null,
     color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin || null,
     can_admin: emp.canAdmin ?? false, can_manage_leave: emp.canManageLeave ?? false, can_manage_events: emp.canManageEvents ?? false,
@@ -69,9 +87,10 @@ export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee |
     pto_balance_hours: emp.ptoBalanceHours ?? 0, sick_balance_hours: emp.sickBalanceHours ?? 0, exclude_from_payroll: emp.excludeFromPayroll ?? false,
     default_schedule: emp.defaultSchedule, remote_days: emp.remoteDays ?? null,
     hire_date: emp.hireDate || null, growth_bonus_eligible: emp.growthBonusEligible ?? false, growth_bonus_multiplier: emp.growthBonusMultiplier ?? 1, pv_bonus_eligible: emp.pvBonusEligible ?? false, hygiene_bonus_eligible: emp.hygieneBonusEligible ?? false, net_production_bonus_percent: emp.netProductionBonusPercent ?? 30, ho_bonus_eligible: emp.hoBonusEligible ?? false, exempt_from_policy_signing: emp.exemptFromPolicySigning ?? false, exempt_from_checkin: emp.exemptFromCheckin ?? false, employment_type: emp.employmentType ?? "full_time",
-  }).select().single();
-  if (error) { console.error("addEmployee error:", error); return null; }
-  return rowToEmployee(data);
+  };
+  const res = await staffWrite({ action: "insert", payload });
+  if (!res.ok || !res.data) { console.error("addEmployee error:", res.error); return null; }
+  return rowToEmployee(res.data);
 }
 
 export async function updateEmployee(emp: Employee): Promise<{ ok: boolean; error?: string }> {
@@ -90,14 +109,14 @@ export async function updateEmployee(emp: Employee): Promise<{ ok: boolean; erro
   // otherwise every routine edit (name, role, permissions, etc.) would
   // silently null out the employee's existing PIN and lock them out.
   if (emp.pin) payload.pin = emp.pin;
-  const { error } = await supabase.from("staff").update(payload).eq("id", emp.id);
-  if (error) { console.error("updateEmployee error:", error); return { ok: false, error: error.message }; }
+  const res = await staffWrite({ action: "update", id: emp.id, payload });
+  if (!res.ok) { console.error("updateEmployee error:", res.error); return { ok: false, error: res.error }; }
   return { ok: true };
 }
 
 export async function setEmployeeArchived(id: number, archived: boolean): Promise<void> {
-  const { error } = await supabase.from("staff").update({ archived }).eq("id", id);
-  if (error) console.error("setEmployeeArchived error:", error);
+  const res = await staffWrite({ action: "setArchived", id, archived });
+  if (!res.ok) console.error("setEmployeeArchived error:", res.error);
 }
 
 // Adjusts a balance by a delta (positive to add hours back, negative to
@@ -106,22 +125,19 @@ export async function setEmployeeArchived(id: number, archived: boolean): Promis
 // these edits happen one at a time from a single admin screen.
 export async function adjustLeaveBalance(id: number, field: "pto" | "sick", deltaHours: number): Promise<void> {
   const column = field === "pto" ? "pto_balance_hours" : "sick_balance_hours";
-  const { data, error: readError } = await supabase.from("staff").select(column).eq("id", id).single();
-  if (readError || !data) { console.error("adjustLeaveBalance read error:", readError); return; }
-  const current = (data as any)[column] ?? 0;
-  const { error } = await supabase.from("staff").update({ [column]: current + deltaHours }).eq("id", id);
-  if (error) console.error("adjustLeaveBalance error:", error);
+  const res = await staffWrite({ action: "adjustBalance", id, column, delta: deltaHours });
+  if (!res.ok) console.error("adjustLeaveBalance error:", res.error);
 }
 
 export async function setLeaveBalance(id: number, field: "pto" | "sick", hours: number): Promise<void> {
   const column = field === "pto" ? "pto_balance_hours" : "sick_balance_hours";
-  const { error } = await supabase.from("staff").update({ [column]: hours }).eq("id", id);
-  if (error) console.error("setLeaveBalance error:", error);
+  const res = await staffWrite({ action: "setBalance", id, column, hours });
+  if (!res.ok) console.error("setLeaveBalance error:", res.error);
 }
 
 export async function removeEmployee(id: number): Promise<void> {
-  const { error } = await supabase.from("staff").delete().eq("id", id);
-  if (error) console.error("removeEmployee error:", error);
+  const res = await staffWrite({ action: "delete", id });
+  if (!res.ok) console.error("removeEmployee error:", res.error);
 }
 
 export async function loadPrefs(): Promise<DentistPrefs> {
@@ -146,10 +162,7 @@ export async function updateOwnProfile(
 ): Promise<{ ok: boolean; error?: string }> {
   const name = updates.name.trim();
   if (!name) return { ok: false, error: "Name can't be empty." };
-  const { error } = await supabase
-    .from("staff")
-    .update({ name, email: updates.email.trim() })
-    .eq("id", employeeId);
-  if (error) { console.error("updateOwnProfile error:", error); return { ok: false, error: error.message }; }
+  const res = await staffWrite({ action: "updateOwnProfile", id: employeeId, name, email: updates.email.trim() });
+  if (!res.ok) { console.error("updateOwnProfile error:", res.error); return { ok: false, error: res.error }; }
   return { ok: true };
 }
