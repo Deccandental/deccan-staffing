@@ -28,7 +28,7 @@ export default function BroughtForward({ programme, employeeId, onSaved }: { pro
     const amount = value === "" ? 0 : Number(value);
     if (isNaN(amount)) { setError("Enter a dollar amount."); return; }
     setError(null);
-    // The year is set once, the first time a balance is saved, and left alone after that.
+    if (!fromYear || fromYear < 2000) { setError("Enter the year."); return; }
     const r = await saveBonusCarryover({ programme, employeeId, amount, asOfYear: fromYear });
     if (!r.ok) { setError(r.error ?? "Couldn't save."); return; }
     setSaved(true);
@@ -46,7 +46,12 @@ export default function BroughtForward({ programme, employeeId, onSaved }: { pro
       </span>
       <button onClick={save} className="rounded-lg px-3 py-1 text-sm font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Save</button>
       {saved && <span className="text-xs text-emerald-600 font-semibold">✓ Saved</span>}
-      <span className="text-xs text-amber-800">Still owed from before {fromYear}. Added to what's owed; payments reduce it.</span>
+      <span className="text-xs text-amber-800">owed at the start of</span>
+      <input type="number" value={fromYear} onChange={(e) => setFromYear(Number(e.target.value))}
+        className="rounded border border-amber-300 bg-white py-1 px-1.5 text-sm focus:outline-none" style={{ width: 70 }} />
+      <span className="text-xs text-amber-800">
+        {fromYear < thisYear ? `Everything from ${fromYear} on is calculated on top of it.` : "Added to what's owed; payments reduce it."}
+      </span>
       {error && <span className="text-xs text-red-600 font-semibold">⚠️ {error}</span>}
     </div>
   );
