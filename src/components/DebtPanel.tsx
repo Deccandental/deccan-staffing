@@ -6,7 +6,7 @@ import { Debt, DebtKind, DebtCategory, CATEGORY_LABEL, CATEGORY_SHORT, LOAN_CATE
 import {
   CreditCard, BalanceCheck, CashAccount, CardCharge, RecurringBill, BillPayment,
   buildOccurrences, addDays, addRecurringBill, updateRecurringBill, updateBalanceCheckAmount, updateStatementEntryAmount,
-  computeAccountForecast, computeSuggestedTransfer, computeCardRecommendation,
+  computeAccountForecast, computeSuggestedTransferMulti, computeCardRecommendation,
   addBalanceCheck, loadBalanceHistoryForAccount, deleteBalanceCheck,
   updateStatementBalance, loadStatementHistoryForCard, backfillStatementMonth, deleteStatementEntry,
 } from "@/lib/cashflow";
@@ -71,9 +71,7 @@ export default function DebtPanel({
   const forecastFor = (acct: CashAccount) =>
     computeAccountForecast(acct, latestBalances[acct.name]?.balance ?? 0,
       buildOccurrences(allBills.filter((b) => b.cashAccountId === acct.id), allPayments, monthStart, addDays(today, 60)), today, 0);
-  const ffAcct = cashAccounts.find((a) => a.name === "Fifth Third Checking");
-  const chaseAcct = cashAccounts.find((a) => a.name === "Chase");
-  const transfer = ffAcct && chaseAcct ? computeSuggestedTransfer(forecastFor(ffAcct), forecastFor(chaseAcct)) : null;
+  const transfer = computeSuggestedTransferMulti(cashAccounts.map((a) => forecastFor(a)));
 
   function recFor(card: CreditCard) {
     const balance = latestBalances[card.name]?.balance ?? 0;
