@@ -37,8 +37,8 @@ export async function GET(req: NextRequest) {
   for (const r of loanStmts ?? []) push(r.debt_id, r.month);
 
   const stale = buildStaleItems({
-    accounts: (accounts ?? []).map((a: any) => ({ id: a.id, name: a.name })),
-    cards: (cards ?? []).map((c: any) => ({ id: c.id, name: c.name, approxClosingDay: c.approx_closing_day })),
+    accounts: (accounts ?? []).filter((a: any) => a.active !== false).map((a: any) => ({ id: a.id, name: a.name })),
+    cards: (cards ?? []).filter((c: any) => c.active !== false).map((c: any) => ({ id: c.id, name: c.name, approxClosingDay: c.approx_closing_day })),
     loans: (debts ?? []).filter((d: any) => d.kind !== "revolving").map((d: any) => ({ id: d.id, name: d.name })),
     latestChecked,
     statements,
@@ -56,8 +56,8 @@ export async function GET(req: NextRequest) {
     if (!sfErr) {
       const filed = new Set((sf ?? []).map((r: any) => `${r.account_kind}:${r.account_id}`));
       const expected = [
-        ...(accounts ?? []).map((a: any) => ({ key: `bank:${a.id}`, name: a.name })),
-        ...(cards ?? []).map((c: any) => ({ key: `card:${c.id}`, name: c.name })),
+        ...(accounts ?? []).filter((a: any) => a.active !== false).map((a: any) => ({ key: `bank:${a.id}`, name: a.name })),
+        ...(cards ?? []).filter((c: any) => c.active !== false).map((c: any) => ({ key: `card:${c.id}`, name: c.name })),
         ...(debts ?? []).filter((d: any) => d.kind !== "revolving" && d.active !== false).map((d: any) => ({ key: `loan:${d.id}`, name: d.name })),
       ];
       const { data: srcRows } = await supabase.from("statement_sources").select("id, name, start_month").eq("active", true);
