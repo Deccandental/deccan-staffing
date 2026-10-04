@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData"; // financial data goes through the secure server gateway, not the public key
 
 /**
  * The practice's debt in one place.
