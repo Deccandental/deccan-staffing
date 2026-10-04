@@ -31,6 +31,8 @@ import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredC
 import CeLogPanel from "@/components/CeLogPanel";
 import { WishlistItem, loadWishlistItems } from "@/lib/wishlist";
 import { formatMoney } from "@/lib/format";
+import { loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
+import { hygieneYear, hygieneYearDetail, HygienePeriodRow } from "@/lib/compOwed";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 
 const REASON_LABELS: Record<string, string> = {
@@ -109,6 +111,29 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [ceEntriesForCerts, setCeEntriesForCerts] = useState<CeCourseEntry[]>([]);
   const [events, setEvents] = useState<StaffEvent[]>([]);
   const [bonusYear] = useState(new Date().getFullYear());
+  // Unpaid hygiene bonus carried in from earlier years (typed on the Hygiene Bonus
+  // sheet), plus any full years since, so this card agrees with that sheet.
+  const [hygieneStart, setHygieneStart] = useState(0);
+  const [hygieneRows, setHygieneRows] = useState<HygienePeriodRow[]>([]);
+  const [showHygieneCalc, setShowHygieneCalc] = useState(false);
+  useEffect(() => {
+    if (selectedId == null) { setHygieneStart(0); setHygieneRows([]); return; }
+    let cancelled = false;
+    (async () => {
+      const c = (await loadBonusCarryovers()).get(carryKey("hygiene", selectedId));
+      let start = 0;
+      if (c && bonusYear >= c.asOfYear) {
+        start = c.amount;
+        for (let y = c.asOfYear; y < bonusYear; y++) {
+          const yr = await hygieneYear(selectedId, y, `${y}-12-31`);
+          start += yr.earned - yr.paid;
+        }
+      }
+      const rows = await hygieneYearDetail(selectedId, bonusYear);
+      if (!cancelled) { setHygieneStart(start); setHygieneRows(rows); }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId, bonusYear]);
   const [yearQuartersData, setYearQuartersData] = useState<Record<number, GrowthBonusQuarter>>({});
   const [yearDaysOverrides, setYearDaysOverrides] = useState<Record<number, Record<number, number>>>({});
   const [yearPayrollEntries, setYearPayrollEntries] = useState<PayrollEntry[]>([]);
@@ -271,9 +296,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const bonusEligibilityDate = selectedEmployee?.hireDate ? addMonths(selectedEmployee.hireDate, 5) : null;
   const bonusDaysLeft = bonusEligibilityDate ? daysUntil(bonusEligibilityDate) : null;
   const showBonusCountdown = !!selectedEmployee?.growthBonusEligible && bonusDaysLeft != null && bonusDaysLeft > 0;
-  const hygieneEarned = hygieneEntries.reduce((sum, e) => sum + e.patientCount * HYGIENE_BONUS_PER_PATIENT, 0);
-  const hygienePaid = hygieneEntries.reduce((sum, e) => sum + e.amountPaid, 0);
-  const hygieneBalance = hygieneEarned - hygienePaid;
+  const hygieneEarned = hygieneRows.reduce((sum, r) => sum + r.earned, 0);
+  const hygienePaid = hygieneRows.reduce((sum, r) => sum + r.paid, 0);
+  const hygieneBalance = hygieneStart + hygieneEarned - hygienePaid;
 
   function bonusForQuarter(q: 1 | 2 | 3 | 4): { calc: ReturnType<typeof computeQuarterCalc>; myBonus: number } | null {
     const qData = yearQuartersData[q];
@@ -747,15 +772,68 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               <div className="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
                 <h2 className="font-bold text-slate-700 mb-2">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
                 <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
-                  <span className="text-slate-500">Earned ${formatMoney(hygieneEarned)} · Paid ${formatMoney(hygienePaid)}</span>
+                  <span className="text-slate-500">
+                    {Math.abs(hygieneStart) > 0.5 && <>Brought forward ${formatMoney(hygieneStart)} {"\u00b7"} </>}
+                    Earned ${formatMoney(hygieneEarned)} {"\u00b7"} Paid ${formatMoney(hygienePaid)}
+                  </span>
                   {hygieneBalance > 0 ? (
                     <span className="text-amber-600 font-semibold">Bonus: ${formatMoney(hygieneBalance)}</span>
-                  ) : hygieneEarned > 0 ? (
+                  ) : hygieneEarned > 0 || Math.abs(hygieneStart) > 0.5 ? (
                     <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
                   ) : (
                     <span className="text-slate-400">Not started</span>
                   )}
                 </div>
+                <button onClick={() => setShowHygieneCalc((v) => !v)} className="mt-2 text-sm font-semibold text-orange-500 hover:underline">
+                  {showHygieneCalc ? "Hide" : "Show"} how this is calculated
+                </button>
+                {showHygieneCalc && (() => {
+                  const today = new Date().toISOString().slice(0, 10);
+                  const shown = hygieneRows.filter((r) => r.start <= today || r.patients > 0 || r.paid > 0);
+                  let running = hygieneStart;
+                  return (
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-xs text-slate-400">
+                            <th className="py-1 pr-3 font-medium">Pay period</th>
+                            <th className="py-1 pr-3 font-medium">Patients</th>
+                            <th className="py-1 pr-3 font-medium">Earned (patients {"\u00d7"} ${HYGIENE_BONUS_PER_PATIENT})</th>
+                            <th className="py-1 pr-3 font-medium">Paid</th>
+                            <th className="py-1 font-medium">Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Math.abs(hygieneStart) > 0.5 && (
+                            <tr className="border-t border-slate-100 bg-amber-50/60">
+                              <td className="py-1.5 pr-3 font-medium text-amber-900" colSpan={4}>Brought forward from earlier years</td>
+                              <td className="py-1.5 font-semibold text-amber-700">${formatMoney(hygieneStart)}</td>
+                            </tr>
+                          )}
+                          {shown.map((r) => {
+                            running += r.earned - r.paid;
+                            return (
+                              <tr key={r.start} className="border-t border-slate-100">
+                                <td className="py-1.5 pr-3 text-slate-600 whitespace-nowrap">{r.label}</td>
+                                <td className="py-1.5 pr-3">{r.patients}</td>
+                                <td className="py-1.5 pr-3">${formatMoney(r.earned)}</td>
+                                <td className="py-1.5 pr-3">${formatMoney(r.paid)}</td>
+                                <td className="py-1.5 font-semibold" style={{ color: running > 0 ? "#b45309" : "#64748b" }}>${formatMoney(running)}</td>
+                              </tr>
+                            );
+                          })}
+                          <tr className="border-t-2 border-slate-200 font-semibold text-slate-700">
+                            <td className="py-1.5 pr-3">Total</td>
+                            <td className="py-1.5 pr-3">{shown.reduce((sum, r) => sum + r.patients, 0)}</td>
+                            <td className="py-1.5 pr-3">${formatMoney(hygieneEarned)}</td>
+                            <td className="py-1.5 pr-3">${formatMoney(hygienePaid)}</td>
+                            <td className="py-1.5" style={{ color: hygieneBalance > 0 ? "#b45309" : "#64748b" }}>${formatMoney(hygieneBalance)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
