@@ -60,6 +60,7 @@ export default function StatementsPage() {
   const [iMatch, setIMatch] = useState<{ billId: string; dueDate: string; billName: string; amount: number } | null>(null);
   const [unpaidOnly, setUnpaidOnly] = useState(false);
   const [iCategory, setICategory] = useState("");
+  const [pending, setPending] = useState<FileRow[]>([]);   // every unpaid invoice, across all months
   // Vendor directory
   const [vendorsAll, setVendorsAll] = useState<{ id: string; name: string; category: string; active: boolean; expectsStatement: boolean }[]>([]);
   const [usedNames, setUsedNames] = useState<string[]>([]);
@@ -211,16 +212,25 @@ export default function StatementsPage() {
     load();
   }
 
+  const loadPending = useCallback(async () => {
+    if (role !== "finance") return;
+    const r = await api("/api/statements/list", { docType: "invoice", unpaid: true });
+    if (r.ok) setPending((r.json.files ?? []).filter((f: FileRow) => !f.paid));
+  }, [role]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadPending(); }, [loadPending]);
+
   const loadInvoices = useCallback(async () => {
     if (!role) return;
     setLoading(true); setLoadError("");
-    const r = await api("/api/statements/list", { docType: "invoice", month: invMonth });
+    const r = await api("/api/statements/list", { docType: "invoice", month: invMonth, unpaid: unpaidOnly });
     setLoading(false);
     if (r.status === 401) { logout(); return; }
     if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load invoices."); return; }
     setInvFiles(r.json.files ?? []); setInvVendors(r.json.vendors ?? []); setUsedCategories(r.json.categories ?? []); setVendorsAll(r.json.vendorsAll ?? []); setUsedNames(r.json.usedNames ?? []);
-  }, [role, invMonth]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [role, invMonth, unpaidOnly]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (tab === "invoices") loadInvoices(); }, [tab, loadInvoices]);
+  // Anything that changes an invoice also refreshes the warning.
+  useEffect(() => { if (role === "finance") loadPending(); }, [invFiles]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function addInvoice(file: File, ignoreDup = false) {
     setMsg(""); setDup(null);
@@ -393,6 +403,21 @@ export default function StatementsPage() {
     return out.sort((a, z) => z.overlap - a.overlap || (a.diff ?? 9) - (z.diff ?? 9)).slice(0, 3);
   })();
 
+  const pendingCutoff = addDays(new Date().toISOString().slice(0, 10), -30);
+  const pendingOld = pending.filter((f) => f.invoice_date && f.invoice_date < pendingCutoff).sort((a, z) => String(a.invoice_date).localeCompare(String(z.invoice_date)));
+  const pendingTotal = pending.reduce((n, f) => n + (f.amount ?? 0), 0);
+  const pendingBanner = finance && pending.length > 0 && (
+    <div className="rounded-xl px-4 py-3 text-sm flex flex-wrap items-center gap-x-4 gap-y-1"
+      style={{ background: pendingOld.length > 0 ? "#fee2e2" : "#FAEEDA", color: pendingOld.length > 0 ? "#991b1b" : "#854F0B", border: `1px solid ${pendingOld.length > 0 ? "#fca5a5" : "#f2d3a0"}` }}>
+      <span>
+        <strong>⚠️ {pending.length} unpaid invoice{pending.length === 1 ? "" : "s"}</strong> totalling {money(pendingTotal)}
+        {pendingOld.length > 0 && <> — <strong>{pendingOld.length} more than 30 days old</strong> (oldest: {pendingOld[0].account_name}, {pendingOld[0].invoice_date ? new Date(pendingOld[0].invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""})</>}
+        . They count in Need to collect until you mark them paid.
+      </span>
+      <button onClick={() => { setTab("invoices"); setUnpaidOnly(true); }} className="underline font-semibold">Review unpaid</button>
+    </div>
+  );
+
   const selAccount = sel ? accounts.find((a) => acctKey(a.kind, a.id) === sel.key) : null;
   const selFiles = selAccount && sel ? filesFor(selAccount.kind, selAccount.id, sel.month) : [];
   const monthLabel = (m: string) => `${MONTHS[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`;
@@ -423,11 +448,14 @@ export default function StatementsPage() {
         ))}
       </div>
 
+      {pendingBanner}
+
       {tab === "invoices" ? (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
           <label className="text-sm font-semibold text-slate-600">Month</label>
-          <input type="month" value={invMonth} onChange={(e) => e.target.value && setInvMonth(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
+          <input type="month" value={invMonth} onChange={(e) => e.target.value && setInvMonth(e.target.value)} disabled={unpaidOnly} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none disabled:opacity-40" />
+          {unpaidOnly && <span className="text-xs text-slate-500">Showing unpaid invoices from every month</span>}
           <input value={invSearch} onChange={(e) => setInvSearch(e.target.value)} placeholder="Search vendor or invoice #…" className="w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
           <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
             <option value="">All categories</option>
