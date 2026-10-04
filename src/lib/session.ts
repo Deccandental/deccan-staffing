@@ -18,7 +18,7 @@ const SECRET = process.env.SESSION_SECRET ?? "";
 const MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 export interface SessionPayload {
-  mode: "super" | "staff";
+  mode: "super" | "staff" | "cpa"; // "cpa" can only reach the statements page, nothing else
   employeeId?: number;
   employeeName?: string;
   canAdmin: boolean;
