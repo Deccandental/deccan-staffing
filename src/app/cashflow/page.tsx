@@ -653,7 +653,12 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     const stats: { k: string; v: string; color?: string }[] = [
       { k: stmtTop ? `Statement ${stmtMonthLabel(stmtTop.date)}` : "Statement", v: stmtTop ? `$${formatMoney(stmtTop.value)}` : "—" },
       { k: "Rate", v: l.interestRate == null ? "not set" : `${l.interestRate}%${l.rateType ? ` ${l.rateType}` : ""}` },
-      { k: "Monthly payment", v: loanBill ? `$${formatMoney(loanBill.estimatedAmount)} · ${cashAccounts.find((a) => a.id === loanBill.cashAccountId)?.name ?? "scheduled"}` : `$${formatMoney(l.monthlyPayment)} · not scheduled` },
+      { k: "Loan payment", v: `$${formatMoney(l.monthlyPayment)}` },
+      ...((l.extraMonthly ?? 0) > 0 ? [
+        { k: l.extraLabel || "Additional charge", v: `+$${formatMoney(l.extraMonthly)}` },
+        { k: "Total paid monthly", v: `$${formatMoney(l.monthlyPayment + l.extraMonthly)}` },
+      ] : []),
+      { k: "Paid from", v: loanBill ? (cashAccounts.find((a) => a.id === loanBill.cashAccountId)?.name ?? "scheduled") : "not scheduled" },
     ];
     return { key: l.id, kind: "loan" as const, defaultMonth: previousMonth(), payBill: loanBill, cat: l.category, name: l.name, tag: CATEGORY_SHORT[l.category], balance: bal?.balance ?? l.currentBalance, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(l.name, "month"), stmtSeries(l.id)] };
   });
