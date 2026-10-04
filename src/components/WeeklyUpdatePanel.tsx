@@ -6,6 +6,7 @@ import DebtPanel from "@/components/DebtPanel";
 import { previousMonth } from "@/lib/staleness";
 import CardChargesPanel from "@/components/CardChargesPanel";
 import BackfillPanel from "@/components/BackfillPanel";
+import AccountsPanel from "@/components/AccountsPanel";
 import { Debt } from "@/lib/debt";
 import { HistoryBlock, HistoryButton, MonthSelect, NumInput, UpdatedStamp, monthLabel, HistRow } from "@/components/CashHistory";
 import {
@@ -246,6 +247,12 @@ export default function WeeklyUpdatePanel({
           (or with Update Numbers Now), so there is one place for each. */}
       <div className="rounded-xl px-4 py-2.5 text-sm" style={{ background: "#e6f1f9", color: "#0c4a6e" }}>
         This tab is for setting up accounts and changing their recurring details: rates, payments, where each is paid from, original amounts. Update balances and statements on the <strong>Overview</strong> cards, or with <strong>Update Numbers Now</strong>.
+      </div>
+
+      {/* ---------- Bank accounts and credit cards: add, edit, close ---------- */}
+      <div className={card}>
+        <h2 className="font-bold text-sm text-slate-700 mb-2">Accounts</h2>
+        <AccountsPanel allBills={allBills} latestBalances={latestBalances} refreshAll={refreshAll} />
       </div>
 
       {/* ---------- Open Dental numbers — one row ---------- */}
