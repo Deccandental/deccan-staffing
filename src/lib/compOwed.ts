@@ -1,7 +1,7 @@
 import { Employee } from "@/types/employee";
 import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
 import { loadAllPvBonusQuarters, loadPvBonusPayrollEntries, loadPvBonusPayments, computePvQuarterCalcs, getPvQuarterDateRange } from "@/lib/pvBonus";
-import { loadHygieneBonusEntries, getPayPeriodsInYear, HYGIENE_BONUS_PER_PATIENT } from "@/lib/hygieneBonus";
+import { loadHygieneBonusEntries, getPayPeriodsInYear, HYGIENE_BONUS_PER_PATIENT, isHygieneBonusEligible } from "@/lib/hygieneBonus";
 import { loadPayrollEntriesInRange } from "@/lib/payrollStore";
 import { loadGrowthBonusQuarter, computeQuarterCalc, loadGrowthBonusPayments, getQuarterDateRange } from "@/lib/growthBonus";
 import { loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
@@ -122,7 +122,7 @@ export async function loadCompOwed(staff: Employee[], today: string = new Date()
   }
 
   // ---- Hygiene bonus ----
-  const hygienists = active.filter((e) => e.role === "Hygienist" || (e.skills ?? []).includes("Hygienist"));
+  const hygienists = active.filter((e) => isHygieneBonusEligible(e));
   for (const e of hygienists) {
     const c = carry.get(carryKey("hygiene", e.id));
     const startYear = c?.asOfYear ?? year;
