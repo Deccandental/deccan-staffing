@@ -1492,7 +1492,6 @@ function HoBonusPanel() {
                         <th className="px-2 py-2 font-medium">Production</th>
                         <th className="px-2 py-2 font-medium">40%</th>
                         <th className="px-2 py-2 font-medium">Paid</th>
-                        <th className="px-2 py-2 font-medium" title="This month's 40% minus the payments dated in this month">This month +/&minus;</th>
                         <th className="px-2 py-2 font-medium" title="Everything earned so far minus everything paid so far">Total owed so far</th>
                         <th className="px-3 py-2 font-medium">Notes</th>
                       </tr>
@@ -1521,13 +1520,12 @@ function HoBonusPanel() {
                                   ${formatMoney(paid)}{monthPayments.length > 0 ? ` (${monthPayments.length})` : ""} {isOpen ? "▲" : "▼"}
                                 </button>
                               </td>
-                              <td className={`px-2 py-2 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
                               <td className={`px-2 py-2 font-bold whitespace-nowrap ${totalSoFar > 0.005 ? "text-amber-700" : totalSoFar < -0.005 ? "text-red-600" : "text-slate-400"}`}>${formatMoney(totalSoFar)}</td>
                               <td className="px-2 py-2"><input type="text" value={m.notes} onChange={(e) => updateCell(year, m.month, "notes", e.target.value)} className={`${cellClass} w-full min-w-[160px]`} /></td>
                             </tr>
                             {isOpen && (
                               <tr className="bg-slate-50/60 border-b border-slate-100">
-                                <td colSpan={7} className="px-4 py-3">
+                                <td colSpan={6} className="px-4 py-3">
                                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Payments in {MONTH_NAMES[m.month - 1]} {m.year}</p>
                                   <div className="space-y-1 mb-2">
                                     {monthPayments.length === 0 && <p className="text-xs text-slate-400 italic">Nothing paid yet this month.</p>}
