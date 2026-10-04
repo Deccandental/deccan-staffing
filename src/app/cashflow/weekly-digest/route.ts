@@ -1,74 +1,176 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
-import { sendWeeklyCashDigest } from "@/lib/cashflowEmail";
-import { buildStaleItems } from "@/lib/staleness";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { statementsAccess, whoIs, BUCKET, KINDS, MONTH_RE, CATEGORIES } from "@/lib/statementsAuth";
 
-export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    }
-  } else {
-    console.warn("CRON_SECRET is not set — /api/cashflow/weekly-digest is unauthenticated");
+// Records an uploaded statement or invoice, checks for duplicates, marks "no statement this month",
+// manages vendors, or removes a file. Finance users only.
+
+const COLS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category";
+
+// What Cash Flow holds as this account's statement balance for a month (null if nothing).
+async function cashFlowBalance(kind: string, id: string, month: string): Promise<number | null> {
+  const t = kind === "bank" ? ["bank_statement_entries", "cash_account_id"] : kind === "card" ? ["card_statement_entries", "credit_card_id"] : kind === "loan" ? ["debt_statement_entries", "debt_id"] : null;
+  if (!t) return null;
+  const { data } = await supabaseAdmin.from(t[0]).select("balance").eq(t[1], id).eq("month", month).maybeSingle();
+  return data ? Number(data.balance) : null;
+}
+
+// Record a filed statement's amount as that month's statement balance in Cash Flow, so it's entered once.
+async function syncStatementBalance(kind: string, id: string, month: string, balance: number): Promise<boolean> {
+  const now = new Date().toISOString();
+  if (kind === "loan") {
+    const { error } = await supabaseAdmin.from("debt_statement_entries").upsert({ debt_id: id, month, balance, entered_at: now }, { onConflict: "debt_id,month" });
+    return !error;
   }
+  const cfg = kind === "bank" ? { table: "bank_statement_entries", col: "cash_account_id", acct: "cash_accounts" }
+            : kind === "card" ? { table: "card_statement_entries", col: "credit_card_id", acct: "credit_cards" } : null;
+  if (!cfg) return false;
+  const { error } = await supabaseAdmin.from(cfg.table).upsert({ [cfg.col]: id, month, balance, entered_at: now }, { onConflict: `${cfg.col},month` });
+  if (error) return false;
+  // The account's "current statement" figure follows the newest month only.
+  const { data: newest } = await supabaseAdmin.from(cfg.table).select("month").eq(cfg.col, id).order("month", { ascending: false }).limit(1).maybeSingle();
+  if (newest?.month === month) await supabaseAdmin.from(cfg.acct).update({ statement_balance: balance, statement_balance_updated_at: now }).eq("id", id);
+  return true;
+}
 
-  // Same overdue rules as the Cash Flow page (src/lib/staleness.ts), so the
-  // email never flags something the page doesn't, or the other way round.
-  const { data: accounts } = await supabase.from("cash_accounts").select("*");
-  const { data: cards } = await supabase.from("credit_cards").select("*");
-  const { data: debts } = await supabase.from("debts").select("*");
-  const { data: balanceRows } = await supabase.from("balance_checks").select("*").order("checked_at", { ascending: false });
-  const { data: bankStmts } = await supabase.from("bank_statement_entries").select("cash_account_id, month");
-  const { data: cardStmts } = await supabase.from("card_statement_entries").select("credit_card_id, month");
-  const { data: loanStmts } = await supabase.from("debt_statement_entries").select("debt_id, month");
-  const { data: latestReview } = await supabase.from("weekly_cash_reviews").select("review_date").order("review_date", { ascending: false }).limit(1).maybeSingle();
-  const { data: latestAr } = await supabase.from("ar_aging_entries").select("entry_date").order("entry_date", { ascending: false }).limit(1).maybeSingle();
+const toAmount = (v: unknown): number | null => (v === "" || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
 
-  const latestChecked: Record<string, string> = {};
-  for (const row of balanceRows ?? []) {
-    if (!latestChecked[row.account_name]) latestChecked[row.account_name] = row.checked_at;
-  }
-  const statements: Record<string, { month: string }[]> = {};
-  const push = (id: string, month: string) => { (statements[id] ??= []).push({ month }); };
-  for (const r of bankStmts ?? []) push(r.cash_account_id, r.month);
-  for (const r of cardStmts ?? []) push(r.credit_card_id, r.month);
-  for (const r of loanStmts ?? []) push(r.debt_id, r.month);
+export async function POST(req: NextRequest) {
+  const acc = statementsAccess(req);
+  if (!acc) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  if (acc.role !== "finance") return NextResponse.json({ error: "Not permitted." }, { status: 403 });
 
-  const stale = buildStaleItems({
-    accounts: (accounts ?? []).filter((a: any) => a.active !== false).map((a: any) => ({ id: a.id, name: a.name })),
-    cards: (cards ?? []).filter((c: any) => c.active !== false).map((c: any) => ({ id: c.id, name: c.name, approxClosingDay: c.approx_closing_day })),
-    loans: (debts ?? []).filter((d: any) => d.kind !== "revolving").map((d: any) => ({ id: d.id, name: d.name })),
-    latestChecked,
-    statements,
-    reviewDate: latestReview?.review_date ?? null,
-    arDate: latestAr?.entry_date ?? null,
-  });
-  const items = stale.map((it) => `<strong>${it.name}</strong> — ${it.warnings.join("; ")}.`);
+  const b = await req.json().catch(() => ({}));
+  const by = whoIs(acc.session);
 
-  // Statements for last month that still haven't been filed (from the 8th on). Names only, nothing sensitive.
-  const nowD = new Date();
-  if (nowD.getDate() >= 8) {
-    const prev = new Date(nowD.getFullYear(), nowD.getMonth() - 1, 1);
-    const pm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
-    const { data: sf, error: sfErr } = await supabase.from("statement_files").select("account_kind, account_id").eq("doc_type", "statement").eq("month", pm);
-    if (!sfErr) {
-      const filed = new Set((sf ?? []).map((r: any) => `${r.account_kind}:${r.account_id}`));
-      const expected = [
-        ...(accounts ?? []).filter((a: any) => a.active !== false).map((a: any) => ({ key: `bank:${a.id}`, name: a.name })),
-        ...(cards ?? []).filter((c: any) => c.active !== false).map((c: any) => ({ key: `card:${c.id}`, name: c.name })),
-        ...(debts ?? []).filter((d: any) => d.kind !== "revolving" && d.active !== false).map((d: any) => ({ key: `loan:${d.id}`, name: d.name })),
-      ];
-      const { data: srcRows } = await supabase.from("statement_sources").select("id, name, start_month").eq("active", true);
-      for (const v of srcRows ?? []) if (v.start_month <= pm) expected.push({ key: `vendor:${v.id}`, name: v.name });
-      const missing = expected.filter((e) => !filed.has(e.key)).map((e) => e.name);
-      if (missing.length > 0) {
-        items.push(`<strong>${prev.toLocaleDateString("en-US", { month: "long" })} statements not filed yet</strong> — ${missing.join(", ")}. File them on the Statements page.`);
+  try {
+    // ---- Is this a duplicate of something already filed? (Asked BEFORE the file is uploaded.) ----
+    if (b.action === "checkDuplicate") {
+      const amount = toAmount(b.amount);
+      if (b.docType === "invoice") {
+        const invNo = String(b.invoiceNumber ?? "").trim().toLowerCase();
+        const date = String(b.invoiceDate ?? "");
+        const name = String(b.accountName ?? "").trim().toLowerCase();
+        const { data } = await supabaseAdmin.from("statement_files").select(COLS).eq("doc_type", "invoice").limit(5000);
+        const matches = (data ?? []).filter((r: any) => {
+          const sameVendor = b.accountKind === "vendor" && b.accountId ? r.account_id === String(b.accountId) : String(r.account_name).trim().toLowerCase() === name;
+          return sameVendor;
+        }).map((r: any) => {
+          const sameNo = invNo !== "" && String(r.invoice_number ?? "").trim().toLowerCase() === invNo;
+          const sameDateAmt = amount != null && r.invoice_date === date && Number(r.amount) === amount;
+          return sameNo || sameDateAmt ? { ...r, reason: sameNo ? "the same invoice number" : "the same date and amount" } : null;
+        }).filter(Boolean);
+        return NextResponse.json({ matches });
       }
+      if (!KINDS.has(b.accountKind) || !MONTH_RE.test(String(b.month))) return NextResponse.json({ error: "Bad request." }, { status: 400 });
+      const { data } = await supabaseAdmin.from("statement_files").select(COLS).eq("doc_type", "statement").eq("account_kind", b.accountKind)
+        .eq("account_id", String(b.accountId)).eq("month", b.month).eq("no_statement", false);
+      const matches = (data ?? []).map((r: any) => ({ ...r, reason: amount != null && Number(r.amount) === amount ? "the same month and amount" : "a statement already filed for this month" }));
+      const cfBalance = await cashFlowBalance(b.accountKind, String(b.accountId), String(b.month));
+      return NextResponse.json({ matches, cfBalance });
     }
-  }
 
-  const sent = await sendWeeklyCashDigest(items);
-  return NextResponse.json({ ok: true, itemCount: items.length, sent });
+    if (b.action === "confirm") {
+      const path = String(b.path ?? "");
+      const isInvoice = b.docType === "invoice";
+      const invoiceDate = String(b.invoiceDate ?? "");
+      // An invoice's month always comes from its own date, so it can't be filed under a different month.
+      const month = isInvoice ? invoiceDate.slice(0, 7) : String(b.month);
+      const prefix = `${isInvoice ? "invoices/" : ""}${month.slice(0, 4)}/${month}/`;
+      if (!KINDS.has(b.accountKind) || !MONTH_RE.test(month) || !/^(invoices\/)?\d{4}\/\d{4}-\d{2}\/[a-z0-9-]+\.pdf$/.test(path) || !path.startsWith(prefix)
+          || (isInvoice && !/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate))) {
+        return NextResponse.json({ error: "Bad request." }, { status: 400 });
+      }
+      // The amount is always recorded, and an invoice always has its number.
+      const amount = toAmount(b.amount);
+      if (amount == null) return NextResponse.json({ error: "Enter the amount." }, { status: 400 });
+      const invoiceNumber = String(b.invoiceNumber ?? "").trim().slice(0, 60);
+      if (isInvoice && !invoiceNumber) return NextResponse.json({ error: "Enter the invoice number." }, { status: 400 });
+
+      // Make sure the file really arrived before recording it.
+      const dir = path.slice(0, path.lastIndexOf("/"));
+      const base = path.slice(path.lastIndexOf("/") + 1);
+      const { data: found } = await supabaseAdmin.storage.from(BUCKET).list(dir, { search: base });
+      if (!found || !found.some((f) => f.name === base)) return NextResponse.json({ error: "The upload didn't complete. Please try again." }, { status: 400 });
+      const { data, error } = await supabaseAdmin.from("statement_files").insert({
+        account_kind: b.accountKind, account_id: String(b.accountId ?? ""), account_name: String(b.accountName), month,
+        file_path: path, file_name: String(b.fileName ?? base).slice(0, 200), size_bytes: Number(b.size) || null, uploaded_by: by,
+        amount, dup_ignored: b.dupIgnored === true,
+        ...(isInvoice ? {
+          doc_type: "invoice", invoice_date: invoiceDate, invoice_number: invoiceNumber, category: String(b.category ?? "").trim().slice(0, 40),
+          ...(b.matchedBillId && /^\d{4}-\d{2}-\d{2}$/.test(String(b.matchedDueDate ?? "")) ? { matched_bill_id: String(b.matchedBillId), matched_due_date: b.matchedDueDate } : {}),
+        } : {}),
+      }).select(COLS).single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      // A statement's amount becomes that month's statement balance in Cash Flow.
+      const synced = !isInvoice && b.accountKind !== "vendor" && b.accountKind !== "other" ? await syncStatementBalance(b.accountKind, String(b.accountId), month, amount) : false;
+      return NextResponse.json({ data, synced });
+    }
+
+    if (b.action === "markNone") {
+      if (!KINDS.has(b.accountKind) || !MONTH_RE.test(String(b.month))) return NextResponse.json({ error: "Bad request." }, { status: 400 });
+      const { data, error } = await supabaseAdmin.from("statement_files").insert({
+        account_kind: b.accountKind, account_id: String(b.accountId), account_name: String(b.accountName), month: b.month,
+        no_statement: true, note: String(b.note ?? "").slice(0, 300), uploaded_by: by,
+      }).select(COLS).single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data });
+    }
+
+    if (b.action === "addSource") {
+      const name = String(b.name ?? "").trim().slice(0, 80);
+      if (!name || !CATEGORIES.has(b.category) || !MONTH_RE.test(String(b.startMonth))) return NextResponse.json({ error: "Enter a name, a type and a first month." }, { status: 400 });
+      const { data, error } = await supabaseAdmin.from("statement_sources").insert({ name, category: b.category, start_month: b.startMonth, expects_statement: b.expectsStatement !== false }).select("id").single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data });
+    }
+
+    if (b.action === "updateSource") {
+      const patch: Record<string, unknown> = {};
+      if (typeof b.name === "string" && b.name.trim()) patch.name = b.name.trim().slice(0, 80);
+      if (CATEGORIES.has(b.category)) patch.category = b.category;
+      if (typeof b.active === "boolean") patch.active = b.active;
+      if (typeof b.expectsStatement === "boolean") patch.expects_statement = b.expectsStatement;
+      if (MONTH_RE.test(String(b.startMonth ?? ""))) patch.start_month = b.startMonth;
+      if (Object.keys(patch).length === 0) return NextResponse.json({ error: "Nothing to change." }, { status: 400 });
+      const { error } = await supabaseAdmin.from("statement_sources").update(patch).eq("id", String(b.id));
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data: null });
+    }
+
+    if (b.action === "setInvoiceCategory") {
+      const { error } = await supabaseAdmin.from("statement_files").update({ category: String(b.category ?? "").trim().slice(0, 40) }).eq("id", String(b.id)).eq("doc_type", "invoice");
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data: null });
+    }
+
+    if (b.action === "markInvoicePaid") {
+      const paid = b.paid === true;
+      const paidDate = paid && /^\d{4}-\d{2}-\d{2}$/.test(String(b.paidDate ?? "")) ? b.paidDate : paid ? new Date().toISOString().slice(0, 10) : null;
+      const { error } = await supabaseAdmin.from("statement_files").update({ paid, paid_date: paidDate }).eq("id", String(b.id)).eq("doc_type", "invoice");
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data: null });
+    }
+
+    if (b.action === "matchInvoice") {
+      const link = b.billId && /^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate ?? ""));
+      const { error } = await supabaseAdmin.from("statement_files").update(link ? { matched_bill_id: String(b.billId), matched_due_date: b.dueDate } : { matched_bill_id: null, matched_due_date: null }).eq("id", String(b.id)).eq("doc_type", "invoice");
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data: null });
+    }
+
+    if (b.action === "remove") {
+      const { data: row } = await supabaseAdmin.from("statement_files").select("id, file_path").eq("id", String(b.id)).maybeSingle();
+      if (!row) return NextResponse.json({ error: "Not found." }, { status: 404 });
+      if (row.file_path) await supabaseAdmin.storage.from(BUCKET).remove([row.file_path]);
+      const { error } = await supabaseAdmin.from("statement_files").delete().eq("id", row.id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data: null });
+    }
+
+    return NextResponse.json({ error: "Unknown action." }, { status: 400 });
+  } catch (err) {
+    console.error("statements/manage error:", err);
+    return NextResponse.json({ error: `Request failed: ${err instanceof Error ? err.message : String(err)}` }, { status: 500 });
+  }
 }
