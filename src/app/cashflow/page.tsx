@@ -5,10 +5,10 @@ import { Sidebar } from "@/components/Sidebar";
 import { formatMoney, formatUSD } from "@/lib/format";
 import WeeklyUpdatePanel from "@/components/WeeklyUpdatePanel";
 import UpdateNumbersFlow from "@/components/UpdateNumbersFlow";
-import { buildStaleItems, StaleItem, newestMonth, monthLabel as stmtMonthLabel } from "@/lib/staleness";
+import { buildStaleItems, StaleItem, newestMonth, monthLabel as stmtMonthLabel, coveredMonth, previousMonth } from "@/lib/staleness";
 import BarChart, { BarPoint, BarSeries } from "@/components/BarChart";
-import { UpdatedStamp } from "@/components/CashHistory";
-import { loadDebts, loadDebtStatements, Debt, CATEGORY_SHORT, CATEGORY_LABEL, categoryRank } from "@/lib/debt";
+import { UpdatedStamp, MonthSelect, NumInput } from "@/components/CashHistory";
+import { loadDebts, loadDebtStatements, Debt, CATEGORY_SHORT, CATEGORY_LABEL, categoryRank, saveDebt, saveDebtStatement } from "@/lib/debt";
 import { loadStaff } from "@/lib/staffStore";
 import { loadCompOwed, CompOwedResult } from "@/lib/compOwed";
 import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
@@ -418,6 +418,10 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   // the last one of each week or month). Statements: monthly. Open Dental:
   // monthly production plus the last income entry of each month. A/R: weekly.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Quick entry on each card: balance, statement, and logging a payment, without the guided flow.
+  type Quick = { open: boolean; bal: string; month: string; stmt: string; payAmt: string; payDate: string; msg: string };
+  const blankQuick = (month: string): Quick => ({ open: false, bal: "", month, stmt: "", payAmt: "", payDate: todayStr(), msg: "" });
+  const [quick, setQuick] = useState<Record<string, Quick>>({});
   const [balanceHist, setBalanceHist] = useState<Record<string, BalanceCheck[]>>({});
   const [statementPts, setStatementPts] = useState<Record<string, BarPoint[]>>({});
   const [loans, setLoans] = useState<Debt[]>([]);
@@ -619,7 +623,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       { k: "Next 14 days", v: `+$${formatMoney(fc.expectedDeposits14d)} / −$${formatMoney(fc.obligations14d)}` },
       { k: "Excess / (shortfall)", v: formatUSD(fc.excessOrShortfall), color: safeColor(fc.excessOrShortfall) },
     ];
-    return { key: a.id, name: a.name, tag: "Bank account", balance: bal?.balance ?? null, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(a.name, "week"), stmtSeries(a.id)] };
+    return { key: a.id, kind: "bank" as const, defaultMonth: previousMonth(), payBill: undefined as RecurringBill | undefined, name: a.name, tag: "Bank account", balance: bal?.balance ?? null, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(a.name, "week"), stmtSeries(a.id)] };
   });
 
   const cardTiles = cards.map((c, i) => {
@@ -637,18 +641,21 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       { k: "Payment due", v: `day ${c.dueDay} (${rec.daysUntilDue}d)`, color: rec.urgentMinimumDue ? "#b45309" : undefined },
       { k: "Projected in 14 days", v: `$${formatMoney(rec.projectedBalance)}`, color: rec.overLimitRisk ? "#b91c1c" : undefined },
     ];
-    return { key: c.id, name: c.name, tag: "Credit card", balance: bal?.balance ?? null, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(c.name, "week"), stmtSeries(c.id)] };
+    const cardBill = allBills.find((b) => b.linkedCreditCardId === c.id && b.active);
+    if (cardBill) stats.push({ k: "Payment from", v: cashAccounts.find((a) => a.id === cardBill.cashAccountId)?.name ?? "--" });
+    return { key: c.id, kind: "card" as const, defaultMonth: coveredMonth(c.approxClosingDay), payBill: cardBill, name: c.name, tag: "Credit card", balance: bal?.balance ?? null, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(c.name, "week"), stmtSeries(c.id)] };
   });
   const loanTiles = loans.map((l) => {
+    const loanBill = allBills.find((b) => b.linkedDebtId === l.id && b.active);
     const bal = latestBalances[l.name];
     const warns: Warn[] = [];
     const stmtTop = latestOf(statementPts[l.id]);
     const stats: { k: string; v: string; color?: string }[] = [
       { k: stmtTop ? `Statement ${stmtMonthLabel(stmtTop.date)}` : "Statement", v: stmtTop ? `$${formatMoney(stmtTop.value)}` : "—" },
       { k: "Rate", v: l.interestRate == null ? "not set" : `${l.interestRate}%${l.rateType ? ` ${l.rateType}` : ""}` },
-      { k: "Monthly payment", v: `$${formatMoney(l.monthlyPayment)}` },
+      { k: "Monthly payment", v: loanBill ? `$${formatMoney(loanBill.estimatedAmount)} · ${cashAccounts.find((a) => a.id === loanBill.cashAccountId)?.name ?? "scheduled"}` : `$${formatMoney(l.monthlyPayment)} · not scheduled` },
     ];
-    return { key: l.id, cat: l.category, name: l.name, tag: CATEGORY_SHORT[l.category], balance: bal?.balance ?? l.currentBalance, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(l.name, "month"), stmtSeries(l.id)] };
+    return { key: l.id, kind: "loan" as const, defaultMonth: previousMonth(), payBill: loanBill, cat: l.category, name: l.name, tag: CATEGORY_SHORT[l.category], balance: bal?.balance ?? l.currentBalance, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(l.name, "month"), stmtSeries(l.id)] };
   });
   const tiles = [...bankTiles, ...cardTiles, ...loanTiles];
 
@@ -705,6 +712,37 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     </div>
   );
 
+  const getQ = (t: { key: string; defaultMonth: string }): Quick => quick[t.key] ?? blankQuick(t.defaultMonth);
+  const setQ = (t: { key: string; defaultMonth: string }, patch: Partial<Quick>) =>
+    setQuick((st) => ({ ...st, [t.key]: { ...(st[t.key] ?? blankQuick(t.defaultMonth)), ...patch } }));
+
+  async function quickBalance(t: (typeof tiles)[number]) {
+    const q = getQ(t); const n = Number(q.bal);
+    if (q.bal === "" || isNaN(n)) return;
+    await addBalanceCheck(t.name, n);
+    if (t.kind === "loan") { const loan = loans.find((l) => l.id === t.key); if (loan) await saveDebt({ ...loan, currentBalance: n }); }
+    setQ(t, { bal: "", msg: "Balance saved." }); refreshAll();
+  }
+  async function quickStatement(t: (typeof tiles)[number]) {
+    const q = getQ(t); const n = Number(q.stmt);
+    if (q.stmt === "" || isNaN(n)) return;
+    const r = t.kind === "bank" ? await updateBankStatementBalance(t.key, n, q.month) : t.kind === "card" ? await updateStatementBalance(t.key, n, q.month) : await saveDebtStatement(t.key, q.month, n);
+    setQ(t, r.ok ? { stmt: "", msg: `${stmtMonthLabel(q.month)} statement saved.` } : { msg: `Not saved: ${r.error ?? "error"}` });
+    if (r.ok) refreshAll();
+  }
+  async function quickPayment(t: (typeof tiles)[number]) {
+    const q = getQ(t); const n = Number(q.payAmt);
+    if (q.payAmt === "" || isNaN(n) || n <= 0) return;
+    const bill = t.payBill;
+    if (!bill) { setQ(t, { msg: "Link a scheduled payment first (loans: Edit on the Numbers tab)." }); return; }
+    // The payment settles the earliest unpaid occurrence of this bill, so it leaves Need to collect.
+    const occ = buildOccurrences([bill], allPayments, addDays(today, -35), monthEnd).filter((o) => !o.isPaid && o.direction === "outflow")[0];
+    if (!occ) { setQ(t, { msg: "Nothing unpaid on this payment schedule right now." }); return; }
+    await saveBillPayment(bill.id, occ.dueDate, n);
+    setQ(t, { payAmt: "", msg: `Payment of $${formatMoney(n)} recorded against ${new Date(occ.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}.` });
+    refreshAll();
+  }
+
   const renderTile = (t: (typeof tiles)[number]) => (
         <div key={t.key} className="rounded-2xl bg-white shadow px-5 py-4 space-y-3">
           <div className="flex flex-wrap gap-x-6 gap-y-3">
@@ -712,6 +750,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-base text-slate-800">{t.name}</h3>
                 <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 rounded-full px-2 py-0.5">{t.tag}</span>
+                <button onClick={() => setQ(t, { open: !getQ(t).open })} className="text-xs font-semibold text-orange-500 hover:underline">{getQ(t).open ? "Close" : "Quick update"}</button>
               </div>
               <div>
                 <p className="text-3xl font-bold leading-tight" style={{ color: "#4A4238" }}>{t.balance != null ? formatUSD(t.balance) : "—"}</p>
@@ -735,6 +774,45 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
               ))}
             </div>
           )}
+          {getQ(t).open && (() => {
+            const q = getQ(t);
+            const box = "rounded border border-sky-300 bg-sky-50 px-1.5 py-1 text-xs font-semibold text-slate-900 focus:border-orange-400 focus:bg-white focus:outline-none";
+            const lab = "block text-[11px] font-semibold text-slate-500 mb-0.5";
+            const go = "rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90";
+            return (
+              <div className="rounded-xl bg-slate-50 px-4 py-3 flex flex-wrap items-end gap-x-6 gap-y-3">
+                <div>
+                  <label className={lab}>Current balance</label>
+                  <div className="flex items-center gap-1.5">
+                    <NumInput onFocus={(e) => e.target.select()} value={q.bal} onChange={(e) => setQ(t, { bal: e.target.value })} wrap="w-28" className={`${box} w-full`} />
+                    <button onClick={() => quickBalance(t)} className={go} style={{ backgroundColor: "#e8622a" }}>Save</button>
+                  </div>
+                </div>
+                <div>
+                  <label className={lab}>Statement balance</label>
+                  <div className="flex items-center gap-1.5">
+                    <MonthSelect value={q.month} onChange={(m) => setQ(t, { month: m })} className="!py-1" />
+                    <NumInput onFocus={(e) => e.target.select()} value={q.stmt} onChange={(e) => setQ(t, { stmt: e.target.value })} wrap="w-28" className={`${box} w-full`} />
+                    <button onClick={() => quickStatement(t)} className={go} style={{ backgroundColor: "#e8622a" }}>Save</button>
+                  </div>
+                </div>
+                {t.kind !== "bank" && (
+                  <div>
+                    <label className={lab}>Log a payment{t.payBill ? ` (${t.payBill.name})` : ""}</label>
+                    {t.payBill ? (
+                      <div className="flex items-center gap-1.5">
+                        <NumInput onFocus={(e) => e.target.select()} value={q.payAmt} onChange={(e) => setQ(t, { payAmt: e.target.value })} wrap="w-28" className={`${box} w-full`} />
+                        <button onClick={() => quickPayment(t)} className={go} style={{ backgroundColor: "#0f766e" }}>Log payment</button>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400" style={{ maxWidth: 260 }}>{t.kind === "loan" ? "Link a scheduled payment to this loan (Edit on the Numbers tab) to log payments here." : "No scheduled payment is linked to this card."}</p>
+                    )}
+                  </div>
+                )}
+                {q.msg && <p className="text-xs font-semibold text-slate-600 basis-full">{q.msg}</p>}
+              </div>
+            );
+          })()}
         </div>
   );
 
