@@ -23,7 +23,7 @@ import {
   PvBonusPayment, loadPvBonusPayments, computePvQuarterCalcs, getPvQuarterDateRange,
 } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusPayoutYear, HoBonusPayment, loadHoBonusPayments } from "@/lib/hoBonus";
-import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT, formatPayDate } from "@/lib/hygieneBonus";
+import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT, formatPayDate, isHygieneBonusEligible } from "@/lib/hygieneBonus";
 import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
 import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsStore";
 import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry, computeRequiredCertStatuses, deleteCeCourseEntry } from "@/lib/requiredCertsStore";
@@ -290,7 +290,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   // Computes what this specific employee earned for a given quarter, by
   // splitting that quarter's pool across every eligible employee — mirrors
   // the same logic used in the Payroll Dashboard's Growth Bonus tab.
-  const isHygienist = selectedEmployee && (selectedEmployee.role === "Hygienist" || selectedEmployee.skills.includes("Hygienist"));
+  const isHygienist = !!selectedEmployee && isHygieneBonusEligible(selectedEmployee);
 
   const isFullTime = (selectedEmployee?.employmentType ?? "full_time") === "full_time";
   const ptoEligibilityDate = selectedEmployee?.hireDate ? addMonths(selectedEmployee.hireDate, 4) : null;
