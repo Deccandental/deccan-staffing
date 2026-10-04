@@ -40,6 +40,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   growthBonusEligible: false,
   growthBonusMultiplier: 1,
   pvBonusEligible: false,
+  hygieneBonusEligible: false,
   netProductionBonusPercent: 30,
   hoBonusEligible: false,
   exemptFromPolicySigning: false,
@@ -108,6 +109,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       hireDate: emp.hireDate ?? "", growthBonusEligible: emp.growthBonusEligible ?? false,
       growthBonusMultiplier: emp.growthBonusMultiplier ?? 1,
       pvBonusEligible: emp.pvBonusEligible ?? false,
+      hygieneBonusEligible: emp.hygieneBonusEligible ?? false,
       netProductionBonusPercent: emp.netProductionBonusPercent ?? 30,
       hoBonusEligible: emp.hoBonusEligible ?? false,
       exemptFromPolicySigning: emp.exemptFromPolicySigning ?? false,
@@ -374,6 +376,10 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                       </div>
                     )}
                     <p className="text-xs text-gray-400 mt-1">Owner, contractors (e.g. Dr. Ho), and temps stay unchecked — they're not part of this program.</p>
+                    <label className="flex items-center gap-2 cursor-pointer mt-3">
+                      <input type="checkbox" checked={form.hygieneBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, hygieneBonusEligible: e.target.checked }))} />
+                      <span className="text-sm font-medium text-gray-700">Eligible for Hygiene Bonus ($15 per patient)</span>
+                    </label>
                     <label className="flex items-center gap-2 cursor-pointer mt-3">
                       <input type="checkbox" checked={form.pvBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, pvBonusEligible: e.target.checked }))} />
                       <span className="text-sm font-medium text-gray-700">Eligible for Net Production Based Bonus</span>
