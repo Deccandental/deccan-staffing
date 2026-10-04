@@ -21,10 +21,61 @@ import { MonthSelect, NumInput, fmtWhen } from "@/components/CashHistory";
  */
 
 type StepKind = "bank" | "card" | "loan" | "od" | "ar";
-interface Step { id: string; kind: StepKind; name: string; due: boolean; account?: CashAccount; card?: CreditCard; loan?: Debt }
+interface Step { id: string; kind: StepKind; name: string; due: boolean; institution: string | null; account?: CashAccount; card?: CreditCard; loan?: Debt }
 type StmtEntry = { month: string; balance: number };
 
 const KIND_LABEL: Record<StepKind, string> = { bank: "Bank account", card: "Credit card", loan: "Loan", od: "Open Dental", ar: "A/R" };
+
+// ---------------- Grouping by institution ----------------
+// Accounts, cards and loans that belong to the same bank are asked one after
+// another, so you can stay on that bank's website instead of leaving and coming
+// back. The institution is worked out from the name (e.g. "US Bank Credit Card
+// 2244" -> "US Bank", "Fifth Third Checking" -> "Fifth Third"), or a loan's lender.
+
+const GENERIC_WORDS = new Set(["credit", "card", "cards", "checking", "savings", "account", "acct", "business", "biz", "visa", "mastercard", "amex", "loan", "line", "of", "operating", "payroll"]);
+
+function institutionTokens(name: string): string[] {
+  const tokens = name.trim().split(/\s+/).filter(Boolean);
+  while (tokens.length > 1) {
+    const last = tokens[tokens.length - 1].toLowerCase().replace(/[^a-z0-9#*]/g, "");
+    if (GENERIC_WORDS.has(last) || /\d/.test(last) || /^[#*x]/.test(last)) tokens.pop(); else break;
+  }
+  return tokens;
+}
+
+/** Institution label per step id; names that start with another's name (Chase / Chase Ink) share it. */
+function assignInstitutions(items: { id: string; text: string }[]): Record<string, string> {
+  const toks = items.map((i) => ({ id: i.id, tokens: institutionTokens(i.text) }));
+  const out: Record<string, string> = {};
+  for (const t of toks) {
+    const lower = t.tokens.map((x) => x.toLowerCase());
+    let best = t.tokens;
+    for (const o of toks) {
+      if (o.tokens.length >= best.length) continue;
+      const ol = o.tokens.map((x) => x.toLowerCase());
+      if (ol.every((w, i) => w === lower[i])) best = o.tokens;
+    }
+    out[t.id] = best.join(" ");
+  }
+  return out;
+}
+
+/** Selected steps in the order they'll be asked: grouped by institution, institutions with something due first. */
+function orderSteps(chosen: Step[]): Step[] {
+  const groups = new Map<string, Step[]>();
+  const keyOf = (st: Step) => (st.institution ? st.institution.toLowerCase() : "~practice");
+  for (const st of chosen) { const k = keyOf(st); groups.set(k, [...(groups.get(k) ?? []), st]); }
+  const firstSeen = new Map<string, number>();
+  chosen.forEach((st, i) => { const k = keyOf(st); if (!firstSeen.has(k)) firstSeen.set(k, i); });
+  const keys = [...groups.keys()].sort((a, b) => {
+    if (a === "~practice") return 1; // Open Dental and A/R aren't on a bank site; they go last
+    if (b === "~practice") return -1;
+    const ad = groups.get(a)!.some((x) => x.due) ? 0 : 1, bd = groups.get(b)!.some((x) => x.due) ? 0 : 1;
+    return ad - bd || (firstSeen.get(a)! - firstSeen.get(b)!);
+  });
+  // Inside the practice group, due items come first.
+  return keys.flatMap((k) => (k === "~practice" ? [...groups.get(k)!].sort((x, y) => Number(y.due) - Number(x.due)) : groups.get(k)!));
+}
 
 export default function UpdateNumbersFlow({
   open, onClose, onSaved, accounts, cards, loans, latestBalances, statements, review, ar, dueNames,
@@ -46,19 +97,24 @@ export default function UpdateNumbersFlow({
   // Build the full step list; frozen when the flow starts so it doesn't reshuffle mid-pass.
   const live = useMemo<Step[]>(() => {
     const due = new Set(dueNames);
+    const inst = assignInstitutions([
+      ...accounts.map((a) => ({ id: `bank:${a.id}`, text: a.name })),
+      ...cards.map((c) => ({ id: `card:${c.id}`, text: c.name })),
+      ...loans.map((l) => ({ id: `loan:${l.id}`, text: l.lender?.trim() ? l.lender : l.name })),
+    ]);
     return [
-      ...accounts.map((a): Step => ({ id: `bank:${a.id}`, kind: "bank", name: a.name, due: due.has(a.name), account: a })),
-      ...cards.map((c): Step => ({ id: `card:${c.id}`, kind: "card", name: c.name, due: due.has(c.name), card: c })),
-      ...loans.map((l): Step => ({ id: `loan:${l.id}`, kind: "loan", name: l.name, due: due.has(l.name), loan: l })),
-      { id: "od", kind: "od", name: "Open Dental numbers", due: due.has("Open Dental numbers") },
-      { id: "ar", kind: "ar", name: "A/R aging", due: due.has("A/R aging") },
+      ...accounts.map((a): Step => ({ id: `bank:${a.id}`, kind: "bank", name: a.name, due: due.has(a.name), institution: inst[`bank:${a.id}`], account: a })),
+      ...cards.map((c): Step => ({ id: `card:${c.id}`, kind: "card", name: c.name, due: due.has(c.name), institution: inst[`card:${c.id}`], card: c })),
+      ...loans.map((l): Step => ({ id: `loan:${l.id}`, kind: "loan", name: l.name, due: due.has(l.name), institution: inst[`loan:${l.id}`], loan: l })),
+      { id: "od", kind: "od", name: "Open Dental numbers", due: due.has("Open Dental numbers"), institution: null },
+      { id: "ar", kind: "ar", name: "A/R aging", due: due.has("A/R aging"), institution: null },
     ];
   }, [accounts, cards, loans, dueNames]);
 
   const steps = frozen ?? live;
   const byId = (id: string) => steps.find((s) => s.id === id)!;
-  const dueSteps = steps.filter((s) => s.due);
-  const otherSteps = steps.filter((s) => !s.due);
+  const dueSteps = orderSteps(steps.filter((s) => s.due));
+  const otherSteps = orderSteps(steps.filter((s) => !s.due));
 
   // Reset to the picker whenever the flow is reopened.
   const [wasOpen, setWasOpen] = useState(false);
@@ -72,8 +128,8 @@ export default function UpdateNumbersFlow({
 
   function start(ids: string[]) {
     setFrozen(frozen ?? live);
-    // Due numbers first, then the rest, each in list order.
-    const ordered = [...(frozen ?? live).filter((s) => ids.includes(s.id) && s.due), ...(frozen ?? live).filter((s) => ids.includes(s.id) && !s.due)].map((s) => s.id);
+    // Grouped by institution so each bank's accounts come one after another.
+    const ordered = orderSteps((frozen ?? live).filter((s) => ids.includes(s.id))).map((s) => s.id);
     setQueue(ordered); setIdx(0); setPhase("run");
   }
   function advance(outcome: "saved" | "skipped") {
@@ -84,7 +140,7 @@ export default function UpdateNumbersFlow({
 
   const savedCount = Object.values(results).filter((r) => r === "saved").length;
   const skippedCount = Object.values(results).filter((r) => r === "skipped").length;
-  const remaining = steps.filter((s) => !queue.includes(s.id));
+  const remaining = orderSteps(steps.filter((s) => !queue.includes(s.id)));
 
   const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
@@ -92,6 +148,7 @@ export default function UpdateNumbersFlow({
     <label key={s.id} className="flex items-center gap-3 py-1.5 border-t border-slate-100 text-sm cursor-pointer">
       <input type="checkbox" checked={picked.has(s.id)} onChange={() => toggle(s.id)} className="h-4 w-4" />
       <span className="font-medium text-slate-800 flex-1 min-w-0 truncate">{s.name}</span>
+      {s.institution && <span className="text-[11px] text-slate-400 whitespace-nowrap">{s.institution}</span>}
       <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">{KIND_LABEL[s.kind]}</span>
     </label>
   );
@@ -262,6 +319,7 @@ function StepForm({ step, position, total, latestBalances, statements, review, a
       <div className="flex items-center gap-2 mt-3">
         <h3 className="font-bold text-slate-800" style={{ fontSize: 17 }}>{step.name}</h3>
         <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">{KIND_LABEL[step.kind]}</span>
+        {step.institution && <span className="text-[11px] font-semibold rounded-full px-2 py-0.5" style={{ background: "#dbeafe", color: "#1e4e8c" }}>{step.institution}</span>}
       </div>
       <p className="text-xs text-slate-500 mb-3">{lastLine}</p>
 
