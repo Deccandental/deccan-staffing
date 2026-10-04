@@ -33,6 +33,7 @@ import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth, HoBonusPayment, 
 import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear, formatPayDate } from "@/lib/hygieneBonus";
 import { BonusCarryover, loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
 import BroughtForward from "@/components/BroughtForward";
+import NumCell from "@/components/NumCell";
 import { hygieneYear } from "@/lib/compOwed";
 import { formatMoney, byLastName } from "@/lib/format";
 import {
@@ -333,7 +334,7 @@ function PayrollPageBody() {
               {people.map((p) => {
                 const fields = rows[p.personKey] ?? EMPTY_ROW;
                 const skipped = fields.skipped;
-                const cellClass = "w-full rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none disabled:bg-slate-50 disabled:text-slate-300";
+                const cellClass = "w-full rounded border border-sky-300 bg-sky-50 px-1.5 py-1 text-xs font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300";
                 return (
                   <tr key={p.personKey} className={`border-b border-slate-50 last:border-0 ${skipped ? "opacity-50" : ""}`}>
                     <td className="px-3 py-1.5 whitespace-nowrap">
@@ -345,21 +346,21 @@ function PayrollPageBody() {
                         <span className="font-medium text-slate-700">{p.personName}</span>
                       </div>
                     </td>
-                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))} className={cellClass} /></td>
-                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><NumCell disabled={skipped} value={fields.hoursWorked} onChange={(n) => updateRow(p.personKey, "hoursWorked", n)} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><NumCell disabled={skipped} value={fields.overtimeHours} onChange={(n) => updateRow(p.personKey, "overtimeHours", n)} className={cellClass} /></td>
                     <td className="px-1 py-1.5">
-                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                      {p.employee ? <NumCell disabled={skipped} value={fields.ptoHours} onChange={(n) => updateRow(p.personKey, "ptoHours", n)} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
                     </td>
                     <td className="px-1 py-1.5">
-                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                      {p.employee ? <NumCell disabled={skipped} value={fields.sickHours} onChange={(n) => updateRow(p.personKey, "sickHours", n)} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
                     </td>
                     <td className="px-1 py-1.5">
-                      {p.employee ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
+                      {p.employee ? <NumCell disabled={skipped} value={fields.paidHolidayHours} onChange={(n) => updateRow(p.personKey, "paidHolidayHours", n)} className={cellClass} /> : <span className="text-slate-300 text-xs">—</span>}
                     </td>
-                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))} className={cellClass} /></td>
-                    <td className="px-1 py-1.5"><input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><NumCell disabled={skipped} value={fields.paidMeetingHours} onChange={(n) => updateRow(p.personKey, "paidMeetingHours", n)} className={cellClass} /></td>
+                    <td className="px-1 py-1.5"><NumCell disabled={skipped} value={fields.bonusAmount} onChange={(n) => updateRow(p.personKey, "bonusAmount", n)} className={cellClass} /></td>
                     <td className="px-1 py-1.5">
-                      {isHygienist(p.employee) ? <input type="number" onFocus={(e) => e.target.select()} disabled={skipped} value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))} className={cellClass} title={`$${(fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT).toFixed(2)} bonus`} /> : <span className="text-slate-300 text-xs">—</span>}
+                      {isHygienist(p.employee) ? <NumCell disabled={skipped} value={fields.hygienePatientCount} onChange={(n) => updateRow(p.personKey, "hygienePatientCount", n)} className={cellClass} title={`$${(fields.hygienePatientCount * HYGIENE_BONUS_PER_PATIENT).toFixed(2)} bonus`} /> : <span className="text-slate-300 text-xs">—</span>}
                     </td>
                     <td className="px-2 py-1.5"><input type="text" disabled={skipped} value={fields.notes} onChange={(e) => updateRow(p.personKey, "notes", e.target.value)} className={cellClass + " min-w-[100px]"} /></td>
                     <td className="px-2 py-1.5 whitespace-nowrap">
@@ -404,13 +405,13 @@ function PayrollPageBody() {
                   <label className="block text-xs text-slate-400 mb-0.5">PTO Balance (hrs)</label>
                   <input type="number" onFocus={(e) => e.target.select()} defaultValue={p.employee.ptoBalanceHours ?? 0}
                     onBlur={(e) => handleBalanceChange(p.employee!, "pto", Number(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                    className="w-full rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs text-slate-400 mb-0.5">Sick Balance (hrs)</label>
                   <input type="number" onFocus={(e) => e.target.select()} defaultValue={p.employee.sickBalanceHours ?? 0}
                     onBlur={(e) => handleBalanceChange(p.employee!, "sick", Number(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                    className="w-full rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none" />
                 </div>
               </div>
             )}
@@ -418,18 +419,18 @@ function PayrollPageBody() {
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="block text-xs text-slate-400 mb-0.5">Hours Worked</label>
-                <input type="number" onFocus={(e) => e.target.select()} value={fields.hoursWorked} onChange={(e) => updateRow(p.personKey, "hoursWorked", Number(e.target.value))}
-                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                <NumCell value={fields.hoursWorked} onChange={(n) => updateRow(p.personKey, "hoursWorked", n)}
+                  className="w-full rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none" />
               </div>
               <div>
                 <label className="block text-xs text-slate-400 mb-0.5">OT Hours</label>
-                <input type="number" onFocus={(e) => e.target.select()} value={fields.overtimeHours} onChange={(e) => updateRow(p.personKey, "overtimeHours", Number(e.target.value))}
-                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                <NumCell value={fields.overtimeHours} onChange={(n) => updateRow(p.personKey, "overtimeHours", n)}
+                  className="w-full rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none" />
               </div>
               <div>
                 <label className="block text-xs text-slate-400 mb-0.5">Bonus ($)</label>
-                <input type="number" onFocus={(e) => e.target.select()} value={fields.bonusAmount} onChange={(e) => updateRow(p.personKey, "bonusAmount", Number(e.target.value))}
-                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                <NumCell value={fields.bonusAmount} onChange={(n) => updateRow(p.personKey, "bonusAmount", n)}
+                  className="w-full rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none" />
               </div>
             </div>
 
@@ -440,19 +441,19 @@ function PayrollPageBody() {
                   <button onClick={() => recomputeAuto(p)} className="text-xs text-orange-500 hover:underline">↺ recompute</button>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  <input type="number" onFocus={(e) => e.target.select()} value={fields.ptoHours} onChange={(e) => updateRow(p.personKey, "ptoHours", Number(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
-                  <input type="number" onFocus={(e) => e.target.select()} value={fields.sickHours} onChange={(e) => updateRow(p.personKey, "sickHours", Number(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
-                  <input type="number" onFocus={(e) => e.target.select()} value={fields.paidHolidayHours} onChange={(e) => updateRow(p.personKey, "paidHolidayHours", Number(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+                  <NumCell value={fields.ptoHours} onChange={(n) => updateRow(p.personKey, "ptoHours", n)}
+                    className="w-full rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none" />
+                  <NumCell value={fields.sickHours} onChange={(n) => updateRow(p.personKey, "sickHours", n)}
+                    className="w-full rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none" />
+                  <NumCell value={fields.paidHolidayHours} onChange={(n) => updateRow(p.personKey, "paidHolidayHours", n)}
+                    className="w-full rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none" />
                 </div>
               </div>
             )}
 
             <div>
               <label className="block text-xs text-slate-400 mb-0.5">Paid Meeting/Day-off Hours</label>
-              <input type="number" onFocus={(e) => e.target.select()} value={fields.paidMeetingHours} onChange={(e) => updateRow(p.personKey, "paidMeetingHours", Number(e.target.value))}
+              <NumCell value={fields.paidMeetingHours} onChange={(n) => updateRow(p.personKey, "paidMeetingHours", n)}
                 className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
             </div>
 
@@ -460,7 +461,7 @@ function PayrollPageBody() {
               <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-2.5 flex items-center gap-3">
                 <div>
                   <label className="block text-xs text-emerald-700 mb-0.5">Hygiene Patients</label>
-                  <input type="number" onFocus={(e) => e.target.select()} value={fields.hygienePatientCount} onChange={(e) => updateRow(p.personKey, "hygienePatientCount", Number(e.target.value))}
+                  <NumCell value={fields.hygienePatientCount} onChange={(n) => updateRow(p.personKey, "hygienePatientCount", n)}
                     className="w-20 rounded-lg border border-emerald-200 px-2 py-1 text-sm focus:outline-none" />
                 </div>
                 <span className="text-sm text-emerald-700">× ${HYGIENE_BONUS_PER_PATIENT} = <strong>${hygieneBonus.toFixed(2)}</strong></span>
@@ -468,7 +469,7 @@ function PayrollPageBody() {
             )}
 
             <input type="text" value={fields.notes} onChange={(e) => updateRow(p.personKey, "notes", e.target.value)}
-              placeholder="Notes (optional)" className="w-full rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none" />
+              placeholder="Notes (optional)" className="w-full rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none" />
 
             <div className="flex items-center gap-3">
               <button onClick={() => handleSave(p)} disabled={savingKey === p.personKey}
@@ -1167,7 +1168,7 @@ function PvBonusPanel() {
   const selectedEmployee = staff.find((e) => e.id === employeeId);
   const percent = selectedEmployee?.netProductionBonusPercent ?? 30;
   const sortedYears = [...years].sort((a, b) => b - a);
-  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+  const cellClass = "rounded border border-sky-300 bg-sky-50 px-1.5 py-1 text-xs font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none";
 
   // Full set of quarters for this employee, oldest-first, filled in for
   // every displayed year even if never saved yet — needed so the running
@@ -1432,7 +1433,7 @@ function HoBonusPanel() {
 
   const eligibleStaff = staff.filter((e) => e.hoBonusEligible);
   const sortedYears = [...years].sort((a, b) => b - a);
-  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+  const cellClass = "rounded border border-sky-300 bg-sky-50 px-1.5 py-1 text-xs font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none";
 
   if (eligibleStaff.length === 0 && !loading) {
     return <p className="text-sm text-slate-400">No one is marked "Eligible for Dr. Ho-style Compensation" yet — set that on the Staff page first.</p>;
@@ -1701,7 +1702,7 @@ function HygieneBonusPanel() {
 
   const hygienists = staff.filter(isHygienistRole);
   const periods = getPayPeriodsInYear(year);
-  const cellClass = "rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
+  const cellClass = "rounded border border-sky-300 bg-sky-50 px-1.5 py-1 text-xs font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:border-orange-400 focus:bg-white focus:outline-none";
 
   let runningEarned = 0;
   let runningPaid = 0;
@@ -1755,9 +1756,9 @@ function HygieneBonusPanel() {
                     <tr key={p.start} className="border-b border-slate-50 last:border-0">
                       <td className="px-3 py-1 font-medium text-slate-700 whitespace-nowrap">{p.label}</td>
                       <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{formatPayDate(p.payDate)}</td>
-                      <td className="px-2 py-1"><input type="number" onFocus={(e) => e.target.select()} value={row.patientCount} onChange={(e) => updateRow(p.start, "patientCount", Number(e.target.value))} className={`${cellClass} w-16`} /></td>
+                      <td className="px-2 py-1"><NumCell value={row.patientCount} onChange={(n) => updateRow(p.start, "patientCount", n)} className={`${cellClass} w-16`} /></td>
                       <td className="px-2 py-1 text-slate-500">${formatMoney(earned)}</td>
-                      <td className="px-2 py-1"><input type="number" onFocus={(e) => e.target.select()} value={row.amountPaid} onChange={(e) => updateRow(p.start, "amountPaid", Number(e.target.value))} className={`${cellClass} w-20`} /></td>
+                      <td className="px-2 py-1"><NumCell value={row.amountPaid} onChange={(n) => updateRow(p.start, "amountPaid", n)} className={`${cellClass} w-20`} /></td>
                       <td className={`px-2 py-1 font-semibold whitespace-nowrap ${balance > 0 ? "text-amber-600" : balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(balance)}</td>
                     </tr>
                   );
