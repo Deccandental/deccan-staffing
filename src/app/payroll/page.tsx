@@ -30,7 +30,7 @@ import {
   computePvQuarterCalcs, PvQuarterCalc, getPvQuarterDateRange,
 } from "@/lib/pvBonus";
 import { HoBonusMonth, loadHoBonusPayoutYear, saveHoBonusMonth, HoBonusPayment, loadHoBonusPayments, addHoBonusPayment, updateHoBonusPayment, deleteHoBonusPayment } from "@/lib/hoBonus";
-import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear } from "@/lib/hygieneBonus";
+import { HygieneBonusEntry, loadHygieneBonusEntries, saveHygieneBonusEntry, getPayPeriodsInYear, formatPayDate } from "@/lib/hygieneBonus";
 import { BonusCarryover, loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
 import BroughtForward from "@/components/BroughtForward";
 import { hygieneYear } from "@/lib/compOwed";
@@ -1731,6 +1731,7 @@ function HygieneBonusPanel() {
               <thead className="sticky top-0 bg-white">
                 <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
                   <th className="px-3 py-2 font-medium">Pay Period</th>
+                  <th className="px-2 py-2 font-medium">Pay Date</th>
                   <th className="px-2 py-2 font-medium">Patients</th>
                   <th className="px-2 py-2 font-medium">Earned</th>
                   <th className="px-2 py-2 font-medium">Paid</th>
@@ -1740,7 +1741,7 @@ function HygieneBonusPanel() {
               <tbody>
                 {Math.abs(startBalance) > 0.5 && (
                   <tr className="border-b border-slate-100 bg-amber-50/60">
-                    <td className="px-3 py-2 font-medium text-amber-900 whitespace-nowrap" colSpan={4}>Brought forward</td>
+                    <td className="px-3 py-2 font-medium text-amber-900 whitespace-nowrap" colSpan={5}>Brought forward</td>
                     <td className="px-2 py-2 font-semibold whitespace-nowrap text-amber-700">${formatMoney(startBalance)}</td>
                   </tr>
                 )}
@@ -1753,6 +1754,7 @@ function HygieneBonusPanel() {
                   return (
                     <tr key={p.start} className="border-b border-slate-50 last:border-0">
                       <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{p.label}</td>
+                      <td className="px-2 py-2 text-slate-500 whitespace-nowrap">{formatPayDate(p.payDate)}</td>
                       <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={row.patientCount} onChange={(e) => updateRow(p.start, "patientCount", Number(e.target.value))} className={`${cellClass} w-16`} /></td>
                       <td className="px-2 py-2 text-slate-500">${formatMoney(earned)}</td>
                       <td className="px-2 py-2"><input type="number" onFocus={(e) => e.target.select()} value={row.amountPaid} onChange={(e) => updateRow(p.start, "amountPaid", Number(e.target.value))} className={`${cellClass} w-20`} /></td>
@@ -1761,6 +1763,16 @@ function HygieneBonusPanel() {
                   );
                 })}
               </tbody>
+              <tfoot className="sticky bottom-0 bg-white">
+                <tr className="border-t-2 border-slate-200 font-semibold text-slate-700">
+                  <td className="px-3 py-2">Total</td>
+                  <td className="px-2 py-2" />
+                  <td className="px-2 py-2">{periods.reduce((sum, p) => sum + (rows[p.start]?.patientCount ?? 0), 0)}</td>
+                  <td className="px-2 py-2">${formatMoney(runningEarned)}</td>
+                  <td className="px-2 py-2">${formatMoney(runningPaid)}</td>
+                  <td className={`px-2 py-2 whitespace-nowrap ${startBalance + runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}`}>${formatMoney(startBalance + runningEarned - runningPaid)}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
           <div className="flex items-center gap-3 p-3 border-t border-slate-100">
@@ -1769,14 +1781,7 @@ function HygieneBonusPanel() {
               {saving ? "Saving…" : "Save All"}
             </button>
             {savedMsg && <span className="text-xs text-slate-400">{savedMsg}</span>}
-            <span className="text-sm text-slate-500 ml-auto text-right">
-              <strong className="text-slate-700">Totals</strong> {periods.reduce((sum, p) => sum + (rows[p.start]?.patientCount ?? 0), 0)} patients
-              <span className="mx-2 text-slate-300">|</span>Earned <strong className="text-slate-700">${formatMoney(runningEarned)}</strong>
-              <span className="mx-2 text-slate-300">|</span>Paid <strong className="text-slate-700">${formatMoney(runningPaid)}</strong>
-              <span className="mx-2 text-slate-300">|</span>
-              {year} balance: <strong className={startBalance + runningEarned - runningPaid > 0 ? "text-amber-600" : "text-slate-500"}>${formatMoney(startBalance + runningEarned - runningPaid)}</strong>
-              {Math.abs(startBalance) > 0.5 && <span className="text-xs text-slate-400"> (includes ${formatMoney(startBalance)} brought forward)</span>}
-            </span>
+            {Math.abs(startBalance) > 0.5 && <span className="text-xs text-slate-400 ml-auto">Balance includes ${formatMoney(startBalance)} brought forward</span>}
           </div>
         </div>
       )}
