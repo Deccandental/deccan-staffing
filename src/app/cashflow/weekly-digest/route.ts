@@ -47,6 +47,28 @@ export async function GET(req: NextRequest) {
   });
   const items = stale.map((it) => `<strong>${it.name}</strong> — ${it.warnings.join("; ")}.`);
 
+  // Statements for last month that still haven't been filed (from the 8th on). Names only, nothing sensitive.
+  const nowD = new Date();
+  if (nowD.getDate() >= 8) {
+    const prev = new Date(nowD.getFullYear(), nowD.getMonth() - 1, 1);
+    const pm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+    const { data: sf, error: sfErr } = await supabase.from("statement_files").select("account_kind, account_id").eq("doc_type", "statement").eq("month", pm);
+    if (!sfErr) {
+      const filed = new Set((sf ?? []).map((r: any) => `${r.account_kind}:${r.account_id}`));
+      const expected = [
+        ...(accounts ?? []).map((a: any) => ({ key: `bank:${a.id}`, name: a.name })),
+        ...(cards ?? []).map((c: any) => ({ key: `card:${c.id}`, name: c.name })),
+        ...(debts ?? []).filter((d: any) => d.kind !== "revolving" && d.active !== false).map((d: any) => ({ key: `loan:${d.id}`, name: d.name })),
+      ];
+      const { data: srcRows } = await supabase.from("statement_sources").select("id, name, start_month").eq("active", true);
+      for (const v of srcRows ?? []) if (v.start_month <= pm) expected.push({ key: `vendor:${v.id}`, name: v.name });
+      const missing = expected.filter((e) => !filed.has(e.key)).map((e) => e.name);
+      if (missing.length > 0) {
+        items.push(`<strong>${prev.toLocaleDateString("en-US", { month: "long" })} statements not filed yet</strong> — ${missing.join(", ")}. File them on the Statements page.`);
+      }
+    }
+  }
+
   const sent = await sendWeeklyCashDigest(items);
   return NextResponse.json({ ok: true, itemCount: items.length, sent });
 }
