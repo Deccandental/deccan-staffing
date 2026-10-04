@@ -17,6 +17,7 @@ export interface RecurringBill {
   direction: BillDirection;
   essential: boolean; // essential (rent, payroll, loans, card minimums) vs discretionary
   linkedCreditCardId?: string | null; // set when this bill IS a card payment
+  linkedDebtId?: string | null;       // set when this bill IS a loan's scheduled payment
 }
 
 export interface BillPayment {
@@ -346,6 +347,7 @@ function fromBillRow(row: any): RecurringBill {
     categoryLabel: row.category_label ?? undefined, active: row.active ?? true,
     cashAccountId: row.cash_account_id ?? null, direction: row.direction ?? "outflow",
     essential: row.essential ?? true, linkedCreditCardId: row.linked_credit_card_id ?? null,
+    linkedDebtId: row.linked_debt_id ?? null,
   };
 }
 
@@ -361,6 +363,8 @@ export async function addRecurringBill(bill: Omit<RecurringBill, "id">): Promise
     anchor_date: bill.anchorDate, category: bill.category, category_label: bill.categoryLabel ?? null, active: bill.active,
     cash_account_id: bill.cashAccountId, direction: bill.direction, essential: bill.essential,
     linked_credit_card_id: bill.linkedCreditCardId ?? null,
+    // only sent when set, so creating ordinary bills never depends on the new column
+    ...(bill.linkedDebtId ? { linked_debt_id: bill.linkedDebtId } : {}),
   }).select().single();
   if (error) { console.error("addRecurringBill error:", error); return null; }
   return fromBillRow(data);
@@ -379,6 +383,7 @@ export async function updateRecurringBill(id: string, updates: Partial<Omit<Recu
   if (updates.direction !== undefined) payload.direction = updates.direction;
   if (updates.essential !== undefined) payload.essential = updates.essential;
   if (updates.linkedCreditCardId !== undefined) payload.linked_credit_card_id = updates.linkedCreditCardId;
+  if (updates.linkedDebtId !== undefined) payload.linked_debt_id = updates.linkedDebtId;
   const { error } = await supabase.from("recurring_bills").update(payload).eq("id", id);
   if (error) console.error("updateRecurringBill error:", error);
 }
