@@ -66,6 +66,13 @@ export default function StatementsPage() {
   const [payDate, setPayDate] = useState("");
   const [payFrom, setPayFrom] = useState("");
   const [payNote, setPayNote] = useState("");
+  // Month-end package for the CPA
+  const [pkgMonth, setPkgMonth] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
+  const [pkgPreview, setPkgPreview] = useState<any>(null);
+  const [pkgList, setPkgList] = useState<any[]>([]);
+  const [cpaEmail, setCpaEmail] = useState("");
+  const [pkgBusy, setPkgBusy] = useState("");
+  const [pkgMsg, setPkgMsg] = useState("");
   const [payMethod, setPayMethod] = useState<"check" | "ach" | "card" | "other">("check");
   const [payCheckNo, setPayCheckNo] = useState("");
   const [payEditing, setPayEditing] = useState(false);
@@ -94,7 +101,7 @@ export default function StatementsPage() {
   // A possible duplicate found before filing: the person can file it anyway or cancel.
   const [dup, setDup] = useState<{ matches: (FileRow & { reason?: string })[]; note?: string; proceed: () => void } | null>(null);
   // Invoices (a separate list from the monthly statements)
-  const [tab, setTab] = useState<"statements" | "invoices" | "checks">("statements");
+  const [tab, setTab] = useState<"statements" | "invoices" | "checks" | "package">("statements");
   const [invMonth, setInvMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [invFiles, setInvFiles] = useState<FileRow[]>([]);
   const [invVendors, setInvVendors] = useState<{ id: string; name: string; category: string }[]>([]);
@@ -231,6 +238,54 @@ export default function StatementsPage() {
     setBusy(false);
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't save."); return; }
     load();
+  }
+
+  const loadPackageTab = useCallback(async () => {
+    if (role !== "finance") return;
+    const [pre, list, set] = await Promise.all([
+      api("/api/statements/package", { action: "preview", month: pkgMonth }),
+      api("/api/statements/package", { action: "list" }),
+      api("/api/statements/package", { action: "settings" }),
+    ]);
+    if (pre.ok) setPkgPreview(pre.json); else setPkgPreview(null);
+    if (list.ok) setPkgList(list.json.packages ?? []); else if (!list.ok && list.json.error) setPkgMsg(list.json.error);
+    if (set.ok) setCpaEmail(set.json.cpaEmail ?? "");
+  }, [role, pkgMonth]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tab === "package") loadPackageTab(); }, [tab, loadPackageTab]);
+
+  async function saveCpaEmail() {
+    const r = await api("/api/statements/package", { action: "setCpaEmail", email: cpaEmail });
+    setPkgMsg(r.ok ? "CPA email saved." : (r.json.error ?? "Couldn't save."));
+  }
+  async function createPackage() {
+    setPkgBusy("create"); setPkgMsg("Building the package. A busy month can take up to a minute…");
+    const r = await api("/api/statements/package", { action: "create", month: pkgMonth });
+    setPkgBusy("");
+    if (!r.ok) { setPkgMsg(r.json.error ?? "Couldn't build the package."); return; }
+    setPkgMsg(`Package ready: ${r.json.package?.stats ?? ""}.${(r.json.missingFiles ?? []).length ? ` ${(r.json.missingFiles ?? []).length} file(s) couldn't be read and are listed in Missing-files.txt.` : ""}`);
+    loadPackageTab();
+  }
+  async function downloadPackage(id: string) {
+    setPkgBusy(`dl:${id}`);
+    const r = await api("/api/statements/package", { action: "download", id });
+    setPkgBusy("");
+    if (!r.ok) { setPkgMsg(r.json.error ?? "Couldn't create the download link."); return; }
+    const a = document.createElement("a"); a.href = r.json.url; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+  }
+  async function emailPackage(pk: any) {
+    if (!cpaEmail.trim()) { setPkgMsg("Save the CPA's email address first."); return; }
+    if (!window.confirm(`Email a download link for ${pk.month} to ${cpaEmail.trim()}? The link works for 7 days.`)) return;
+    setPkgBusy(`em:${pk.id}`);
+    const r = await api("/api/statements/package", { action: "email", id: pk.id, to: cpaEmail.trim() });
+    setPkgBusy("");
+    if (!r.ok) { setPkgMsg(r.json.error ?? "The email couldn't be sent."); return; }
+    setPkgMsg(`Link emailed to ${r.json.to}. It works until ${r.json.expires}.`); loadPackageTab();
+  }
+  async function deletePackage(pk: any) {
+    if (!window.confirm(`Delete the ${pk.month} package? Any link already emailed will stop working.`)) return;
+    const r = await api("/api/statements/package", { action: "delete", id: pk.id });
+    if (!r.ok) { setPkgMsg(r.json.error ?? "Couldn't delete."); return; }
+    loadPackageTab();
   }
 
   const loadChecks = useCallback(async () => {
@@ -599,10 +654,10 @@ export default function StatementsPage() {
       </div>
 
       <div className="flex gap-2">
-        {(["statements", "invoices", "checks"] as const).map((t) => (
+        {(["statements", "invoices", "checks", "package"] as const).filter((t) => finance || t !== "package").map((t) => (
           <button key={t} onClick={() => { setTab(t); setMsg(""); }} className="px-4 py-2 text-sm font-semibold rounded-lg border-2 transition"
             style={tab === t ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "white", color: "#475569", borderColor: "#cbd5e1" }}>
-            {t === "statements" ? "Monthly statements" : t === "invoices" ? "Invoices" : "Check register"}
+            {t === "statements" ? "Monthly statements" : t === "invoices" ? "Invoices" : t === "checks" ? "Check register" : "CPA package"}
           </button>
         ))}
       </div>
@@ -902,6 +957,65 @@ export default function StatementsPage() {
             </>
           );
         })()}
+      </div>
+      ) : tab === "package" ? (
+      <div className="space-y-4 max-w-4xl">
+        <div className="rounded-2xl bg-white shadow px-5 py-4 space-y-3">
+          <h2 className="font-bold text-slate-800">Month-end package for your CPA</h2>
+          <p className="text-sm text-slate-500">One download with the check register, the invoices paid, and the statement and invoice PDFs. Statements are the ones covering the month; invoices are the ones paid in the month.</p>
+          <div className="flex flex-wrap items-end gap-3">
+            <div><label className="block text-xs font-semibold text-slate-500 mb-1">Month</label>
+              <input type="month" value={pkgMonth} onChange={(e) => e.target.value && setPkgMonth(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
+            <div style={{ flex: "1 1 240px" }}><label className="block text-xs font-semibold text-slate-500 mb-1">CPA's email address</label>
+              <input type="email" value={cpaEmail} onChange={(e) => setCpaEmail(e.target.value)} placeholder="cpa@firm.com" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
+            <button onClick={saveCpaEmail} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Save email</button>
+          </div>
+
+          {pkgPreview && (
+            <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm space-y-1">
+              <p className="font-semibold text-slate-700">{pkgPreview.statements} statement{pkgPreview.statements === 1 ? "" : "s"} · {pkgPreview.invoices} invoice{pkgPreview.invoices === 1 ? "" : "s"} paid ({money(pkgPreview.invoiceTotal)}) · {pkgPreview.checks} check{pkgPreview.checks === 1 ? "" : "s"}</p>
+              {pkgPreview.missing?.length > 0 && <p style={{ color: "#854F0B" }}>⚠️ No statement filed yet for: {pkgPreview.missing.join(", ")}.</p>}
+              {pkgPreview.invoices > pkgPreview.invoicePdfs && <p style={{ color: "#854F0B" }}>⚠️ {pkgPreview.invoices - pkgPreview.invoicePdfs} paid invoice(s) have no PDF attached.</p>}
+              {pkgPreview.unpaidInvoices > 0 && <p className="text-slate-500">{pkgPreview.unpaidInvoices} invoice(s) are still unpaid. They aren't in this package; they'll be in the month they're paid.</p>}
+              {pkgPreview.outstanding > 0 && <p className="text-slate-500">{pkgPreview.outstanding} check(s) are still outstanding. The summary page mentions them.</p>}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button onClick={createPackage} disabled={!!pkgBusy} className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+              {pkgBusy === "create" ? "Building…" : `Create package for ${monthLabel(pkgMonth)}`}
+            </button>
+          </div>
+          {pkgMsg && <p className="text-sm font-semibold text-slate-600">{pkgMsg}</p>}
+        </div>
+
+        <div className="rounded-2xl bg-white shadow overflow-x-auto">
+          <table className="w-full text-sm border-collapse" style={{ minWidth: 640 }}>
+            <thead>
+              <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
+                <th className="px-4 py-2 font-medium">Month</th><th className="px-2 py-2 font-medium">Contents</th><th className="px-2 py-2 font-medium">Built</th>
+                <th className="px-2 py-2 font-medium">Emailed</th><th className="px-2 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {pkgList.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-slate-400">No packages built yet.</td></tr>}
+              {pkgList.map((pk) => (
+                <tr key={pk.id} className="border-b border-slate-50">
+                  <td className="px-4 py-2 font-semibold text-slate-700 whitespace-nowrap">{monthLabel(pk.month)}</td>
+                  <td className="px-2 py-2 text-xs text-slate-500">{pk.stats}{pk.file_size ? ` · ${(pk.file_size / 1024 / 1024).toFixed(1)} MB` : ""}</td>
+                  <td className="px-2 py-2 text-xs text-slate-500 whitespace-nowrap">{new Date(pk.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td>
+                  <td className="px-2 py-2 text-xs text-slate-500">{pk.emailed_at ? `${pk.emailed_to} · ${new Date(pk.emailed_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Not yet"}</td>
+                  <td className="px-2 py-2 text-right whitespace-nowrap">
+                    <button onClick={() => emailPackage(pk)} disabled={!!pkgBusy} className="rounded-lg px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>{pkgBusy === `em:${pk.id}` ? "Sending…" : pk.emailed_at ? "Email new link" : "Email link to CPA"}</button>
+                    <button onClick={() => downloadPackage(pk.id)} disabled={!!pkgBusy} className="ml-2 rounded-lg px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>Download</button>
+                    <button onClick={() => deletePackage(pk)} className="ml-3 text-xs text-red-400 hover:text-red-600 hover:underline">Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-slate-400">The emailed link works for 7 days and the file stays in your private storage. Delete a package once your CPA has it. "Email new link" sends a fresh 7-day link, and links already sent keep working until they expire.</p>
       </div>
       ) : (
       <>
