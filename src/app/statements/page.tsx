@@ -15,7 +15,7 @@ import { loadRecurringBills, loadBillPayments, buildOccurrences, addDays, Recurr
 type Role = "finance" | "cpa";
 interface Account { kind: "bank" | "card" | "loan" | "vendor"; id: string; name: string; category?: string; startMonth?: string; active?: boolean }
 interface CheckRow { id: string; check_number: string; account_id: string | null; account_name: string; check_date: string; payee: string; amount: number | null; memo: string; invoice_id: string | null; status: "outstanding" | "cleared" | "void"; cleared_date: string | null; created_by: string }
-interface FileRow { paid_method?: string | null; paid_check_number?: string; paid_from_name?: string; paid_note?: string; category?: string; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
+interface FileRow { paid_from_kind?: string | null; paid_from_id?: string | null; paid_method?: string | null; paid_check_number?: string; paid_from_name?: string; paid_note?: string; category?: string; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
 
 const ROLE_KEY = "dd_statements_role";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -68,6 +68,7 @@ export default function StatementsPage() {
   const [payNote, setPayNote] = useState("");
   const [payMethod, setPayMethod] = useState<"check" | "ach" | "card" | "other">("check");
   const [payCheckNo, setPayCheckNo] = useState("");
+  const [payEditing, setPayEditing] = useState(false);
   // Check register
   const [checks, setChecks] = useState<CheckRow[]>([]);
   const [chkAccount, setChkAccount] = useState("");
@@ -299,9 +300,18 @@ export default function StatementsPage() {
   function openPay(f: FileRow) {
     const first = accounts.find((a) => a.kind === "bank");
     const from = payFrom || (first ? `bank:${first.id}` : "other");
+    setPayEditing(false);
     setPayFor(f); setPayDate(new Date().toISOString().slice(0, 10)); setPayNote(""); setPayFrom(from);
     setPayMethod(payFrom.startsWith("card:") ? "card" : "check");
     setPayCheckNo(from.startsWith("bank:") ? nextCheckFor(from.slice(5)) : "");
+  }
+  // Changing a payment that's already marked paid: the same box, filled in with what was recorded.
+  function openEditPay(f: FileRow) {
+    setPayEditing(true); setPayFor(f);
+    setPayDate(f.paid_date ?? new Date().toISOString().slice(0, 10));
+    setPayFrom(f.paid_from_kind && f.paid_from_kind !== "other" && f.paid_from_id ? `${f.paid_from_kind}:${f.paid_from_id}` : "other");
+    setPayMethod((f.paid_method as typeof payMethod) ?? (f.paid_from_kind === "card" ? "card" : "other"));
+    setPayCheckNo(f.paid_check_number ?? ""); setPayNote(f.paid_note ?? "");
   }
   async function confirmPay(allowDuplicateCheck = false) {
     if (!payFor) return;
@@ -516,7 +526,7 @@ export default function StatementsPage() {
   const payDialog = payFor && (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.35)" }}>
       <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-3">
-        <h3 className="font-bold text-slate-800">Mark invoice paid</h3>
+        <h3 className="font-bold text-slate-800">{payEditing ? "Edit payment" : "Mark invoice paid"}</h3>
         <p className="text-sm text-slate-500">{payFor.account_name}{payFor.invoice_number ? ` · #${payFor.invoice_number}` : ""} · {money(payFor.amount)}</p>
         <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">Date paid</label>
@@ -549,7 +559,7 @@ export default function StatementsPage() {
         </div>
         <p className="text-xs text-slate-400">This records where it was paid from. It doesn't change any balance, so update that account's balance as usual.</p>
         <div className="flex items-center gap-3 pt-1">
-          <button onClick={() => confirmPay()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>{busy ? "Saving…" : "Mark paid"}</button>
+          <button onClick={() => confirmPay()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>{busy ? "Saving…" : payEditing ? "Save changes" : "Mark paid"}</button>
           <button onClick={() => setPayFor(null)} className="text-sm text-slate-400 hover:underline">Cancel</button>
         </div>
       </div>
@@ -748,6 +758,7 @@ export default function StatementsPage() {
                           : f.matched_bill_id ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#dbeafe", color: "#1e4e8c" }} title="Counted through its scheduled bill">Scheduled bill{f.matched_due_date ? ` · ${new Date(f.matched_due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</span>
                           : <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#fef3c7", color: "#92400e" }}>Unpaid</span>}
                         {finance && !f.paid && <button onClick={() => openPay(f)} disabled={busy} className="ml-2 underline text-slate-500 hover:text-slate-700">Mark paid</button>}
+                        {finance && f.paid && <button onClick={() => openEditPay(f)} disabled={busy} className="ml-2 underline text-slate-500 hover:text-slate-700">Edit</button>}
                         {finance && f.paid && <button onClick={() => undoPaid(f)} disabled={busy} className="ml-2 underline text-slate-400 hover:text-slate-600">Undo</button>}
                         {finance && f.matched_bill_id && !f.paid && <button onClick={() => unlinkInvoice(f)} className="ml-2 underline text-slate-400 hover:text-slate-600">Unlink</button>}
                       </td>
