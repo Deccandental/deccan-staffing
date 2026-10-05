@@ -318,24 +318,36 @@ export default function StatementsPage() {
   useEffect(() => { if (role === "finance") loadPending(); }, [invFiles]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A vendor added here only sends invoices, so it never appears on the monthly statement checklist.
-  async function addVendorHere() {
+  async function createVendor(): Promise<{ id: string; name: string; category: string } | null> {
     const name = nvName.trim();
-    if (!name) { setMsg("Enter the vendor's name."); return; }
+    if (!name) { setMsg("Enter the vendor's name."); return null; }
     const existing = invVendors.find((v) => v.name.trim().toLowerCase() === name.toLowerCase());
-    if (existing) { setIVendor(existing.id); setNvName(""); setMsg(`${existing.name} was already in your list, so it's selected.`); return; }
-    setBusy(true); setMsg("");
+    if (existing) { setIVendor(existing.id); setNvName(""); return existing; }
     const r = await api("/api/statements/manage", { action: "addSource", name, category: nvType, startMonth: new Date().toISOString().slice(0, 7), expectsStatement: false });
+    if (!r.ok || !r.json.data?.id) { setMsg(r.json.error ?? "Couldn't add the vendor."); return null; }
+    const made = { id: String(r.json.data.id), name, category: nvType };
+    setInvVendors((v) => [...v, made]);
+    setIVendor(made.id); setNvName("");
+    return made;
+  }
+  async function addVendorHere() {
+    setBusy(true); setMsg("");
+    const v = await createVendor();
     setBusy(false);
-    if (!r.ok || !r.json.data?.id) { setMsg(r.json.error ?? "Couldn't add the vendor."); return; }
-    const id = String(r.json.data.id);
-    setInvVendors((v) => [...v, { id, name, category: nvType }]);
-    setIVendor(id); setNvName(""); setMsg(`Added ${name}.`);
-    loadInvoices();
+    if (v) { setMsg(`${v.name} is saved and selected.`); loadInvoices(); }
   }
 
   async function addInvoice(file: File, ignoreDup = false) {
     setMsg(""); setDup(null);
-    const vendor = invVendors.find((v) => v.id === iVendor);
+    let vendor = invVendors.find((v) => v.id === iVendor);
+    // A new vendor name typed in but not yet added is added now, so filing the invoice never silently fails.
+    if (!vendor && iVendor === "__new" && nvName.trim()) {
+      setBusy(true);
+      const made = await createVendor();
+      setBusy(false);
+      if (!made) return;
+      vendor = made;
+    }
     if (!vendor) { setMsg("Choose a vendor, or add a new one."); return; }
     const name = vendor.name;
     if (!iDate) { setMsg("Enter the invoice date."); return; }
@@ -426,6 +438,17 @@ export default function StatementsPage() {
     const r = await api("/api/statements/manage", { action: "updateSource", id, ...patch });
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't update the vendor."); return; }
     loadInvoices();
+  }
+  async function mergeVendor(from: { id: string; name: string }, intoId: string) {
+    const into = vendorsAll.find((v) => v.id === intoId);
+    if (!into) return;
+    if (!window.confirm(`Merge "${from.name}" into "${into.name}"?\n\nEvery invoice and statement filed under "${from.name}" moves to "${into.name}", and "${from.name}" is removed from your list. This can't be undone.`)) return;
+    setBusy(true);
+    const r = await api("/api/statements/manage", { action: "mergeSource", fromId: from.id, intoId });
+    setBusy(false);
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't merge."); return; }
+    setMsg(`Merged "${r.json.from}" into "${r.json.into}" (${r.json.moved} item${r.json.moved === 1 ? "" : "s"} moved).`);
+    loadInvoices(); loadPending(); load();
   }
   async function renameDirVendor(v: { id: string; name: string }) {
     const name = window.prompt("Rename:", v.name);
@@ -694,6 +717,10 @@ export default function StatementsPage() {
                 </select>
                 <button onClick={() => renameDirVendor(v)} className="text-xs text-slate-400 hover:text-slate-600" title="Rename">✎ Rename</button>
                 <button onClick={() => updateVendor(v.id, { active: !v.active })} className="text-xs text-slate-400 hover:text-slate-600">{v.active ? "Retire" : "Restore"}</button>
+                <select value="" onChange={(e) => { if (e.target.value) mergeVendor(v, e.target.value); }} className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs text-slate-500 focus:outline-none" title="Move everything filed under this vendor into another one">
+                  <option value="">Merge into…</option>
+                  {vendorsAll.filter((x) => x.id !== v.id).map((x) => <option key={x.id} value={x.id}>{x.name}{!x.active ? " (retired)" : ""}</option>)}
+                </select>
               </div>
             ))}
           </div>

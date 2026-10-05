@@ -138,6 +138,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ data: null });
     }
 
+    if (b.action === "mergeSource") {
+      const fromId = String(b.fromId ?? ""), intoId = String(b.intoId ?? "");
+      if (!fromId || !intoId || fromId === intoId) return NextResponse.json({ error: "Choose a different vendor to merge into." }, { status: 400 });
+      const { data: srcs } = await supabaseAdmin.from("statement_sources").select("id, name").in("id", [fromId, intoId]);
+      const from = (srcs ?? []).find((x: any) => String(x.id) === fromId), into = (srcs ?? []).find((x: any) => String(x.id) === intoId);
+      if (!from || !into) return NextResponse.json({ error: "Vendor not found." }, { status: 404 });
+      // Everything filed under the duplicate moves to the vendor being kept, so its invoices, statements and
+      // duplicate warnings all sit under one name. The kept vendor's own settings are left as they are.
+      const { data: moved, error: e1 } = await supabaseAdmin.from("statement_files").update({ account_id: intoId, account_name: into.name }).eq("account_kind", "vendor").eq("account_id", fromId).select("id");
+      if (e1) return NextResponse.json({ error: e1.message }, { status: 400 });
+      const { error: e2 } = await supabaseAdmin.from("statement_sources").delete().eq("id", fromId);
+      if (e2) return NextResponse.json({ error: e2.message }, { status: 400 });
+      return NextResponse.json({ moved: (moved ?? []).length, into: into.name, from: from.name });
+    }
+
     if (b.action === "setInvoiceCategory") {
       const { error } = await supabaseAdmin.from("statement_files").update({ category: String(b.category ?? "").trim().slice(0, 40) }).eq("id", String(b.id)).eq("doc_type", "invoice");
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
