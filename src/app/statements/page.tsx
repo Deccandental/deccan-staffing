@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState, useEffect, useCallback } from "react";
+import type { DragEvent } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { supabase } from "@/lib/supabase";
 import { loadStaff } from "@/lib/staffStore";
@@ -65,6 +66,10 @@ export default function StatementsPage() {
   const [iMatch, setIMatch] = useState<{ billId: string; dueDate: string; billName: string; amount: number } | null>(null);
   const [unpaidOnly, setUnpaidOnly] = useState(false);
   const [iCategory, setICategory] = useState("");
+  // Drag-and-drop: the file waiting in each form, and which area is being dragged over
+  const [iFile, setIFile] = useState<File | null>(null);
+  const [sFile, setSFile] = useState<File | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
   // "Mark paid" dialog: the invoice, the date, the account it was paid from, and a note
   const [payFor, setPayFor] = useState<FileRow | null>(null);
   const [payDate, setPayDate] = useState("");
@@ -149,6 +154,24 @@ export default function StatementsPage() {
     setChecked(true);
   }, []);
 
+  function droppedPdf(e: DragEvent<HTMLElement>): File | null {
+    e.preventDefault(); setDragOver(null);
+    const f = e.dataTransfer.files?.[0];
+    if (!f) return null;
+    if (!/\.pdf$/i.test(f.name)) { setMsg("Only PDF files can be dropped here."); return null; }
+    return f;
+  }
+  const dropProps = (zone: string, onFile: (f: File) => void) => ({
+    onDragOver: (e: DragEvent<HTMLElement>) => { e.preventDefault(); setDragOver(zone); },
+    onDragLeave: (e: DragEvent<HTMLElement>) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(null); },
+    onDrop: (e: DragEvent<HTMLElement>) => { const f = droppedPdf(e); if (f) onFile(f); },
+  });
+  useEffect(() => {
+    const stop = (e: Event) => e.preventDefault();
+    window.addEventListener("dragover", stop); window.addEventListener("drop", stop);
+    return () => { window.removeEventListener("dragover", stop); window.removeEventListener("drop", stop); };
+  }, []);
+
   function logout() {
     setRole(null); clearSessionToken();
     try { sessionStorage.removeItem(ROLE_KEY); } catch {}
@@ -182,7 +205,7 @@ export default function StatementsPage() {
     setDup(null);
     const a = sel ? accounts.find((x) => acctKey(x.kind, x.id) === sel.key) : null;
     const v = a && sel ? cfBalances[`${a.kind}:${a.id}:${sel.month}`] : undefined;
-    setSAmount(v != null ? String(v) : "");
+    setSAmount(v != null ? String(v) : ""); setSFile(null);
   }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
   // Choosing a vendor suggests a category from its type (a lab -> Lab); it can still be changed.
   useEffect(() => {
@@ -224,7 +247,7 @@ export default function StatementsPage() {
   async function upload(a: Account, month: string, file: File, ignoreDup = false) {
     setMsg(""); setDup(null);
     if (!/\.pdf$/i.test(file.name)) { setMsg("Only PDF files can be uploaded."); return; }
-    if (sAmount.trim() === "" || isNaN(Number(sAmount))) { setMsg("Enter the statement amount first, then choose the PDF."); return; }
+    if (sAmount.trim() === "" || isNaN(Number(sAmount))) { setMsg("Enter the statement amount first."); return; }
     setBusy(true);
     if (!ignoreDup) {
       const chk = await api("/api/statements/manage", { action: "checkDuplicate", docType: "statement", accountKind: a.kind, accountId: a.id, accountName: a.name, month, amount: sAmount });
@@ -243,7 +266,7 @@ export default function StatementsPage() {
     const rec = await api("/api/statements/manage", { action: "confirm", path: slot.json.path, accountKind: a.kind, accountId: a.id, accountName: a.name, month, fileName: file.name, size: file.size, amount: sAmount, dupIgnored: ignoreDup });
     setBusy(false);
     if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't record the upload."); return; }
-    setSAmount(""); setMsg(`Filed ${file.name}.${rec.json.synced ? " Saved as this month's statement balance in Cash Flow." : ""}`); load();
+    setSAmount(""); setSFile(null); setMsg(`Filed ${file.name}.${rec.json.synced ? " Saved as this month's statement balance in Cash Flow." : ""}`); load();
   }
 
   async function markNone(a: Account, month: string) {
@@ -390,7 +413,7 @@ export default function StatementsPage() {
     setMsg(`Filed invoice ${iNumber.trim()} from ${name}.`);
     const filedMonth = iDate.slice(0, 7);
     // Clear the whole form so the next invoice starts fresh.
-    setIVendor(""); setIDate(new Date().toISOString().slice(0, 10)); setINumber(""); setIAmount(""); setICategory(""); setIMatch(null); setNvName("");
+    setIVendor(""); setIDate(new Date().toISOString().slice(0, 10)); setINumber(""); setIAmount(""); setICategory(""); setIMatch(null); setNvName(""); setIFile(null);
     if (!unpaidOnly && filedMonth !== invMonth) setInvMonth(filedMonth); else loadInvoices();
   }
 
@@ -658,7 +681,8 @@ export default function StatementsPage() {
     const kindLabel: Record<string, string> = { invoice: "Invoice", statement: "Statement", other: "Other" };
     return (
       <tr key={`${c.id}-panel`} className="border-b border-slate-100">
-        <td colSpan={10} className="px-4 py-3" style={{ background: "#f8fafc" }}>
+        <td colSpan={10} className="px-4 py-3" {...(finance && c.status !== "void" ? dropProps(`check-${c.id}`, (f) => attachToCheck(c, f)) : {})}
+          style={{ background: dragOver === `check-${c.id}` ? "#fff7ed" : "#f8fafc", outline: dragOver === `check-${c.id}` ? "2px dashed #e8622a" : "none", outlineOffset: -4 }}>
           <div className="space-y-3">
             <div>
               <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Attached files</p>
@@ -681,7 +705,7 @@ export default function StatementsPage() {
             {finance && c.status !== "void" && (
               <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Attach a PDF</p>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Attach a PDF <span className="normal-case font-normal">· or drag it anywhere on this panel</span></p>
                   <div className="flex items-center gap-2">
                     <select value={attKind} onChange={(e) => setAttKind(e.target.value)} className="rounded border border-slate-200 bg-white px-1.5 py-1.5 text-xs focus:outline-none">
                       <option value="invoice">Invoice copy</option><option value="statement">Statement</option><option value="other">Other (refund approval, check scan…)</option>
@@ -855,7 +879,7 @@ export default function StatementsPage() {
             {!invAdding ? (
               <button onClick={() => setInvAdding(true)} className="text-sm font-semibold text-orange-500 hover:underline">+ Add an invoice</button>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3 rounded-xl" {...dropProps("invoice", setIFile)} style={{ outline: dragOver === "invoice" ? "2px dashed #e8622a" : "none", outlineOffset: 6, background: dragOver === "invoice" ? "#fff7ed" : "transparent" }}>
                 <div className="flex flex-wrap items-end gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Vendor</label>
@@ -920,12 +944,17 @@ export default function StatementsPage() {
                     ))}
                   </div>
                 )}
-                <div className="flex items-center gap-3">
-                  <label className="rounded-lg px-4 py-2 text-sm font-semibold text-white cursor-pointer hover:opacity-90" style={{ backgroundColor: "#e8622a", opacity: busy ? 0.5 : 1 }}>
-                    {busy ? "Working…" : "Choose PDF and file it"}
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-50">
+                    Choose PDF
                     <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={busy}
-                      onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) addInvoice(f); }} />
+                      onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setIFile(f); }} />
                   </label>
+                  <span className="text-sm text-slate-500">
+                    {iFile ? <>📄 <strong className="text-slate-700">{iFile.name}</strong> <button onClick={() => setIFile(null)} className="ml-1 text-slate-400 hover:text-slate-600" title="Remove">✕</button></> : "or drag the invoice PDF anywhere on this form"}
+                  </span>
+                  <button onClick={() => (iFile ? addInvoice(iFile) : setMsg("Drop or choose the invoice PDF first."))} disabled={busy}
+                    className="rounded-lg px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>{busy ? "Working…" : "File invoice"}</button>
                   <button onClick={() => setInvAdding(false)} className="text-sm text-slate-400 hover:underline">Close</button>
                 </div>
               </div>
@@ -1334,7 +1363,7 @@ export default function StatementsPage() {
       )}
 
       {selAccount && sel && (
-        <div className="rounded-2xl bg-white shadow px-5 py-4 space-y-3">
+        <div className="rounded-2xl bg-white shadow px-5 py-4 space-y-3" {...(finance ? dropProps("statement", setSFile) : {})} style={{ outline: dragOver === "statement" ? "2px dashed #e8622a" : "none", background: dragOver === "statement" ? "#fff7ed" : undefined }}>
           <div className="flex items-center justify-between gap-2">
             <h2 className="font-bold text-slate-800">{selAccount.name} — {monthLabel(sel.month)}</h2>
             <button onClick={() => setSel(null)} className="text-slate-400 hover:text-slate-600">✕</button>
@@ -1356,11 +1385,16 @@ export default function StatementsPage() {
                 <label className="block text-xs font-semibold text-slate-500 mb-1">Statement amount (required)</label>
                 <input type="number" step="0.01" value={sAmount} onChange={(e) => setSAmount(e.target.value)} placeholder="Ending balance or total" className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 190 }} />
               </div>
-              <label className="rounded-lg px-4 py-2 text-sm font-semibold text-white cursor-pointer hover:opacity-90" style={{ backgroundColor: "#e8622a", opacity: busy ? 0.5 : 1 }}>
-                {busy ? "Working…" : "Upload PDF"}
+              <label className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-50">
+                Choose PDF
                 <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={busy}
-                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) upload(selAccount, sel.month, f); }} />
+                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setSFile(f); }} />
               </label>
+              <span className="text-sm text-slate-500 pb-2">
+                {sFile ? <>📄 <strong className="text-slate-700">{sFile.name}</strong> <button onClick={() => setSFile(null)} className="ml-1 text-slate-400 hover:text-slate-600" title="Remove">✕</button></> : "or drag the statement PDF onto this panel"}
+              </span>
+              <button onClick={() => (sFile ? upload(selAccount, sel.month, sFile) : setMsg("Drop or choose the statement PDF first."))} disabled={busy}
+                className="rounded-lg px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>{busy ? "Working…" : "File statement"}</button>
               {selFiles.length === 0 && <button onClick={() => markNone(selAccount, sel.month)} disabled={busy} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">No statement this month</button>}
             </div>
           )}

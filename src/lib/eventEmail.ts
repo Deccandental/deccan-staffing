@@ -35,15 +35,8 @@ export async function sendEventEmail(event: StaffEvent, type: EventEmailType): P
   });
   const label = LABELS[type];
 
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: "Deccan Dental <noreply@mydeccandental.com>",
-        to: recipients.map((r) => r.email),
-        subject: `${label} — ${event.title}`,
-        html: `
+  // Each person gets their own copy, so invitees never see each other's email addresses.
+  const html = `
           <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#5a5a5a">
             <div style="background:${event.mandatory ? "#dc2626" : "#e8622a"};padding:24px;border-radius:12px 12px 0 0">
               <h1 style="color:white;margin:0;font-size:20px">${label}</h1>
@@ -59,10 +52,23 @@ export async function sendEventEmail(event: StaffEvent, type: EventEmailType): P
               <p style="color:#888;font-size:12px;margin-top:24px">Deccan Dental Sleep Center</p>
             </div>
           </div>
-        `,
-      }),
-    });
-    return res.ok;
+        `;
+  const subject = `${label} -- ${event.title}`;
+  const from = "Deccan Dental <noreply@mydeccandental.com>";
+  const messages = recipients.map((r) => ({ from, to: [r.email], subject, html }));
+
+  try {
+    let allOk = true;
+    // Resend's batch endpoint takes up to 100 messages in one request.
+    for (let i = 0; i < messages.length; i += 100) {
+      const res = await fetch("https://api.resend.com/emails/batch", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify(messages.slice(i, i + 100)),
+      });
+      if (!res.ok) allOk = false;
+    }
+    return allOk;
   } catch (err) {
     console.error("sendEventEmail error:", err);
     return false;
