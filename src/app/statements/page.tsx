@@ -14,7 +14,8 @@ import { loadRecurringBills, loadBillPayments, buildOccurrences, addDays, Recurr
 
 type Role = "finance" | "cpa";
 interface Account { kind: "bank" | "card" | "loan" | "vendor"; id: string; name: string; category?: string; startMonth?: string; active?: boolean }
-interface FileRow { paid_from_name?: string; paid_note?: string; category?: string; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
+interface CheckRow { id: string; check_number: string; account_id: string | null; account_name: string; check_date: string; payee: string; amount: number | null; memo: string; invoice_id: string | null; status: "outstanding" | "cleared" | "void"; cleared_date: string | null; created_by: string }
+interface FileRow { paid_method?: string | null; paid_check_number?: string; paid_from_name?: string; paid_note?: string; category?: string; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
 
 const ROLE_KEY = "dd_statements_role";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -65,6 +66,20 @@ export default function StatementsPage() {
   const [payDate, setPayDate] = useState("");
   const [payFrom, setPayFrom] = useState("");
   const [payNote, setPayNote] = useState("");
+  const [payMethod, setPayMethod] = useState<"check" | "ach" | "card" | "other">("check");
+  const [payCheckNo, setPayCheckNo] = useState("");
+  // Check register
+  const [checks, setChecks] = useState<CheckRow[]>([]);
+  const [chkAccount, setChkAccount] = useState("");
+  const [chkStatus, setChkStatus] = useState("");
+  const [chkSearch, setChkSearch] = useState("");
+  const [chkAdding, setChkAdding] = useState(false);
+  const [cNumber, setCNumber] = useState("");
+  const [cDate, setCDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [cAccount, setCAccount] = useState("");
+  const [cPayee, setCPayee] = useState("");
+  const [cAmount, setCAmount] = useState("");
+  const [cMemo, setCMemo] = useState("");
   const [pending, setPending] = useState<FileRow[]>([]);   // every unpaid invoice, across all months
   // Vendor directory
   const [vendorsAll, setVendorsAll] = useState<{ id: string; name: string; category: string; active: boolean; expectsStatement: boolean }[]>([]);
@@ -78,7 +93,7 @@ export default function StatementsPage() {
   // A possible duplicate found before filing: the person can file it anyway or cancel.
   const [dup, setDup] = useState<{ matches: (FileRow & { reason?: string })[]; note?: string; proceed: () => void } | null>(null);
   // Invoices (a separate list from the monthly statements)
-  const [tab, setTab] = useState<"statements" | "invoices">("statements");
+  const [tab, setTab] = useState<"statements" | "invoices" | "checks">("statements");
   const [invMonth, setInvMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [invFiles, setInvFiles] = useState<FileRow[]>([]);
   const [invVendors, setInvVendors] = useState<{ id: string; name: string; category: string }[]>([]);
@@ -217,6 +232,15 @@ export default function StatementsPage() {
     load();
   }
 
+  const loadChecks = useCallback(async () => {
+    if (!role) return;
+    const r = await api("/api/statements/checks", { action: "list" });
+    if (r.status === 401) { logout(); return; }
+    if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load the check register."); return; }
+    setChecks(r.json.checks ?? []);
+  }, [role]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadChecks(); }, [loadChecks]);
+
   const loadPending = useCallback(async () => {
     if (role !== "finance") return;
     const r = await api("/api/statements/list", { docType: "invoice", unpaid: true });
@@ -273,28 +297,40 @@ export default function StatementsPage() {
 
   // Marking paid opens a small dialog (date, which account, note). Undo needs no questions.
   function openPay(f: FileRow) {
-    setPayFor(f); setPayDate(new Date().toISOString().slice(0, 10)); setPayNote("");
-    setPayFrom((cur) => cur || (() => { const first = accounts.find((a) => a.kind === "bank"); return first ? `bank:${first.id}` : "other"; })());
+    const first = accounts.find((a) => a.kind === "bank");
+    const from = payFrom || (first ? `bank:${first.id}` : "other");
+    setPayFor(f); setPayDate(new Date().toISOString().slice(0, 10)); setPayNote(""); setPayFrom(from);
+    setPayMethod(payFrom.startsWith("card:") ? "card" : "check");
+    setPayCheckNo(from.startsWith("bank:") ? nextCheckFor(from.slice(5)) : "");
   }
-  async function confirmPay() {
+  async function confirmPay(allowDuplicateCheck = false) {
     if (!payFor) return;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(payDate)) { setMsg("Enter the date paid."); return; }
     const acct = accounts.find((a) => `${a.kind}:${a.id}` === payFrom);
+    if (payMethod === "check") {
+      if (!payCheckNo.trim()) { setMsg("Enter the check number."); return; }
+      if (!acct || acct.kind !== "bank") { setMsg("Choose the bank account the check is drawn on."); return; }
+    }
     setBusy(true);
     const r = await api("/api/statements/manage", {
-      action: "markInvoicePaid", id: payFor.id, paid: true, paidDate: payDate,
+      action: "markInvoicePaid", id: payFor.id, paid: true, paidDate: payDate, method: payMethod, checkNumber: payCheckNo, allowDuplicateCheck,
       paidFromKind: acct ? acct.kind : "other", paidFromId: acct?.id ?? "", paidFromName: acct ? acct.name : "Other", paidNote: payNote,
     });
     setBusy(false);
+    if (r.status === 409 && r.json.duplicate) {
+      const d = r.json.duplicate;
+      if (window.confirm(`Check #${payCheckNo.trim()} on ${acct?.name ?? "this account"} is already on the register (${d.payee || "no payee"}, ${money(d.amount)}, ${d.check_date}). Use this number anyway?`)) confirmPay(true);
+      return;
+    }
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
-    setPayFor(null); loadInvoices();
+    setPayFor(null); loadInvoices(); loadChecks();
   }
   async function undoPaid(f: FileRow) {
     setBusy(true);
     const r = await api("/api/statements/manage", { action: "markInvoicePaid", id: f.id, paid: false });
     setBusy(false);
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
-    loadInvoices();
+    loadInvoices(); loadChecks();
   }
 
   async function newCategory(): Promise<string> {
@@ -438,6 +474,44 @@ export default function StatementsPage() {
     </div>
   );
 
+  async function addCheck(allowDuplicate = false) {
+    const acct = accounts.find((a) => a.kind === "bank" && a.id === cAccount);
+    if (!cNumber.trim() || !cDate) { setMsg("Enter the check number and date."); return; }
+    setBusy(true); setMsg("");
+    const r = await api("/api/statements/checks", { action: "add", checkNumber: cNumber, checkDate: cDate, accountId: acct?.id ?? "", accountName: acct?.name ?? "", payee: cPayee, amount: cAmount, memo: cMemo, allowDuplicate });
+    setBusy(false);
+    if (r.status === 409 && r.json.duplicate) {
+      const d = r.json.duplicate;
+      if (window.confirm(`Check #${cNumber.trim()} on ${acct?.name ?? "this account"} is already on the register (${d.payee || "no payee"}, ${d.check_date}). Add it again anyway?`)) addCheck(true);
+      return;
+    }
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't add the check."); return; }
+    setCNumber(/^\d+$/.test(cNumber.trim()) ? String(Number(cNumber.trim()) + 1) : ""); setCPayee(""); setCAmount(""); setCMemo("");
+    setMsg(`Check #${r.json.data?.check_number ?? ""} added.`); loadChecks();
+  }
+  async function setCheckStatus(c: CheckRow, status: string) {
+    setChecks((list) => list.map((x) => (x.id === c.id ? { ...x, status: status as CheckRow["status"] } : x)));
+    const r = await api("/api/statements/checks", { action: "setStatus", id: c.id, status });
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); loadChecks(); }
+  }
+  async function deleteCheck(c: CheckRow) {
+    if (!window.confirm(`Delete check #${c.check_number}? Voiding it keeps the number on the register, so use Void unless it was entered by mistake.`)) return;
+    const r = await api("/api/statements/checks", { action: "delete", id: c.id });
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't delete."); return; }
+    loadChecks();
+  }
+  function downloadChecksCsv(rows: CheckRow[]) {
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [["Check #", "Date", "Account", "Payee", "Amount", "Memo", "Status", "Cleared date"].map(esc).join(",")]
+      .concat(rows.map((c) => [c.check_number, c.check_date, c.account_name, c.payee, c.amount ?? "", c.memo, c.status, c.cleared_date ?? ""].map(esc).join(",")));
+    const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+    const a = document.createElement("a"); a.href = url; a.download = `check-register-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }
+
+  const nextCheckFor = (accountId: string): string => {
+    const nums = checks.filter((c) => c.account_id === accountId && /^\d+$/.test(c.check_number)).map((c) => Number(c.check_number));
+    return nums.length ? String(Math.max(...nums) + 1) : "";
+  };
   const payOptions = accounts.filter((a) => a.kind === "bank" || a.kind === "card");
   const payDialog = payFor && (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.35)" }}>
@@ -449,20 +523,33 @@ export default function StatementsPage() {
           <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
         </div>
         <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">How was it paid?</label>
+          <select value={payMethod} onChange={(e) => { const m = e.target.value as typeof payMethod; setPayMethod(m); if (m === "check" && payFrom.startsWith("bank:") && !payCheckNo) setPayCheckNo(nextCheckFor(payFrom.slice(5))); }} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+            <option value="check">Check</option><option value="ach">ACH / bank transfer</option><option value="card">Credit card</option><option value="other">Cash / other</option>
+          </select>
+        </div>
+        <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">Paid from</label>
-          <select value={payFrom} onChange={(e) => setPayFrom(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+          <select value={payFrom} onChange={(e) => { const v = e.target.value; setPayFrom(v); if (payMethod === "check" && v.startsWith("bank:")) setPayCheckNo(nextCheckFor(v.slice(5))); }} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
             <optgroup label="Bank accounts">{payOptions.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
             <optgroup label="Credit cards">{payOptions.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
             <option value="other">Other (cash, owner, etc.)</option>
           </select>
         </div>
+        {payMethod === "check" && (
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1">Check number (required)</label>
+            <input value={payCheckNo} onChange={(e) => setPayCheckNo(e.target.value)} placeholder="e.g. 1043" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+            <p className="text-xs text-slate-400 mt-1">It's added to the check register. The next number after your last check on this account is filled in for you.</p>
+          </div>
+        )}
         <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">Note (optional)</label>
           <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Check number, ACH, etc." className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
         </div>
         <p className="text-xs text-slate-400">This records where it was paid from. It doesn't change any balance, so update that account's balance as usual.</p>
         <div className="flex items-center gap-3 pt-1">
-          <button onClick={confirmPay} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>{busy ? "Saving…" : "Mark paid"}</button>
+          <button onClick={() => confirmPay()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>{busy ? "Saving…" : "Mark paid"}</button>
           <button onClick={() => setPayFor(null)} className="text-sm text-slate-400 hover:underline">Cancel</button>
         </div>
       </div>
@@ -491,10 +578,10 @@ export default function StatementsPage() {
       </div>
 
       <div className="flex gap-2">
-        {(["statements", "invoices"] as const).map((t) => (
+        {(["statements", "invoices", "checks"] as const).map((t) => (
           <button key={t} onClick={() => { setTab(t); setMsg(""); }} className="px-4 py-2 text-sm font-semibold rounded-lg border-2 transition"
             style={tab === t ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "white", color: "#475569", borderColor: "#cbd5e1" }}>
-            {t === "statements" ? "Monthly statements" : "Invoices"}
+            {t === "statements" ? "Monthly statements" : t === "invoices" ? "Invoices" : "Check register"}
           </button>
         ))}
       </div>
@@ -657,7 +744,7 @@ export default function StatementsPage() {
                       <td className="px-2 py-1.5 text-slate-600">{f.invoice_number || "—"}{f.dup_ignored && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "#FAEEDA", color: "#854F0B" }} title="Filed even though the app warned it might be a duplicate">dup?</span>}</td>
                       <td className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{f.amount != null ? `$${Number(f.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
                       <td className="px-2 py-1.5 text-xs whitespace-nowrap">
-                        {f.paid ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#e7f6ec", color: "#166534" }} title={f.paid_note || undefined}>Paid{f.paid_date ? ` ${new Date(f.paid_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}{f.paid_from_name ? ` · ${f.paid_from_name}` : ""}</span>
+                        {f.paid ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#e7f6ec", color: "#166534" }} title={f.paid_note || undefined}>Paid{f.paid_date ? ` ${new Date(f.paid_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}{f.paid_from_name ? ` · ${f.paid_from_name}` : ""}{f.paid_method === "check" && f.paid_check_number ? ` · check #${f.paid_check_number}` : f.paid_method === "ach" ? " · ACH" : ""}</span>
                           : f.matched_bill_id ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#dbeafe", color: "#1e4e8c" }} title="Counted through its scheduled bill">Scheduled bill{f.matched_due_date ? ` · ${new Date(f.matched_due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</span>
                           : <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#fef3c7", color: "#92400e" }}>Unpaid</span>}
                         {finance && !f.paid && <button onClick={() => openPay(f)} disabled={busy} className="ml-2 underline text-slate-500 hover:text-slate-700">Mark paid</button>}
@@ -691,6 +778,110 @@ export default function StatementsPage() {
                 ) : null;
               })()}
             </div>
+          );
+        })()}
+      </div>
+      ) : tab === "checks" ? (
+      <div className="space-y-4">
+        {(() => {
+          const banks = accounts.filter((a) => a.kind === "bank");
+          const q = chkSearch.trim().toLowerCase();
+          const shown = checks.filter((c) => (!chkAccount || c.account_id === chkAccount) && (!chkStatus || c.status === chkStatus)
+            && (!q || c.check_number.toLowerCase().includes(q) || c.payee.toLowerCase().includes(q) || c.memo.toLowerCase().includes(q)));
+          const outstanding = checks.filter((c) => c.status === "outstanding");
+          const outTotal = outstanding.reduce((n, c) => n + (c.amount ?? 0), 0);
+          // Numbers skipped in the sequence for each account (small gaps only), so a check that was written but never logged stands out.
+          const gaps: string[] = [];
+          for (const a of banks) {
+            const nums = [...new Set(checks.filter((c) => c.account_id === a.id && /^\d+$/.test(c.check_number)).map((c) => Number(c.check_number)))].sort((x, y) => x - y).slice(-100);
+            const missing: number[] = [];
+            for (let i = 1; i < nums.length; i++) { const d = nums[i] - nums[i - 1] - 1; if (d > 0 && d <= 15) for (let n = nums[i - 1] + 1; n < nums[i]; n++) missing.push(n); }
+            if (missing.length > 0) gaps.push(`${a.name}: ${missing.slice(0, 20).join(", ")}${missing.length > 20 ? "…" : ""}`);
+          }
+          return (
+            <>
+              <div className="flex flex-wrap items-center gap-3">
+                <select value={chkAccount} onChange={(e) => setChkAccount(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+                  <option value="">All accounts</option>
+                  {banks.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+                <select value={chkStatus} onChange={(e) => setChkStatus(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+                  <option value="">Any status</option><option value="outstanding">Outstanding</option><option value="cleared">Cleared</option><option value="void">Void</option>
+                </select>
+                <input value={chkSearch} onChange={(e) => setChkSearch(e.target.value)} placeholder="Search number, payee or memo…" className="w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
+                <button onClick={() => downloadChecksCsv(shown)} className="text-sm font-semibold text-orange-500 hover:underline">Download CSV</button>
+              </div>
+
+              {outstanding.length > 0 && (
+                <div className="rounded-xl px-4 py-2.5 text-sm" style={{ background: "#FAEEDA", color: "#854F0B" }}>
+                  <strong>{outstanding.length} outstanding check{outstanding.length === 1 ? "" : "s"}</strong> totalling {money(outTotal)}. They haven't cleared yet, so the bank balance doesn't reflect them.
+                </div>
+              )}
+              {gaps.length > 0 && (
+                <div className="rounded-xl px-4 py-2.5 text-xs" style={{ background: "#eef6ff", color: "#1e4e8c" }}>
+                  <strong>Check numbers not on the register:</strong> {gaps.join(" · ")}. If these were written, add them; if they were voided or never used, ignore this.
+                </div>
+              )}
+
+              {finance && (
+                <div className="rounded-2xl bg-white shadow px-5 py-3">
+                  {!chkAdding ? (
+                    <button onClick={() => { setChkAdding(true); const a = banks[0]; if (a && !cAccount) { setCAccount(a.id); setCNumber(nextCheckFor(a.id)); } }} className="text-sm font-semibold text-orange-500 hover:underline">+ Add a check</button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-slate-500">Checks that pay an invoice are added automatically when you mark the invoice paid. Use this for any other check.</p>
+                      <div className="flex flex-wrap items-end gap-3">
+                        <div><label className="block text-xs font-semibold text-slate-500 mb-1">Account</label>
+                          <select value={cAccount} onChange={(e) => { setCAccount(e.target.value); setCNumber(nextCheckFor(e.target.value)); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+                            {banks.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}<option value="">Other / not listed</option>
+                          </select></div>
+                        <div><label className="block text-xs font-semibold text-slate-500 mb-1">Check #</label><input value={cNumber} onChange={(e) => setCNumber(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 100 }} /></div>
+                        <div><label className="block text-xs font-semibold text-slate-500 mb-1">Date</label><input type="date" value={cDate} onChange={(e) => setCDate(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
+                        <div style={{ flex: "1 1 160px" }}><label className="block text-xs font-semibold text-slate-500 mb-1">Payee</label><input value={cPayee} onChange={(e) => setCPayee(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
+                        <div><label className="block text-xs font-semibold text-slate-500 mb-1">Amount</label><input type="number" step="0.01" value={cAmount} onChange={(e) => setCAmount(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 110 }} /></div>
+                        <div style={{ flex: "1 1 160px" }}><label className="block text-xs font-semibold text-slate-500 mb-1">Memo</label><input value={cMemo} onChange={(e) => setCMemo(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
+                        <button onClick={() => addCheck()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>Add</button>
+                        <button onClick={() => setChkAdding(false)} className="text-sm text-slate-400 hover:underline pb-2">Close</button>
+                      </div>
+                    </div>
+                  )}
+                  {msg && <p className="text-sm font-semibold text-slate-600 mt-2">{msg}</p>}
+                </div>
+              )}
+
+              <div className="rounded-2xl bg-white shadow overflow-x-auto">
+                <table className="w-full text-sm border-collapse" style={{ minWidth: 760 }}>
+                  <thead>
+                    <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
+                      <th className="px-4 py-2 font-medium">Check #</th><th className="px-2 py-2 font-medium">Date</th><th className="px-2 py-2 font-medium">Account</th>
+                      <th className="px-2 py-2 font-medium">Payee</th><th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Memo</th>
+                      <th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shown.length === 0 && <tr><td colSpan={8} className="px-4 py-6 text-slate-400">{checks.length === 0 ? "No checks logged yet." : "No checks match."}</td></tr>}
+                    {shown.map((c) => (
+                      <tr key={c.id} className="border-b border-slate-50" style={{ opacity: c.status === "void" ? 0.5 : 1 }}>
+                        <td className="px-4 py-1.5 font-semibold text-slate-700 whitespace-nowrap">#{c.check_number}</td>
+                        <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">{new Date(c.check_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}</td>
+                        <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">{c.account_name || "—"}</td>
+                        <td className="px-2 py-1.5 text-slate-700">{c.payee || "—"}</td>
+                        <td className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{c.amount != null ? money(c.amount) : "—"}</td>
+                        <td className="px-2 py-1.5 text-xs text-slate-500">{c.memo}</td>
+                        <td className="px-2 py-1.5 text-xs whitespace-nowrap">
+                          {finance ? (
+                            <select value={c.status} onChange={(e) => setCheckStatus(c, e.target.value)} className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none">
+                              <option value="outstanding">Outstanding</option><option value="cleared">Cleared</option><option value="void">Void</option>
+                            </select>
+                          ) : <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: c.status === "cleared" ? "#e7f6ec" : c.status === "void" ? "#f1f5f9" : "#fef3c7", color: c.status === "cleared" ? "#166534" : c.status === "void" ? "#475569" : "#92400e" }}>{c.status === "outstanding" ? "Outstanding" : c.status === "cleared" ? "Cleared" : "Void"}</span>}
+                        </td>
+                        <td className="px-2 py-1.5 text-right">{finance && <button onClick={() => deleteCheck(c)} className="text-xs text-red-400 hover:text-red-600 hover:underline">Delete</button>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           );
         })()}
       </div>

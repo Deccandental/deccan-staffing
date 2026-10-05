@@ -5,7 +5,7 @@ import { statementsAccess, whoIs, BUCKET, KINDS, MONTH_RE, CATEGORIES } from "@/
 // Records an uploaded statement or invoice, checks for duplicates, marks "no statement this month",
 // manages vendors, or removes a file. Finance users only.
 
-const COLS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category, paid_from_name, paid_note";
+const COLS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category, paid_from_name, paid_note, paid_method, paid_check_number";
 
 // What Cash Flow holds as this account's statement balance for a month (null if nothing).
 async function cashFlowBalance(kind: string, id: string, month: string): Promise<number | null> {
@@ -146,16 +146,45 @@ export async function POST(req: NextRequest) {
 
     if (b.action === "markInvoicePaid") {
       const paid = b.paid === true;
+      const id = String(b.id);
       const paidDate = paid && /^\d{4}-\d{2}-\d{2}$/.test(String(b.paidDate ?? "")) ? b.paidDate : paid ? new Date().toISOString().slice(0, 10) : null;
+      const method = paid && ["check", "ach", "card", "other"].includes(b.method) ? b.method : null;
+      const checkNumber = method === "check" ? String(b.checkNumber ?? "").trim().slice(0, 20) : "";
+      const accountId = b.paidFromId ? String(b.paidFromId) : null;
+
+      // Paying by check: it needs a number and a bank account, and the number must not already be on the register.
+      if (paid && method === "check") {
+        if (!checkNumber) return NextResponse.json({ error: "Enter the check number." }, { status: 400 });
+        if (b.paidFromKind !== "bank" || !accountId) return NextResponse.json({ error: "Choose the bank account the check is drawn on." }, { status: 400 });
+        if (!b.allowDuplicateCheck) {
+          const { data: same } = await supabaseAdmin.from("check_register").select("id, payee, amount, check_date, status").eq("account_id", accountId).ilike("check_number", checkNumber.replace(/[%_]/g, "")).neq("status", "void");
+          if ((same ?? []).length > 0) return NextResponse.json({ error: "duplicate", duplicate: same![0] }, { status: 409 });
+        }
+      }
+
       // Which account it was paid from, and an optional note. Both are cleared if the payment is undone.
       const from = paid ? {
         paid_from_kind: ["bank", "card", "other"].includes(b.paidFromKind) ? b.paidFromKind : null,
-        paid_from_id: b.paidFromId ? String(b.paidFromId) : null,
+        paid_from_id: accountId,
         paid_from_name: String(b.paidFromName ?? "").trim().slice(0, 80),
         paid_note: String(b.paidNote ?? "").trim().slice(0, 120),
-      } : { paid_from_kind: null, paid_from_id: null, paid_from_name: "", paid_note: "" };
-      const { error } = await supabaseAdmin.from("statement_files").update({ paid, paid_date: paidDate, ...from }).eq("id", String(b.id)).eq("doc_type", "invoice");
+        paid_method: method, paid_check_number: checkNumber,
+      } : { paid_from_kind: null, paid_from_id: null, paid_from_name: "", paid_note: "", paid_method: null, paid_check_number: "" };
+      const { data: inv, error } = await supabaseAdmin.from("statement_files").update({ paid, paid_date: paidDate, ...from }).eq("id", id).eq("doc_type", "invoice").select("account_name, invoice_number, amount").single();
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+      if (paid && method === "check") {
+        // The check goes on the register, linked to this invoice.
+        await supabaseAdmin.from("check_register").insert({
+          check_number: checkNumber, account_kind: "bank", account_id: accountId, account_name: from.paid_from_name, check_date: paidDate,
+          payee: inv?.account_name ?? "", amount: inv?.amount ?? null, memo: `Invoice ${inv?.invoice_number ?? ""}`.trim(), invoice_id: id, created_by: whoIs(acc.session),
+        });
+      }
+      if (!paid) {
+        // Undoing the payment voids any check that was logged for it. The number stays on the register as used.
+        const { data: linked } = await supabaseAdmin.from("check_register").select("id, memo").eq("invoice_id", id).neq("status", "void");
+        for (const c of linked ?? []) await supabaseAdmin.from("check_register").update({ status: "void", memo: `${c.memo} (payment undone)`.trim() }).eq("id", c.id);
+      }
       return NextResponse.json({ data: null });
     }
 
