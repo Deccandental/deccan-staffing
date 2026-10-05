@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { statementsAccess, MONTH_RE, KINDS } from "@/lib/statementsAuth";
 
+const nextMonthStart = (m: string) => new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5)), 1)).toISOString().slice(0, 10);
 const COLUMNS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category, paid_from_name, paid_note, paid_method, paid_check_number, paid_from_kind, paid_from_id";
 
 // Statements: the accounts that should have one each month, what's filed for a year, and what Cash Flow
@@ -20,7 +21,10 @@ export async function POST(req: NextRequest) {
       // "unpaid" lists every month's unpaid invoices; otherwise one month's invoices.
       body.unpaid
         ? supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("paid", false).order("invoice_date", { ascending: true }).limit(1000)
-        : supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("month", month).order("invoice_date", { ascending: true }),
+        : body.by === "paid"
+          // Invoices PAID in this month, whatever month they're dated: the view that matches how the CPA works.
+          ? supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("paid", true).gte("paid_date", `${month}-01`).lt("paid_date", nextMonthStart(month)).order("paid_date", { ascending: true })
+          : supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("month", month).order("invoice_date", { ascending: true }),
       supabaseAdmin.from("statement_sources").select("*").order("name"),
     ]);
     if (inv.error) return NextResponse.json({ error: "Invoices aren't set up yet (run the invoices SQL)." }, { status: 500 });

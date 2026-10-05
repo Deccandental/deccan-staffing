@@ -64,6 +64,8 @@ function summaryHtml(month: string, g: Awaited<ReturnType<typeof gather>>): stri
   for (const i of g.invoicesAll) { const k = i.category || "Uncategorized"; byCat[k] = (byCat[k] ?? 0) + Number(i.amount ?? 0); }
   const invTotal = g.invoicesAll.reduce((n: number, i: any) => n + Number(i.amount ?? 0), 0);
   const chkTotal = g.checks.filter((c: any) => c.status !== "void").reduce((n: number, c: any) => n + Number(c.amount ?? 0), 0);
+  const chkByType: Record<string, number> = {};
+  for (const c of g.checks.filter((x: any) => x.status !== "void")) { const k = c.category || "Uncategorized"; chkByType[k] = (chkByType[k] ?? 0) + Number(c.amount ?? 0); }
   const outTotal = g.outstanding.reduce((n: number, c: any) => n + Number(c.amount ?? 0), 0);
   const th = "text-align:left;padding:4px 10px;border-bottom:1px solid #ddd;font-size:12px;color:#666";
   const td = "padding:4px 10px;border-bottom:1px solid #eee;font-size:13px";
@@ -81,6 +83,10 @@ function summaryHtml(month: string, g: Awaited<ReturnType<typeof gather>>): stri
 <h3>Invoices paid, by category</h3>
 <table style="border-collapse:collapse;min-width:320px"><tr><th style="${th}">Category</th><th style="${th}">Amount</th></tr>
 ${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td style="${td}">${esc(k)}</td><td style="${td}">$${money(v)}</td></tr>`).join("") || `<tr><td style="${td}" colspan="2">None</td></tr>`}
+</table>
+<h3>Checks, by type</h3>
+<table style="border-collapse:collapse;min-width:320px"><tr><th style="${th}">Type</th><th style="${th}">Amount</th></tr>
+${Object.entries(chkByType).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td style="${td}">${esc(k)}</td><td style="${td}">$${money(v)}</td></tr>`).join("") || `<tr><td style="${td}" colspan="2">None</td></tr>`}
 </table>
 <h3>Things to know</h3>
 <ul>
@@ -164,8 +170,8 @@ export async function POST(req: NextRequest) {
         g.invoicesAll.map((i: any) => [i.paid_date, i.account_name, i.invoice_number, i.invoice_date, i.category, i.amount, i.paid_from_name, i.paid_method ?? "", i.paid_check_number ?? "", i.paid_note ?? ""]),
       ), "utf8"));
       zip.add("Check-register.csv", Buffer.from(csv(
-        ["Check #", "Date", "Account", "Payee", "Amount", "Memo", "Status", "Cleared date"],
-        g.checks.map((c: any) => [c.check_number, c.check_date, c.account_name, c.payee, c.amount, c.memo, c.status, c.cleared_date ?? ""]),
+        ["Check #", "Date", "Account", "Payee", "Type", "Amount", "Memo", "Status", "Cleared date"],
+        g.checks.map((c: any) => [c.check_number, c.check_date, c.account_name, c.payee, c.category ?? "", c.amount, c.memo, c.status, c.cleared_date ?? ""]),
       ), "utf8"));
       zip.add("Summary.html", Buffer.from(summaryHtml(month, g), "utf8"));
       if (missingFiles.length > 0) zip.add("Missing-files.txt", Buffer.from(`These files could not be read from storage and are not in this package:\r\n${missingFiles.join("\r\n")}\r\n`, "utf8"));

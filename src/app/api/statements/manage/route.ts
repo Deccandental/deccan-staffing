@@ -196,7 +196,7 @@ export async function POST(req: NextRequest) {
 
       const checkFields = {
         check_number: checkNumber, account_kind: "bank", account_id: accountId, account_name: from.paid_from_name, check_date: paidDate,
-        payee: inv?.account_name ?? "", amount: inv?.amount ?? null, memo: `Invoice ${inv?.invoice_number ?? ""}`.trim(),
+        payee: inv?.account_name ?? "", amount: inv?.amount ?? null, memo: `Invoice ${inv?.invoice_number ?? ""}`.trim(), category: "Vendor invoice",
       };
       if (paid && method === "check") {
         // The check is on the register, linked to this invoice: updated if it was already there, added if not.

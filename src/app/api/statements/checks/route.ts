@@ -35,10 +35,32 @@ export async function POST(req: NextRequest) {
       const { data, error } = await supabaseAdmin.from("check_register").insert({
         check_number: checkNumber, account_kind: accountId ? "bank" : "other", account_id: accountId, account_name: String(b.accountName ?? "").slice(0, 80),
         check_date: checkDate, payee: String(b.payee ?? "").trim().slice(0, 120), amount: toAmount(b.amount), memo: String(b.memo ?? "").trim().slice(0, 200),
-        created_by: whoIs(acc.session),
+        category: String(b.category ?? "").trim().slice(0, 40), created_by: whoIs(acc.session),
       }).select("*").single();
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
       return NextResponse.json({ data });
+    }
+
+    if (b.action === "update") {
+      // Only a check entered by hand can be edited here. One that paid an invoice is changed from the invoice.
+      const { data: row } = await supabaseAdmin.from("check_register").select("id, invoice_id").eq("id", String(b.id)).maybeSingle();
+      if (!row) return NextResponse.json({ error: "Check not found." }, { status: 404 });
+      if (row.invoice_id) return NextResponse.json({ error: "This check paid an invoice. Change it with Edit on the invoice." }, { status: 400 });
+      const checkNumber = String(b.checkNumber ?? "").trim().slice(0, 20);
+      const checkDate = String(b.checkDate ?? "");
+      if (!checkNumber || !/^\d{4}-\d{2}-\d{2}$/.test(checkDate)) return NextResponse.json({ error: "Enter the check number and date." }, { status: 400 });
+      const accountId = b.accountId ? String(b.accountId) : null;
+      if (!b.allowDuplicate && accountId) {
+        const { data: same } = await supabaseAdmin.from("check_register").select("id, payee, amount, check_date, status").eq("account_id", accountId).ilike("check_number", checkNumber.replace(/[%_]/g, "")).neq("status", "void").neq("id", row.id);
+        if ((same ?? []).length > 0) return NextResponse.json({ error: "duplicate", duplicate: same![0] }, { status: 409 });
+      }
+      const { error } = await supabaseAdmin.from("check_register").update({
+        check_number: checkNumber, account_kind: accountId ? "bank" : "other", account_id: accountId, account_name: String(b.accountName ?? "").slice(0, 80),
+        check_date: checkDate, payee: String(b.payee ?? "").trim().slice(0, 120), amount: toAmount(b.amount), memo: String(b.memo ?? "").trim().slice(0, 200),
+        category: String(b.category ?? "").trim().slice(0, 40),
+      }).eq("id", row.id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data: null });
     }
 
     if (b.action === "setStatus") {

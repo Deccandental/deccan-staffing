@@ -14,7 +14,7 @@ import { loadRecurringBills, loadBillPayments, buildOccurrences, addDays, Recurr
 
 type Role = "finance" | "cpa";
 interface Account { kind: "bank" | "card" | "loan" | "vendor"; id: string; name: string; category?: string; startMonth?: string; active?: boolean }
-interface CheckRow { id: string; check_number: string; account_id: string | null; account_name: string; check_date: string; payee: string; amount: number | null; memo: string; invoice_id: string | null; status: "outstanding" | "cleared" | "void"; cleared_date: string | null; created_by: string }
+interface CheckRow { category?: string; id: string; check_number: string; account_id: string | null; account_name: string; check_date: string; payee: string; amount: number | null; memo: string; invoice_id: string | null; status: "outstanding" | "cleared" | "void"; cleared_date: string | null; created_by: string }
 interface FileRow { paid_from_kind?: string | null; paid_from_id?: string | null; paid_method?: string | null; paid_check_number?: string; paid_from_name?: string; paid_note?: string; category?: string; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
 
 const ROLE_KEY = "dd_statements_role";
@@ -23,6 +23,7 @@ const KIND_LABEL: Record<string, string> = { bank: "Bank accounts", card: "Credi
 const DEFAULT_CATEGORIES = ["CAM", "Rent", "Supplies", "Lab", "Utilities", "Insurance", "Equipment & repairs", "Marketing", "Professional fees", "Other"];
 // A vendor's type suggests a starting category for its invoices.
 const VENDOR_TYPE_CATEGORY: Record<string, string> = { Lab: "Lab", Supplier: "Supplies", Insurance: "Insurance" };
+const CHECK_TYPES = ["Vendor invoice", "Patient refund", "Payroll", "Rent / lease", "Tax / government", "Insurance", "Other"];
 const VENDOR_LABEL: Record<string, string> = { Lab: "Labs", Supplier: "Suppliers", Insurance: "Insurance", Other: "Other vendors" };
 const acctKey = (kind: string, id: string) => `${kind}:${id}`;
 const mkey = (year: number, m: number) => `${year}-${String(m).padStart(2, "0")}`;
@@ -88,6 +89,9 @@ export default function StatementsPage() {
   const [cPayee, setCPayee] = useState("");
   const [cAmount, setCAmount] = useState("");
   const [cMemo, setCMemo] = useState("");
+  const [cType, setCType] = useState("Patient refund");
+  const [cEditId, setCEditId] = useState<string | null>(null);   // a hand-entered check being edited
+  const [chkType, setChkType] = useState("");
   const [pending, setPending] = useState<FileRow[]>([]);   // every unpaid invoice, across all months
   // Vendor directory
   const [vendorsAll, setVendorsAll] = useState<{ id: string; name: string; category: string; active: boolean; expectsStatement: boolean }[]>([]);
@@ -103,6 +107,7 @@ export default function StatementsPage() {
   // Invoices (a separate list from the monthly statements)
   const [tab, setTab] = useState<"statements" | "invoices" | "checks" | "package">("statements");
   const [invMonth, setInvMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [invBy, setInvBy] = useState<"dated" | "paid">("dated");   // list a month by invoice date, or by the date it was paid
   const [invFiles, setInvFiles] = useState<FileRow[]>([]);
   const [invVendors, setInvVendors] = useState<{ id: string; name: string; category: string }[]>([]);
   const [invSearch, setInvSearch] = useState("");
@@ -307,12 +312,12 @@ export default function StatementsPage() {
   const loadInvoices = useCallback(async () => {
     if (!role) return;
     setLoading(true); setLoadError("");
-    const r = await api("/api/statements/list", { docType: "invoice", month: invMonth, unpaid: unpaidOnly });
+    const r = await api("/api/statements/list", { docType: "invoice", month: invMonth, unpaid: unpaidOnly, by: invBy });
     setLoading(false);
     if (r.status === 401) { logout(); return; }
     if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load invoices."); return; }
     setInvFiles(r.json.files ?? []); setInvVendors(r.json.vendors ?? []); setUsedCategories(r.json.categories ?? []); setVendorsAll(r.json.vendorsAll ?? []); setUsedNames(r.json.usedNames ?? []);
-  }, [role, invMonth, unpaidOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [role, invMonth, unpaidOnly, invBy]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (tab === "invoices") loadInvoices(); }, [tab, loadInvoices]);
   // Anything that changes an invoice also refreshes the warning.
   useEffect(() => { if (role === "finance") loadPending(); }, [invFiles]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -369,6 +374,7 @@ export default function StatementsPage() {
     if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't record the invoice."); return; }
     setMsg(`Filed invoice ${iNumber.trim()} from ${name}.`);
     const filedMonth = iDate.slice(0, 7);
+    if (invBy === "paid") setInvBy("dated");   // a new invoice is unpaid, so show the view where it will appear
     // Clear the whole form so the next invoice starts fresh.
     setIVendor(""); setIDate(new Date().toISOString().slice(0, 10)); setINumber(""); setIAmount(""); setICategory(""); setIMatch(null); setNvName("");
     if (!unpaidOnly && filedMonth !== invMonth) setInvMonth(filedMonth); else loadInvoices();
@@ -577,16 +583,23 @@ export default function StatementsPage() {
     const acct = accounts.find((a) => a.kind === "bank" && a.id === cAccount);
     if (!cNumber.trim() || !cDate) { setMsg("Enter the check number and date."); return; }
     setBusy(true); setMsg("");
-    const r = await api("/api/statements/checks", { action: "add", checkNumber: cNumber, checkDate: cDate, accountId: acct?.id ?? "", accountName: acct?.name ?? "", payee: cPayee, amount: cAmount, memo: cMemo, allowDuplicate });
+    const r = await api("/api/statements/checks", { action: cEditId ? "update" : "add", id: cEditId, checkNumber: cNumber, checkDate: cDate, accountId: acct?.id ?? "", accountName: acct?.name ?? "", payee: cPayee, amount: cAmount, memo: cMemo, category: cType, allowDuplicate });
     setBusy(false);
     if (r.status === 409 && r.json.duplicate) {
       const d = r.json.duplicate;
-      if (window.confirm(`Check #${cNumber.trim()} on ${acct?.name ?? "this account"} is already on the register (${d.payee || "no payee"}, ${d.check_date}). Add it again anyway?`)) addCheck(true);
+      if (window.confirm(`Check #${cNumber.trim()} on ${acct?.name ?? "this account"} is already on the register (${d.payee || "no payee"}, ${d.check_date}). Use this number anyway?`)) addCheck(true);
       return;
     }
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't add the check."); return; }
-    setCNumber(/^\d+$/.test(cNumber.trim()) ? String(Number(cNumber.trim()) + 1) : ""); setCPayee(""); setCAmount(""); setCMemo("");
-    setMsg(`Check #${r.json.data?.check_number ?? ""} added.`); loadChecks();
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't save the check."); return; }
+    const wasEditing = !!cEditId;
+    setCEditId(null);
+    setCNumber(!wasEditing && /^\d+$/.test(cNumber.trim()) ? String(Number(cNumber.trim()) + 1) : ""); setCPayee(""); setCAmount(""); setCMemo("");
+    setMsg(wasEditing ? "Check updated." : `Check #${r.json.data?.check_number ?? ""} added.`); loadChecks();
+  }
+  function startEditCheck(c: CheckRow) {
+    setCEditId(c.id); setChkAdding(true); setMsg("");
+    setCAccount(c.account_id ?? ""); setCNumber(c.check_number); setCDate(c.check_date); setCPayee(c.payee); setCAmount(c.amount != null ? String(c.amount) : "");
+    setCMemo(c.memo); setCType(c.category || "Other");
   }
   async function setCheckStatus(c: CheckRow, status: string) {
     setChecks((list) => list.map((x) => (x.id === c.id ? { ...x, status: status as CheckRow["status"] } : x)));
@@ -601,8 +614,8 @@ export default function StatementsPage() {
   }
   function downloadChecksCsv(rows: CheckRow[]) {
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const lines = [["Check #", "Date", "Account", "Payee", "Amount", "Memo", "Status", "Cleared date"].map(esc).join(",")]
-      .concat(rows.map((c) => [c.check_number, c.check_date, c.account_name, c.payee, c.amount ?? "", c.memo, c.status, c.cleared_date ?? ""].map(esc).join(",")));
+    const lines = [["Check #", "Date", "Account", "Payee", "Type", "Amount", "Memo", "Status", "Cleared date"].map(esc).join(",")]
+      .concat(rows.map((c) => [c.check_number, c.check_date, c.account_name, c.payee, c.category ?? "", c.amount ?? "", c.memo, c.status, c.cleared_date ?? ""].map(esc).join(",")));
     const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
     const a = document.createElement("a"); a.href = url; a.download = `check-register-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   }
@@ -693,6 +706,10 @@ export default function StatementsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <label className="text-sm font-semibold text-slate-600">Month</label>
           <input type="month" value={invMonth} onChange={(e) => e.target.value && setInvMonth(e.target.value)} disabled={unpaidOnly} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none disabled:opacity-40" />
+          <select value={invBy} onChange={(e) => setInvBy(e.target.value as "dated" | "paid")} disabled={unpaidOnly} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none disabled:opacity-40">
+            <option value="dated">Invoices dated this month</option>
+            <option value="paid">Invoices paid this month</option>
+          </select>
           {unpaidOnly && <span className="text-xs text-slate-500">Showing unpaid invoices from every month</span>}
           <input value={invSearch} onChange={(e) => setInvSearch(e.target.value)} placeholder="Search vendor or invoice #…" className="w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
           <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
@@ -821,15 +838,19 @@ export default function StatementsPage() {
               <table className="w-full text-sm border-collapse" style={{ minWidth: 640 }}>
                 <thead>
                   <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
-                    <th className="px-4 py-2 font-medium">Date</th><th className="px-2 py-2 font-medium">Vendor</th><th className="px-2 py-2 font-medium">Category</th><th className="px-2 py-2 font-medium">Invoice #</th>
+                    <th className="px-4 py-2 font-medium">{invBy === "paid" && !unpaidOnly ? "Paid on" : "Date"}</th><th className="px-2 py-2 font-medium">Vendor</th><th className="px-2 py-2 font-medium">Category</th><th className="px-2 py-2 font-medium">Invoice #</th>
                     <th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2" />
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-slate-400">{loading ? "Loading…" : "No invoices filed for this month."}</td></tr>}
+                  {shown.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-slate-400">{loading ? "Loading…" : invBy === "paid" && !unpaidOnly ? "No invoices were paid this month." : "No invoices filed for this month."}</td></tr>}
                   {shown.map((f) => (
                     <tr key={f.id} className="border-b border-slate-50">
-                      <td className="px-4 py-1.5 text-slate-600 whitespace-nowrap">{f.invoice_date ? new Date(f.invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}</td>
+                      <td className="px-4 py-1.5 text-slate-600 whitespace-nowrap">
+                        {invBy === "paid" && !unpaidOnly && f.paid_date
+                          ? <>{new Date(f.paid_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}<span className="block text-[11px] text-slate-400">inv. {f.invoice_date ? new Date(f.invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}</span></>
+                          : (f.invoice_date ? new Date(f.invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—")}
+                      </td>
                       <td className="px-2 py-1.5 font-medium text-slate-700">{f.account_name}</td>
                       <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">
                         {finance ? (
@@ -886,7 +907,7 @@ export default function StatementsPage() {
         {(() => {
           const banks = accounts.filter((a) => a.kind === "bank");
           const q = chkSearch.trim().toLowerCase();
-          const shown = checks.filter((c) => (!chkAccount || c.account_id === chkAccount) && (!chkStatus || c.status === chkStatus)
+          const shown = checks.filter((c) => (!chkAccount || c.account_id === chkAccount) && (!chkStatus || c.status === chkStatus) && (!chkType || (c.category ?? "") === chkType)
             && (!q || c.check_number.toLowerCase().includes(q) || c.payee.toLowerCase().includes(q) || c.memo.toLowerCase().includes(q)));
           const outstanding = checks.filter((c) => c.status === "outstanding");
           const outTotal = outstanding.reduce((n, c) => n + (c.amount ?? 0), 0);
@@ -907,6 +928,10 @@ export default function StatementsPage() {
                 </select>
                 <select value={chkStatus} onChange={(e) => setChkStatus(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
                   <option value="">Any status</option><option value="outstanding">Outstanding</option><option value="cleared">Cleared</option><option value="void">Void</option>
+                </select>
+                <select value={chkType} onChange={(e) => setChkType(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+                  <option value="">Any type</option>
+                  {CHECK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <input value={chkSearch} onChange={(e) => setChkSearch(e.target.value)} placeholder="Search number, payee or memo…" className="w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
                 <button onClick={() => downloadChecksCsv(shown)} className="text-sm font-semibold text-orange-500 hover:underline">Download CSV</button>
@@ -929,7 +954,7 @@ export default function StatementsPage() {
                     <button onClick={() => { setChkAdding(true); const a = banks[0]; if (a && !cAccount) { setCAccount(a.id); setCNumber(nextCheckFor(a.id)); } }} className="text-sm font-semibold text-orange-500 hover:underline">+ Add a check</button>
                   ) : (
                     <div className="space-y-2">
-                      <p className="text-xs text-slate-500">Checks that pay an invoice are added automatically when you mark the invoice paid. Use this for any other check.</p>
+                      <p className="text-xs text-slate-500">{cEditId ? "Editing a check." : "Checks that pay an invoice are added automatically when you mark the invoice paid. Use this for any other check: a patient refund, a payroll check, rent, and so on."}</p>
                       <div className="flex flex-wrap items-end gap-3">
                         <div><label className="block text-xs font-semibold text-slate-500 mb-1">Account</label>
                           <select value={cAccount} onChange={(e) => { setCAccount(e.target.value); setCNumber(nextCheckFor(e.target.value)); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
@@ -937,11 +962,15 @@ export default function StatementsPage() {
                           </select></div>
                         <div><label className="block text-xs font-semibold text-slate-500 mb-1">Check #</label><input value={cNumber} onChange={(e) => setCNumber(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 100 }} /></div>
                         <div><label className="block text-xs font-semibold text-slate-500 mb-1">Date</label><input type="date" value={cDate} onChange={(e) => setCDate(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
+                        <div><label className="block text-xs font-semibold text-slate-500 mb-1">Type</label>
+                          <select value={cType} onChange={(e) => setCType(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+                            {CHECK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                          </select></div>
                         <div style={{ flex: "1 1 160px" }}><label className="block text-xs font-semibold text-slate-500 mb-1">Payee</label><input value={cPayee} onChange={(e) => setCPayee(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
                         <div><label className="block text-xs font-semibold text-slate-500 mb-1">Amount</label><input type="number" step="0.01" value={cAmount} onChange={(e) => setCAmount(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 110 }} /></div>
                         <div style={{ flex: "1 1 160px" }}><label className="block text-xs font-semibold text-slate-500 mb-1">Memo</label><input value={cMemo} onChange={(e) => setCMemo(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
-                        <button onClick={() => addCheck()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>Add</button>
-                        <button onClick={() => setChkAdding(false)} className="text-sm text-slate-400 hover:underline pb-2">Close</button>
+                        <button onClick={() => addCheck()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>{cEditId ? "Save changes" : "Add"}</button>
+                        <button onClick={() => { setChkAdding(false); setCEditId(null); }} className="text-sm text-slate-400 hover:underline pb-2">{cEditId ? "Cancel" : "Close"}</button>
                       </div>
                     </div>
                   )}
@@ -954,18 +983,19 @@ export default function StatementsPage() {
                   <thead>
                     <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
                       <th className="px-4 py-2 font-medium">Check #</th><th className="px-2 py-2 font-medium">Date</th><th className="px-2 py-2 font-medium">Account</th>
-                      <th className="px-2 py-2 font-medium">Payee</th><th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Memo</th>
+                      <th className="px-2 py-2 font-medium">Payee</th><th className="px-2 py-2 font-medium">Type</th><th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Memo</th>
                       <th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2" />
                     </tr>
                   </thead>
                   <tbody>
-                    {shown.length === 0 && <tr><td colSpan={8} className="px-4 py-6 text-slate-400">{checks.length === 0 ? "No checks logged yet." : "No checks match."}</td></tr>}
+                    {shown.length === 0 && <tr><td colSpan={9} className="px-4 py-6 text-slate-400">{checks.length === 0 ? "No checks logged yet." : "No checks match."}</td></tr>}
                     {shown.map((c) => (
                       <tr key={c.id} className="border-b border-slate-50" style={{ opacity: c.status === "void" ? 0.5 : 1 }}>
                         <td className="px-4 py-1.5 font-semibold text-slate-700 whitespace-nowrap">#{c.check_number}</td>
                         <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">{new Date(c.check_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}</td>
                         <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">{c.account_name || "—"}</td>
                         <td className="px-2 py-1.5 text-slate-700">{c.payee || "—"}</td>
+                        <td className="px-2 py-1.5 text-xs text-slate-500 whitespace-nowrap">{c.category || "—"}</td>
                         <td className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{c.amount != null ? money(c.amount) : "—"}</td>
                         <td className="px-2 py-1.5 text-xs text-slate-500">{c.memo}</td>
                         <td className="px-2 py-1.5 text-xs whitespace-nowrap">
@@ -975,11 +1005,24 @@ export default function StatementsPage() {
                             </select>
                           ) : <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: c.status === "cleared" ? "#e7f6ec" : c.status === "void" ? "#f1f5f9" : "#fef3c7", color: c.status === "cleared" ? "#166534" : c.status === "void" ? "#475569" : "#92400e" }}>{c.status === "outstanding" ? "Outstanding" : c.status === "cleared" ? "Cleared" : "Void"}</span>}
                         </td>
-                        <td className="px-2 py-1.5 text-right">{finance && <button onClick={() => deleteCheck(c)} className="text-xs text-red-400 hover:text-red-600 hover:underline">Delete</button>}</td>
+                        <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                          {finance && !c.invoice_id && <button onClick={() => startEditCheck(c)} className="text-xs text-slate-500 hover:text-slate-700 hover:underline mr-3">Edit</button>}
+                          {finance && <button onClick={() => deleteCheck(c)} className="text-xs text-red-400 hover:text-red-600 hover:underline">Delete</button>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                {(() => {
+                  const by = shown.filter((c) => c.status !== "void").reduce<Record<string, number>>((m, c) => { const k = c.category || "Uncategorized"; m[k] = (m[k] ?? 0) + (c.amount ?? 0); return m; }, {});
+                  const entries = Object.entries(by).filter(([, v]) => v !== 0).sort((a, z) => z[1] - a[1]);
+                  return entries.length > 0 ? (
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 px-4 py-2.5 border-t border-slate-100 text-xs text-slate-500">
+                      <span className="font-semibold text-slate-400">By type</span>
+                      {entries.map(([k, v]) => <span key={k}><span className="font-semibold text-slate-600">{k}</span> {money(v)}</span>)}
+                    </div>
+                  ) : null;
+                })()}
               </div>
             </>
           );
