@@ -86,8 +86,8 @@ export default function StatementsPage() {
   const [vendorsAll, setVendorsAll] = useState<{ id: string; name: string; category: string; active: boolean; expectsStatement: boolean }[]>([]);
   const [usedNames, setUsedNames] = useState<string[]>([]);
   const [showVendors, setShowVendors] = useState(false);
-  const [iSave, setISave] = useState(true);       // save a newly typed vendor to the list
-  const [iType, setIType] = useState("Other");    // its type
+  const [nvName, setNvName] = useState("");        // a new vendor being added from the invoice form
+  const [nvType, setNvType] = useState("Other");
   const [vExpects, setVExpects] = useState(true); // new vendor on the Monthly statements tab: sends a statement?
   const [usedCategories, setUsedCategories] = useState<string[]>([]);
   const [catFilter, setCatFilter] = useState("");
@@ -262,28 +262,36 @@ export default function StatementsPage() {
   // Anything that changes an invoice also refreshes the warning.
   useEffect(() => { if (role === "finance") loadPending(); }, [invFiles]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A vendor added here only sends invoices, so it never appears on the monthly statement checklist.
+  async function addVendorHere() {
+    const name = nvName.trim();
+    if (!name) { setMsg("Enter the vendor's name."); return; }
+    const existing = invVendors.find((v) => v.name.trim().toLowerCase() === name.toLowerCase());
+    if (existing) { setIVendor(existing.id); setNvName(""); setMsg(`${existing.name} was already in your list, so it's selected.`); return; }
+    setBusy(true); setMsg("");
+    const r = await api("/api/statements/manage", { action: "addSource", name, category: nvType, startMonth: new Date().toISOString().slice(0, 7), expectsStatement: false });
+    setBusy(false);
+    if (!r.ok || !r.json.data?.id) { setMsg(r.json.error ?? "Couldn't add the vendor."); return; }
+    const id = String(r.json.data.id);
+    setInvVendors((v) => [...v, { id, name, category: nvType }]);
+    setIVendor(id); setNvName(""); setMsg(`Added ${name}.`);
+    loadInvoices();
+  }
+
   async function addInvoice(file: File, ignoreDup = false) {
     setMsg(""); setDup(null);
-    let vendor = invVendors.find((v) => v.id === iVendor);
-    const typed = iOther.trim();
-    // A typed name that matches a saved vendor is that vendor, so one company never ends up listed twice.
-    if (!vendor && typed) vendor = invVendors.find((v) => v.name.trim().toLowerCase() === typed.toLowerCase());
-    const name = vendor ? vendor.name : typed;
-    if (!name) { setMsg("Choose a vendor or type a name."); return; }
+    const vendor = invVendors.find((v) => v.id === iVendor);
+    if (!vendor) { setMsg("Choose a vendor, or add a new one."); return; }
+    const name = vendor.name;
     if (!iDate) { setMsg("Enter the invoice date."); return; }
     if (!iNumber.trim()) { setMsg("Enter the invoice number."); return; }
     if (iAmount.trim() === "" || isNaN(Number(iAmount))) { setMsg("Enter the invoice amount."); return; }
     if (!/\.pdf$/i.test(file.name)) { setMsg("Only PDF files can be uploaded."); return; }
     setBusy(true);
-    let kind = vendor ? "vendor" : "other";
+    const kind = "vendor";
     if (!ignoreDup) {
-      const chk = await api("/api/statements/manage", { action: "checkDuplicate", docType: "invoice", accountKind: kind, accountId: vendor?.id ?? "", accountName: name, invoiceDate: iDate, invoiceNumber: iNumber, amount: iAmount });
+      const chk = await api("/api/statements/manage", { action: "checkDuplicate", docType: "invoice", accountKind: kind, accountId: vendor.id, accountName: name, invoiceDate: iDate, invoiceNumber: iNumber, amount: iAmount });
       if (chk.ok && (chk.json.matches ?? []).length > 0) { setBusy(false); setDup({ matches: chk.json.matches, proceed: () => addInvoice(file, true) }); return; }
-    }
-    // Only now, once the invoice is really going ahead, save a new vendor to the list (invoice-only: no monthly statement expected).
-    if (!vendor && iSave) {
-      const saved = await api("/api/statements/manage", { action: "addSource", name, category: iType, startMonth: new Date().toISOString().slice(0, 7), expectsStatement: false });
-      if (saved.ok && saved.json.data?.id) { vendor = { id: String(saved.json.data.id), name, category: iType }; kind = "vendor"; setInvVendors((v) => [...v, vendor!]); }
     }
     const slot = await api("/api/statements/upload-url", { docType: "invoice", accountKind: kind, accountName: name, month: iDate.slice(0, 7), fileName: file.name, size: file.size });
     if (!slot.ok) { setBusy(false); setMsg(slot.json.error ?? "Couldn't start the upload."); return; }
@@ -292,8 +300,11 @@ export default function StatementsPage() {
     const rec = await api("/api/statements/manage", { action: "confirm", docType: "invoice", path: slot.json.path, accountKind: kind, accountId: vendor?.id ?? "", accountName: name, invoiceDate: iDate, invoiceNumber: iNumber, amount: iAmount, fileName: file.name, size: file.size, dupIgnored: ignoreDup, matchedBillId: iMatch?.billId, matchedDueDate: iMatch?.dueDate, category: iCategory });
     setBusy(false);
     if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't record the invoice."); return; }
-    setMsg(`Filed invoice ${iNumber.trim()} from ${name}.`); setINumber(""); setIAmount(""); setIMatch(null);
-    if (iDate.slice(0, 7) !== invMonth) setInvMonth(iDate.slice(0, 7)); else loadInvoices();
+    setMsg(`Filed invoice ${iNumber.trim()} from ${name}.`);
+    const filedMonth = iDate.slice(0, 7);
+    // Clear the whole form so the next invoice starts fresh.
+    setIVendor(""); setIDate(new Date().toISOString().slice(0, 10)); setINumber(""); setIAmount(""); setICategory(""); setIMatch(null); setNvName("");
+    if (!unpaidOnly && filedMonth !== invMonth) setInvMonth(filedMonth); else loadInvoices();
   }
 
   // Marking paid opens a small dialog (date, which account, note). Undo needs no questions.
@@ -452,7 +463,7 @@ export default function StatementsPage() {
 
   const STOP = new Set(["the", "inc", "llc", "corp", "company", "payment", "bill", "and", "for", "dental"]);
   const toks = (t: string) => t.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length >= 3 && !STOP.has(x));
-  const invVendorName = (invVendors.find((v) => v.id === iVendor)?.name ?? iOther).trim();
+  const invVendorName = (invVendors.find((v) => v.id === iVendor)?.name ?? "").trim();
   const suggestions = (() => {
     if (!invAdding || !invVendorName || !iDate || bills.length === 0) return [];
     const vt = toks(invVendorName); if (vt.length === 0) return [];
@@ -618,15 +629,14 @@ export default function StatementsPage() {
         {finance && showVendors && (
           <div className="rounded-2xl bg-white shadow px-5 py-3 space-y-1">
             <h3 className="font-bold text-sm text-slate-700">Vendors</h3>
-            <p className="text-xs text-slate-500">Everyone you've saved. Tick "Monthly statement" only for vendors that send one each month, since those appear on the monthly checklist and in the Friday reminder.</p>
-            {vendorsAll.length === 0 && <p className="text-xs text-slate-400 pt-1">No vendors saved yet. File an invoice and tick "Save to my vendor list".</p>}
+            <p className="text-xs text-slate-500">Everyone you've saved for invoices. Vendors added here only send invoices, so they never appear on the monthly statement checklist.</p>
+            {vendorsAll.length === 0 && <p className="text-xs text-slate-400 pt-1">No vendors saved yet. Choose "+ Add a new vendor…" in the Add an invoice form.</p>}
             {vendorsAll.map((v) => (
               <div key={v.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm border-t border-slate-100 pt-1.5" style={{ opacity: v.active ? 1 : 0.5 }}>
                 <span className="font-medium text-slate-700 w-48 truncate">{v.name}{!v.active && <span className="ml-1 text-xs font-normal text-slate-400">retired</span>}</span>
                 <select value={v.category} onChange={(e) => updateVendor(v.id, { category: e.target.value })} className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none">
                   <option>Lab</option><option>Supplier</option><option>Insurance</option><option>Other</option>
                 </select>
-                <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={v.expectsStatement} onChange={(e) => updateVendor(v.id, { expectsStatement: e.target.checked })} /> Monthly statement</label>
                 <button onClick={() => renameDirVendor(v)} className="text-xs text-slate-400 hover:text-slate-600" title="Rename">✎ Rename</button>
                 <button onClick={() => updateVendor(v.id, { active: !v.active })} className="text-xs text-slate-400 hover:text-slate-600">{v.active ? "Retire" : "Restore"}</button>
               </div>
@@ -644,28 +654,25 @@ export default function StatementsPage() {
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Vendor</label>
                     <select value={iVendor} onChange={(e) => setIVendor(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" style={{ minWidth: 200 }}>
-                      <option value="">Other (type a name)…</option>
+                      <option value="">Choose a vendor…</option>
                       {invVendors.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.category})</option>)}
+                      <option value="__new">+ Add a new vendor…</option>
                     </select>
                   </div>
-                  {!iVendor && (
+                  {iVendor === "__new" && (
                     <>
                       <div style={{ flex: "1 1 180px" }}>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">Vendor name</label>
-                        <input value={iOther} onChange={(e) => setIOther(e.target.value)} list="usedVendorNames" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-                        <datalist id="usedVendorNames">{usedNames.map((n) => <option key={n} value={n} />)}</datalist>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">New vendor name</label>
+                        <input value={nvName} onChange={(e) => setNvName(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
                       </div>
-                      {iOther.trim() && !invVendors.some((v) => v.name.trim().toLowerCase() === iOther.trim().toLowerCase()) && (
-                        <>
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-500 mb-1">Type</label>
-                            <select value={iType} onChange={(e) => setIType(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-                              <option>Lab</option><option>Supplier</option><option>Insurance</option><option>Other</option>
-                            </select>
-                          </div>
-                          <label className="flex items-center gap-1.5 text-sm text-slate-600 pb-2"><input type="checkbox" checked={iSave} onChange={(e) => setISave(e.target.checked)} /> Save to my vendor list</label>
-                        </>
-                      )}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Type</label>
+                        <select value={nvType} onChange={(e) => setNvType(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+                          <option>Lab</option><option>Supplier</option><option>Insurance</option><option>Other</option>
+                        </select>
+                      </div>
+                      <button onClick={addVendorHere} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>Add vendor</button>
+                      <button onClick={() => { setIVendor(""); setNvName(""); }} className="text-sm text-slate-400 hover:underline pb-2">Cancel</button>
                     </>
                   )}
                   <div>
