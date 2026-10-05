@@ -35,6 +35,8 @@ async function gather(month: string) {
     supabaseAdmin.from("cash_accounts").select("*"), supabaseAdmin.from("credit_cards").select("*"),
     supabaseAdmin.from("debts").select("*"), supabaseAdmin.from("statement_sources").select("*"),
   ]);
+  const checkIds = (chk.data ?? []).map((c: any) => c.id);
+  const { data: checkDocs } = checkIds.length ? await supabaseAdmin.from("check_documents").select("*").in("check_id", checkIds) : { data: [] as any[] };
   const statements = (stm.data ?? []).filter((r: any) => !r.no_statement && r.file_path);
   const marked = new Set((stm.data ?? []).map((r: any) => `${r.account_kind}:${r.account_id}`));
   const expected = [
@@ -45,7 +47,7 @@ async function gather(month: string) {
   ];
   return {
     statements, invoices: (inv.data ?? []).filter((r: any) => r.file_path), invoicesAll: inv.data ?? [],
-    checks: chk.data ?? [], outstanding: outstanding.data ?? [],
+    checks: chk.data ?? [], checkDocs: checkDocs ?? [], outstanding: outstanding.data ?? [],
     missing: expected.filter((e) => !marked.has(e.key)).map((e) => e.name),
   };
 }
@@ -79,6 +81,7 @@ function summaryHtml(month: string, g: Awaited<ReturnType<typeof gather>>): stri
 <li><strong>Invoices/</strong>: ${g.invoices.length} invoice PDF${g.invoices.length === 1 ? "" : "s"}, for invoices paid in ${monthLabel(month)}.</li>
 <li><strong>Invoices-paid.csv</strong>: ${g.invoicesAll.length} invoice${g.invoicesAll.length === 1 ? "" : "s"} paid in the month, total <strong>$${money(invTotal)}</strong>.</li>
 <li><strong>Check-register.csv</strong>: ${g.checks.length} check${g.checks.length === 1 ? "" : "s"} dated in the month, total <strong>$${money(chkTotal)}</strong> (voided checks excluded from the total).</li>
+<li><strong>Check support/</strong>: ${g.checkDocs.length} supporting document${g.checkDocs.length === 1 ? "" : "s"} attached to those checks.</li>
 </ul>
 <h3>Invoices paid, by category</h3>
 <table style="border-collapse:collapse;min-width:320px"><tr><th style="${th}">Category</th><th style="${th}">Amount</th></tr>
@@ -145,7 +148,9 @@ export async function POST(req: NextRequest) {
       const used = new Set<string>();
       const unique = (folder: string, base: string) => { let name = `${folder}/${base}.pdf`, n = 2; while (used.has(name.toLowerCase())) name = `${folder}/${base} (${n++}).pdf`; used.add(name.toLowerCase()); return name; };
 
+      const checkById = new Map<string, any>((g.checks as any[]).map((c) => [c.id, c]));
       const jobs = [
+        ...(g.checkDocs as any[]).map((d) => { const c = checkById.get(d.check_id); return { path: d.file_path as string, name: unique("Check support", `Check ${safe(c?.check_number ?? "")} - ${safe(c?.payee ?? "")} - ${safe(String(d.file_name).replace(/\.pdf$/i, ""))}`) }; }),
         ...g.statements.map((r: any) => ({ path: r.file_path as string, name: unique("Statements", `${safe(r.account_name)} - ${month}`) })),
         ...g.invoices.map((r: any) => ({ path: r.file_path as string, name: unique("Invoices", `${safe(r.account_name)} - ${safe(r.invoice_number || "no number")} - ${money(r.amount)}`) })),
       ];
@@ -170,8 +175,8 @@ export async function POST(req: NextRequest) {
         g.invoicesAll.map((i: any) => [i.paid_date, i.account_name, i.invoice_number, i.invoice_date, i.category, i.amount, i.paid_from_name, i.paid_method ?? "", i.paid_check_number ?? "", i.paid_note ?? ""]),
       ), "utf8"));
       zip.add("Check-register.csv", Buffer.from(csv(
-        ["Check #", "Date", "Account", "Payee", "Type", "Amount", "Memo", "Status", "Cleared date"],
-        g.checks.map((c: any) => [c.check_number, c.check_date, c.account_name, c.payee, c.category ?? "", c.amount, c.memo, c.status, c.cleared_date ?? ""]),
+        ["Check #", "Date", "Account", "Payee", "Type", "Amount", "Memo", "Status", "Cleared date", "Attachments"],
+        g.checks.map((c: any) => [c.check_number, c.check_date, c.account_name, c.payee, c.category ?? "", c.amount, c.memo, c.status, c.cleared_date ?? "", (g.checkDocs as any[]).filter((d) => d.check_id === c.id).length]),
       ), "utf8"));
       zip.add("Summary.html", Buffer.from(summaryHtml(month, g), "utf8"));
       if (missingFiles.length > 0) zip.add("Missing-files.txt", Buffer.from(`These files could not be read from storage and are not in this package:\r\n${missingFiles.join("\r\n")}\r\n`, "utf8"));

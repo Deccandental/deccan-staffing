@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Fragment, useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { supabase } from "@/lib/supabase";
+import { loadStaff } from "@/lib/staffStore";
 import { getSessionToken, storeSessionToken, clearSessionToken, hasSessionToken } from "@/lib/secureData";
 import { loadRecurringBills, loadBillPayments, buildOccurrences, addDays, RecurringBill, BillPayment } from "@/lib/cashflow";
 
@@ -15,6 +16,8 @@ import { loadRecurringBills, loadBillPayments, buildOccurrences, addDays, Recurr
 type Role = "finance" | "cpa";
 interface Account { kind: "bank" | "card" | "loan" | "vendor"; id: string; name: string; category?: string; startMonth?: string; active?: boolean }
 interface CheckRow { category?: string; id: string; check_number: string; account_id: string | null; account_name: string; check_date: string; payee: string; amount: number | null; memo: string; invoice_id: string | null; status: "outstanding" | "cleared" | "void"; cleared_date: string | null; created_by: string }
+interface CheckDoc { id: string; check_id: string; file_name: string; size_bytes: number | null; doc_kind: string; note: string; uploaded_by: string; uploaded_at: string }
+interface CheckInvoice { id: string; account_name: string; invoice_number: string; amount: number | null; paid_check_number: string; paid_from_id: string | null }
 interface FileRow { paid_from_kind?: string | null; paid_from_id?: string | null; paid_method?: string | null; paid_check_number?: string; paid_from_name?: string; paid_note?: string; category?: string; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
 
 const ROLE_KEY = "dd_statements_role";
@@ -92,6 +95,14 @@ export default function StatementsPage() {
   const [cType, setCType] = useState("Patient refund");
   const [cEditId, setCEditId] = useState<string | null>(null);   // a hand-entered check being edited
   const [chkType, setChkType] = useState("");
+  const [checkDocs, setCheckDocs] = useState<CheckDoc[]>([]);
+  const [checkInvoices, setCheckInvoices] = useState<CheckInvoice[]>([]);
+  const [openCheck, setOpenCheck] = useState<string | null>(null);   // the check whose files panel is open
+  const [attKind, setAttKind] = useState("invoice");
+  const [attNote, setAttNote] = useState("");
+  const [linkInvId, setLinkInvId] = useState("");
+  const [staffNames, setStaffNames] = useState<string[]>([]);
+  const [cPayeeOther, setCPayeeOther] = useState(false);
   const [pending, setPending] = useState<FileRow[]>([]);   // every unpaid invoice, across all months
   // Vendor directory
   const [vendorsAll, setVendorsAll] = useState<{ id: string; name: string; category: string; active: boolean; expectsStatement: boolean }[]>([]);
@@ -107,7 +118,6 @@ export default function StatementsPage() {
   // Invoices (a separate list from the monthly statements)
   const [tab, setTab] = useState<"statements" | "invoices" | "checks" | "package">("statements");
   const [invMonth, setInvMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [invBy, setInvBy] = useState<"dated" | "paid">("dated");   // list a month by invoice date, or by the date it was paid
   const [invFiles, setInvFiles] = useState<FileRow[]>([]);
   const [invVendors, setInvVendors] = useState<{ id: string; name: string; category: string }[]>([]);
   const [invSearch, setInvSearch] = useState("");
@@ -298,9 +308,14 @@ export default function StatementsPage() {
     const r = await api("/api/statements/checks", { action: "list" });
     if (r.status === 401) { logout(); return; }
     if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load the check register."); return; }
-    setChecks(r.json.checks ?? []);
+    setChecks(r.json.checks ?? []); setCheckDocs(r.json.docs ?? []); setCheckInvoices(r.json.invoices ?? []);
   }, [role]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadChecks(); }, [loadChecks]);
+
+  useEffect(() => {
+    if (role !== "finance" || tab !== "checks") return;
+    loadStaff().then((list) => setStaffNames(list.filter((e) => !e.archived).map((e) => e.name).sort())).catch(() => {});
+  }, [role, tab]);
 
   const loadPending = useCallback(async () => {
     if (role !== "finance") return;
@@ -312,12 +327,12 @@ export default function StatementsPage() {
   const loadInvoices = useCallback(async () => {
     if (!role) return;
     setLoading(true); setLoadError("");
-    const r = await api("/api/statements/list", { docType: "invoice", month: invMonth, unpaid: unpaidOnly, by: invBy });
+    const r = await api("/api/statements/list", { docType: "invoice", month: invMonth, unpaid: unpaidOnly });
     setLoading(false);
     if (r.status === 401) { logout(); return; }
     if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load invoices."); return; }
     setInvFiles(r.json.files ?? []); setInvVendors(r.json.vendors ?? []); setUsedCategories(r.json.categories ?? []); setVendorsAll(r.json.vendorsAll ?? []); setUsedNames(r.json.usedNames ?? []);
-  }, [role, invMonth, unpaidOnly, invBy]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [role, invMonth, unpaidOnly]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (tab === "invoices") loadInvoices(); }, [tab, loadInvoices]);
   // Anything that changes an invoice also refreshes the warning.
   useEffect(() => { if (role === "finance") loadPending(); }, [invFiles]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -374,7 +389,6 @@ export default function StatementsPage() {
     if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't record the invoice."); return; }
     setMsg(`Filed invoice ${iNumber.trim()} from ${name}.`);
     const filedMonth = iDate.slice(0, 7);
-    if (invBy === "paid") setInvBy("dated");   // a new invoice is unpaid, so show the view where it will appear
     // Clear the whole form so the next invoice starts fresh.
     setIVendor(""); setIDate(new Date().toISOString().slice(0, 10)); setINumber(""); setIAmount(""); setICategory(""); setIMatch(null); setNvName("");
     if (!unpaidOnly && filedMonth !== invMonth) setInvMonth(filedMonth); else loadInvoices();
@@ -601,6 +615,103 @@ export default function StatementsPage() {
     setCAccount(c.account_id ?? ""); setCNumber(c.check_number); setCDate(c.check_date); setCPayee(c.payee); setCAmount(c.amount != null ? String(c.amount) : "");
     setCMemo(c.memo); setCType(c.category || "Other");
   }
+  async function attachToCheck(c: CheckRow, file: File) {
+    setMsg("");
+    if (!/\.pdf$/i.test(file.name)) { setMsg("Only PDF files can be attached."); return; }
+    setBusy(true);
+    const slot = await api("/api/statements/upload-url", { docType: "check", checkId: c.id, fileName: file.name, size: file.size });
+    if (!slot.ok) { setBusy(false); setMsg(slot.json.error ?? "Couldn't start the upload."); return; }
+    const up = await supabase.storage.from("statements").uploadToSignedUrl(slot.json.path, slot.json.token, file, { contentType: "application/pdf" });
+    if (up.error) { setBusy(false); setMsg(`Upload failed: ${up.error.message}`); return; }
+    const rec = await api("/api/statements/checks", { action: "attachDoc", checkId: c.id, path: slot.json.path, fileName: file.name, size: file.size, kind: attKind, note: attNote });
+    setBusy(false);
+    if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't attach the file."); return; }
+    setAttNote(""); setMsg(`Attached ${file.name} to check #${c.check_number}.`); loadChecks();
+  }
+  async function removeCheckDoc(d: CheckDoc) {
+    if (!window.confirm(`Remove ${d.file_name} from this check? This can't be undone.`)) return;
+    const r = await api("/api/statements/checks", { action: "removeDoc", id: d.id });
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't remove."); return; }
+    loadChecks();
+  }
+  async function downloadCheckDoc(d: CheckDoc) {
+    const r = await api("/api/statements/download-url", { id: d.id, source: "check" });
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't create the download link."); return; }
+    const a = document.createElement("a"); a.href = r.json.url; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+  }
+  async function linkInvoiceToCheck(c: CheckRow) {
+    if (!linkInvId) { setMsg("Choose an invoice to link."); return; }
+    const inv = pending.find((x) => x.id === linkInvId);
+    if (inv && c.amount != null && inv.amount != null && Math.abs(Number(inv.amount) - Number(c.amount)) > 0.004
+        && !window.confirm(`The invoice is ${money(inv.amount)} but the check is ${money(c.amount)}. Link them anyway?`)) return;
+    setBusy(true);
+    const r = await api("/api/statements/checks", { action: "linkInvoice", checkId: c.id, invoiceId: linkInvId });
+    setBusy(false);
+    if (!r.ok) { setMsg(r.json.error ?? "Couldn't link the invoice."); return; }
+    setLinkInvId(""); setMsg("Invoice linked and marked paid by this check."); loadChecks(); loadPending(); loadInvoices();
+  }
+
+  // The files panel under a check: its attachments, the invoices it paid, and (for finance) attach / link.
+  function renderCheckPanel(c: CheckRow) {
+    const docs = checkDocs.filter((d) => d.check_id === c.id);
+    const paidInv = checkInvoices.filter((i) => i.paid_from_id === c.account_id && i.paid_check_number === c.check_number);
+    const kindLabel: Record<string, string> = { invoice: "Invoice", statement: "Statement", other: "Other" };
+    return (
+      <tr key={`${c.id}-panel`} className="border-b border-slate-100">
+        <td colSpan={10} className="px-4 py-3" style={{ background: "#f8fafc" }}>
+          <div className="space-y-3">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Attached files</p>
+              {docs.length === 0 && <p className="text-xs text-slate-400">Nothing attached.</p>}
+              {docs.map((d) => (
+                <div key={d.id} className="flex items-center gap-3 text-sm py-0.5">
+                  <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "#e2e8f0", color: "#475569" }}>{kindLabel[d.doc_kind] ?? "Other"}</span>
+                  <span className="flex-1 min-w-0 truncate text-slate-700">{d.file_name}{d.note ? <span className="text-xs text-slate-400"> · {d.note}</span> : null}</span>
+                  <button onClick={() => downloadCheckDoc(d)} className="rounded px-2.5 py-0.5 text-xs font-semibold text-white" style={{ backgroundColor: "#0f766e" }}>Download</button>
+                  {finance && <button onClick={() => removeCheckDoc(d)} className="text-xs text-red-400 hover:text-red-600 hover:underline">Remove</button>}
+                </div>
+              ))}
+            </div>
+            {paidInv.length > 0 && (
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Invoices paid by this check</p>
+                {paidInv.map((i) => <p key={i.id} className="text-sm text-slate-700">{i.account_name} · #{i.invoice_number} · {money(i.amount)}</p>)}
+              </div>
+            )}
+            {finance && c.status !== "void" && (
+              <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Attach a PDF</p>
+                  <div className="flex items-center gap-2">
+                    <select value={attKind} onChange={(e) => setAttKind(e.target.value)} className="rounded border border-slate-200 bg-white px-1.5 py-1.5 text-xs focus:outline-none">
+                      <option value="invoice">Invoice copy</option><option value="statement">Statement</option><option value="other">Other (refund approval, check scan…)</option>
+                    </select>
+                    <input value={attNote} onChange={(e) => setAttNote(e.target.value)} placeholder="Note (optional)" className="rounded border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" style={{ width: 150 }} />
+                    <label className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white cursor-pointer hover:opacity-90" style={{ backgroundColor: "#e8622a", opacity: busy ? 0.5 : 1 }}>
+                      {busy ? "Working…" : "Choose PDF"}
+                      <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) attachToCheck(c, f); }} />
+                    </label>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Link an invoice already filed</p>
+                  <div className="flex items-center gap-2">
+                    <select value={linkInvId} onChange={(e) => setLinkInvId(e.target.value)} className="rounded border border-slate-200 bg-white px-1.5 py-1.5 text-xs focus:outline-none" style={{ maxWidth: 300 }}>
+                      <option value="">Choose an unpaid invoice…</option>
+                      {pending.map((i) => <option key={i.id} value={i.id}>{i.account_name} · #{i.invoice_number} · {money(i.amount)}</option>)}
+                    </select>
+                    <button onClick={() => linkInvoiceToCheck(c)} disabled={busy || !linkInvId} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" style={{ backgroundColor: "#0f766e" }}>Link and mark paid</button>
+                  </div>
+                  {!c.account_id && <p className="text-[11px] text-amber-700 mt-1">Edit this check and choose its bank account first.</p>}
+                </div>
+              </div>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
   async function setCheckStatus(c: CheckRow, status: string) {
     setChecks((list) => list.map((x) => (x.id === c.id ? { ...x, status: status as CheckRow["status"] } : x)));
     const r = await api("/api/statements/checks", { action: "setStatus", id: c.id, status });
@@ -706,10 +817,6 @@ export default function StatementsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <label className="text-sm font-semibold text-slate-600">Month</label>
           <input type="month" value={invMonth} onChange={(e) => e.target.value && setInvMonth(e.target.value)} disabled={unpaidOnly} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none disabled:opacity-40" />
-          <select value={invBy} onChange={(e) => setInvBy(e.target.value as "dated" | "paid")} disabled={unpaidOnly} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none disabled:opacity-40">
-            <option value="dated">Invoices dated this month</option>
-            <option value="paid">Invoices paid this month</option>
-          </select>
           {unpaidOnly && <span className="text-xs text-slate-500">Showing unpaid invoices from every month</span>}
           <input value={invSearch} onChange={(e) => setInvSearch(e.target.value)} placeholder="Search vendor or invoice #…" className="w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
           <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
@@ -838,18 +945,23 @@ export default function StatementsPage() {
               <table className="w-full text-sm border-collapse" style={{ minWidth: 640 }}>
                 <thead>
                   <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
-                    <th className="px-4 py-2 font-medium">{invBy === "paid" && !unpaidOnly ? "Paid on" : "Date"}</th><th className="px-2 py-2 font-medium">Vendor</th><th className="px-2 py-2 font-medium">Category</th><th className="px-2 py-2 font-medium">Invoice #</th>
+                    <th className="px-4 py-2 font-medium">Date</th><th className="px-2 py-2 font-medium">Vendor</th><th className="px-2 py-2 font-medium">Category</th><th className="px-2 py-2 font-medium">Invoice #</th>
                     <th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2" />
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-slate-400">{loading ? "Loading…" : invBy === "paid" && !unpaidOnly ? "No invoices were paid this month." : "No invoices filed for this month."}</td></tr>}
+                  {shown.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-slate-400">{loading ? "Loading…" : "No invoices dated or paid in this month."}</td></tr>}
                   {shown.map((f) => (
                     <tr key={f.id} className="border-b border-slate-50">
                       <td className="px-4 py-1.5 text-slate-600 whitespace-nowrap">
-                        {invBy === "paid" && !unpaidOnly && f.paid_date
-                          ? <>{new Date(f.paid_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}<span className="block text-[11px] text-slate-400">inv. {f.invoice_date ? new Date(f.invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}</span></>
-                          : (f.invoice_date ? new Date(f.invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—")}
+                        {f.invoice_date ? new Date(f.invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                        {!unpaidOnly && (() => {
+                          const datedHere = f.month === invMonth;
+                          const paidHere = !!f.paid && !!f.paid_date && f.paid_date.startsWith(invMonth);
+                          if (datedHere && f.paid && !paidHere && f.paid_date) return <span className="block text-[11px] text-slate-400">paid {new Date(f.paid_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>;
+                          if (!datedHere && paidHere) return <span className="block text-[11px] text-slate-400">paid this month</span>;
+                          return null;
+                        })()}
                       </td>
                       <td className="px-2 py-1.5 font-medium text-slate-700">{f.account_name}</td>
                       <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">
@@ -883,20 +995,32 @@ export default function StatementsPage() {
                   <tfoot>
                     <tr className="border-t-2 border-slate-200 font-semibold text-slate-700">
                       <td className="px-4 py-2" colSpan={4}>{shown.length} invoice{shown.length === 1 ? "" : "s"}</td>
-                      <td className="px-2 py-2 whitespace-nowrap" colSpan={3}>{withAmount > 0 ? `$${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""}{withAmount > 0 && withAmount < shown.length ? ` (${withAmount} with amounts)` : ""}</td>
+                      <td className="px-2 py-2 whitespace-nowrap" colSpan={3}>{unpaidOnly && withAmount > 0 ? `$${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""}</td>
                     </tr>
                   </tfoot>
                 )}
               </table>
               {(() => {
-                const by = shown.reduce<Record<string, number>>((m, f) => { const k = f.category || "Uncategorized"; m[k] = (m[k] ?? 0) + (f.amount ?? 0); return m; }, {});
-                const entries = Object.entries(by).filter(([, v]) => v !== 0).sort((a, z) => z[1] - a[1]);
-                return entries.length > 0 ? (
-                  <div className="flex flex-wrap gap-x-5 gap-y-1 px-4 py-2.5 border-t border-slate-100 text-xs text-slate-500">
-                    <span className="font-semibold text-slate-400">By category</span>
-                    {entries.map(([k, v]) => <span key={k}><span className="font-semibold text-slate-600">{k}</span> {money(v)}</span>)}
+                const sum = (list: FileRow[]) => list.reduce((n, f) => n + (f.amount ?? 0), 0);
+                const cats = (list: FileRow[]) => Object.entries(list.reduce<Record<string, number>>((m, f) => { const k = f.category || "Uncategorized"; m[k] = (m[k] ?? 0) + (f.amount ?? 0); return m; }, {}))
+                  .filter(([, v]) => v !== 0).sort((a, z) => z[1] - a[1]);
+                const monthName = new Date(invMonth + "-01T00:00:00").toLocaleDateString("en-US", { month: "long", year: "numeric" });
+                const line = (label: string, list: FileRow[], extra?: string) => (
+                  <div className="px-4 py-2 border-t border-slate-100 text-xs text-slate-500">
+                    <span className="font-semibold text-slate-700">{label}</span> · {list.length} invoice{list.length === 1 ? "" : "s"} · <span className="font-semibold text-slate-700">{money(sum(list))}</span>{extra}
+                    {cats(list).length > 0 && <span className="block mt-0.5">{cats(list).map(([k, v], i) => <span key={k}>{i > 0 && " · "}<span className="font-semibold text-slate-600">{k}</span> {money(v)}</span>)}</span>}
                   </div>
-                ) : null;
+                );
+                if (unpaidOnly) return shown.length > 0 ? line("Unpaid, all months", shown) : null;
+                const paidHere = shown.filter((f) => f.paid && f.paid_date && f.paid_date.startsWith(invMonth));
+                const datedHere = shown.filter((f) => f.month === invMonth);
+                const unpaidDated = datedHere.filter((f) => !f.paid).length;
+                return (
+                  <>
+                    {line(`Paid in ${monthName}`, paidHere)}
+                    {line(`Dated in ${monthName}`, datedHere, unpaidDated > 0 ? ` (${unpaidDated} unpaid)` : "")}
+                  </>
+                );
               })()}
             </div>
           );
@@ -966,7 +1090,21 @@ export default function StatementsPage() {
                           <select value={cType} onChange={(e) => setCType(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
                             {CHECK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                           </select></div>
-                        <div style={{ flex: "1 1 160px" }}><label className="block text-xs font-semibold text-slate-500 mb-1">Payee</label><input value={cPayee} onChange={(e) => setCPayee(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
+                        <div style={{ flex: "1 1 180px" }}>
+                          <label className="block text-xs font-semibold text-slate-500 mb-1">{cType === "Payroll" ? "Employee" : "Payee"}</label>
+                          {cType === "Payroll" && staffNames.length > 0 ? (
+                            <>
+                              <select value={cPayeeOther ? "__other" : (staffNames.includes(cPayee) ? cPayee : "")} onChange={(e) => { if (e.target.value === "__other") { setCPayeeOther(true); setCPayee(""); } else { setCPayeeOther(false); setCPayee(e.target.value); } }} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+                                <option value="">Choose an employee…</option>
+                                {staffNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                                <option value="__other">Someone else (type a name)…</option>
+                              </select>
+                              {cPayeeOther && <input value={cPayee} onChange={(e) => setCPayee(e.target.value)} placeholder="Name" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />}
+                            </>
+                          ) : (
+                            <input value={cPayee} onChange={(e) => setCPayee(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+                          )}
+                        </div>
                         <div><label className="block text-xs font-semibold text-slate-500 mb-1">Amount</label><input type="number" step="0.01" value={cAmount} onChange={(e) => setCAmount(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 110 }} /></div>
                         <div style={{ flex: "1 1 160px" }}><label className="block text-xs font-semibold text-slate-500 mb-1">Memo</label><input value={cMemo} onChange={(e) => setCMemo(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
                         <button onClick={() => addCheck()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>{cEditId ? "Save changes" : "Add"}</button>
@@ -983,14 +1121,15 @@ export default function StatementsPage() {
                   <thead>
                     <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
                       <th className="px-4 py-2 font-medium">Check #</th><th className="px-2 py-2 font-medium">Date</th><th className="px-2 py-2 font-medium">Account</th>
-                      <th className="px-2 py-2 font-medium">Payee</th><th className="px-2 py-2 font-medium">Type</th><th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Memo</th>
+                      <th className="px-2 py-2 font-medium">Payee</th><th className="px-2 py-2 font-medium">Type</th><th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Memo</th><th className="px-2 py-2 font-medium">Files</th>
                       <th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2" />
                     </tr>
                   </thead>
                   <tbody>
-                    {shown.length === 0 && <tr><td colSpan={9} className="px-4 py-6 text-slate-400">{checks.length === 0 ? "No checks logged yet." : "No checks match."}</td></tr>}
+                    {shown.length === 0 && <tr><td colSpan={10} className="px-4 py-6 text-slate-400">{checks.length === 0 ? "No checks logged yet." : "No checks match."}</td></tr>}
                     {shown.map((c) => (
-                      <tr key={c.id} className="border-b border-slate-50" style={{ opacity: c.status === "void" ? 0.5 : 1 }}>
+                      <Fragment key={c.id}>
+                      <tr className="border-b border-slate-50" style={{ opacity: c.status === "void" ? 0.5 : 1 }}>
                         <td className="px-4 py-1.5 font-semibold text-slate-700 whitespace-nowrap">#{c.check_number}</td>
                         <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">{new Date(c.check_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}</td>
                         <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">{c.account_name || "—"}</td>
@@ -998,6 +1137,11 @@ export default function StatementsPage() {
                         <td className="px-2 py-1.5 text-xs text-slate-500 whitespace-nowrap">{c.category || "—"}</td>
                         <td className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{c.amount != null ? money(c.amount) : "—"}</td>
                         <td className="px-2 py-1.5 text-xs text-slate-500">{c.memo}</td>
+                        <td className="px-2 py-1.5 text-xs whitespace-nowrap">
+                          {(() => { const n = checkDocs.filter((d) => d.check_id === c.id).length; return (
+                            <button onClick={() => setOpenCheck(openCheck === c.id ? null : c.id)} disabled={!finance && n === 0 && !checkInvoices.some((i) => i.paid_from_id === c.account_id && i.paid_check_number === c.check_number)} className="font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-30">📎 {n > 0 ? n : finance ? "Attach" : "—"}</button>
+                          ); })()}
+                        </td>
                         <td className="px-2 py-1.5 text-xs whitespace-nowrap">
                           {finance ? (
                             <select value={c.status} onChange={(e) => setCheckStatus(c, e.target.value)} className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none">
@@ -1010,6 +1154,8 @@ export default function StatementsPage() {
                           {finance && <button onClick={() => deleteCheck(c)} className="text-xs text-red-400 hover:text-red-600 hover:underline">Delete</button>}
                         </td>
                       </tr>
+                      {openCheck === c.id && renderCheckPanel(c)}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>

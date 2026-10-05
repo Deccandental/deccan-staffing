@@ -18,13 +18,13 @@ export async function POST(req: NextRequest) {
   if (body.docType === "invoice") {
     const month = MONTH_RE.test(String(body.month)) ? String(body.month) : new Date().toISOString().slice(0, 7);
     const [inv, sources] = await Promise.all([
-      // "unpaid" lists every month's unpaid invoices; otherwise one month's invoices.
+      // "unpaid" lists every month's unpaid invoices; otherwise the month's invoices (dated or paid in it).
       body.unpaid
         ? supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("paid", false).order("invoice_date", { ascending: true }).limit(1000)
-        : body.by === "paid"
-          // Invoices PAID in this month, whatever month they're dated: the view that matches how the CPA works.
-          ? supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("paid", true).gte("paid_date", `${month}-01`).lt("paid_date", nextMonthStart(month)).order("paid_date", { ascending: true })
-          : supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("month", month).order("invoice_date", { ascending: true }),
+        // Everything that belongs to the month: invoices dated in it, plus invoices paid in it (even if dated earlier).
+        : supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice")
+            .or(`month.eq.${month},and(paid.eq.true,paid_date.gte.${month}-01,paid_date.lt.${nextMonthStart(month)})`)
+            .order("invoice_date", { ascending: true }),
       supabaseAdmin.from("statement_sources").select("*").order("name"),
     ]);
     if (inv.error) return NextResponse.json({ error: "Invoices aren't set up yet (run the invoices SQL)." }, { status: 500 });

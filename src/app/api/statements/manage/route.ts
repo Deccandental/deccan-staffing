@@ -203,9 +203,19 @@ export async function POST(req: NextRequest) {
         if ((linkedRows ?? []).length > 0) await supabaseAdmin.from("check_register").update(checkFields).eq("id", linkedRows![0].id);
         else await supabaseAdmin.from("check_register").insert({ ...checkFields, invoice_id: id, created_by: whoIs(acc.session) });
       } else {
-        // No longer a check (the payment was undone, or changed to another method): the old check is voided.
-        // The number stays on the register as used.
-        for (const c of linkedRows ?? []) await supabaseAdmin.from("check_register").update({ status: "void", memo: `${c.memo} (${paid ? "payment method changed" : "payment undone"})`.trim() }).eq("id", c.id);
+        // No longer a check (the payment was undone, or changed to another method): the old check is voided,
+        // unless another invoice was paid with the same check. The number stays on the register as used.
+        for (const c of linkedRows ?? []) {
+          const { data: chk } = await supabaseAdmin.from("check_register").select("account_id, check_number").eq("id", c.id).maybeSingle();
+          let shared = false;
+          if (chk?.account_id) {
+            const { data: others } = await supabaseAdmin.from("statement_files").select("id").eq("doc_type", "invoice").eq("paid", true).eq("paid_method", "check")
+              .eq("paid_from_id", chk.account_id).eq("paid_check_number", chk.check_number).neq("id", id).limit(1);
+            shared = (others ?? []).length > 0;
+          }
+          if (shared) await supabaseAdmin.from("check_register").update({ invoice_id: null }).eq("id", c.id);
+          else await supabaseAdmin.from("check_register").update({ status: "void", memo: `${c.memo} (${paid ? "payment method changed" : "payment undone"})`.trim() }).eq("id", c.id);
+        }
       }
       return NextResponse.json({ data: null });
     }

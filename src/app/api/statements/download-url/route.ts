@@ -8,12 +8,13 @@ export async function POST(req: NextRequest) {
   if (!acc) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
   const b = await req.json().catch(() => ({}));
-  const { data: row } = await supabaseAdmin.from("statement_files").select("id, file_path, file_name").eq("id", String(b.id ?? "")).maybeSingle();
+  const table = b.source === "check" ? "check_documents" : "statement_files";
+  const { data: row } = await supabaseAdmin.from(table).select("id, file_path, file_name").eq("id", String(b.id ?? "")).maybeSingle();
   if (!row || !row.file_path) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
   const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(row.file_path, 60, { download: row.file_name || true });
   if (error || !data) return NextResponse.json({ error: error?.message ?? "Couldn't create the link." }, { status: 500 });
 
-  await supabaseAdmin.from("statement_downloads").insert({ file_id: row.id, file_path: row.file_path, who: whoIs(acc.session), role: acc.role });
+  await supabaseAdmin.from("statement_downloads").insert({ file_id: b.source === "check" ? null : row.id, file_path: row.file_path, who: whoIs(acc.session), role: acc.role });
   return NextResponse.json({ url: data.signedUrl });
 }
