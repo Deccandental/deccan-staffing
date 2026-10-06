@@ -227,6 +227,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ data: null });
     }
 
+    if (b.action === "editInvoice") {
+      const id = String(b.id ?? "");
+      const invoiceDate = String(b.invoiceDate ?? "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)) return NextResponse.json({ error: "Enter a valid invoice date." }, { status: 400 });
+      const amount = toAmount(b.amount);
+      if (amount == null) return NextResponse.json({ error: "Enter the amount." }, { status: 400 });
+      const invoiceNumber = String(b.invoiceNumber ?? "").trim().slice(0, 60);
+      if (!invoiceNumber) return NextResponse.json({ error: "Enter the invoice number." }, { status: 400 });
+      const { data: cur } = await supabaseAdmin.from("statement_files").select("id, doc_type, account_id, account_name").eq("id", id).maybeSingle();
+      if (!cur || cur.doc_type !== "invoice") return NextResponse.json({ error: "Not found." }, { status: 404 });
+
+      // The vendor stays as it is unless a different one is chosen.
+      let accountId = String(cur.account_id ?? ""), accountName = String(cur.account_name ?? "");
+      const vendorChanged = !!b.accountId && String(b.accountId) !== accountId;
+      if (vendorChanged) {
+        const { data: src } = await supabaseAdmin.from("statement_sources").select("id, name").eq("id", String(b.accountId)).maybeSingle();
+        if (!src) return NextResponse.json({ error: "Vendor not found." }, { status: 404 });
+        accountId = String(src.id); accountName = String(src.name);
+      }
+
+      // Duplicate check against the OTHER invoices from this vendor (an invoice is never a duplicate of itself).
+      const { data: others } = await supabaseAdmin.from("statement_files").select(COLS).eq("doc_type", "invoice").neq("id", id).limit(5000);
+      const matches = (others ?? []).filter((r: any) => String(r.account_id) === accountId).map((r: any) => {
+        const sameNo = String(r.invoice_number ?? "").trim().toLowerCase() === invoiceNumber.toLowerCase();
+        const sameDateAmt = r.invoice_date === invoiceDate && Number(r.amount) === amount;
+        return sameNo || sameDateAmt ? { ...r, reason: sameNo ? "the same invoice number" : "the same date and amount" } : null;
+      }).filter(Boolean);
+      if (matches.length > 0 && b.ignoreDup !== true) return NextResponse.json({ error: "duplicate", matches }, { status: 409 });
+
+      // An invoice's month always comes from its own date. The PDF itself is not moved or changed.
+      const { data: updated, error } = await supabaseAdmin.from("statement_files").update({
+        invoice_date: invoiceDate, month: invoiceDate.slice(0, 7), invoice_number: invoiceNumber, amount, dup_ignored: matches.length > 0,
+        ...(vendorChanged ? { account_kind: "vendor", account_id: accountId, account_name: accountName } : {}),
+      }).eq("id", id).eq("doc_type", "invoice").select(COLS).single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+      // A check already logged for this invoice follows the correction. A check that has already cleared the bank keeps its amount.
+      await supabaseAdmin.from("check_register").update({ payee: accountName, memo: `Invoice ${invoiceNumber}` }).eq("invoice_id", id).neq("status", "void");
+      await supabaseAdmin.from("check_register").update({ amount }).eq("invoice_id", id).eq("status", "outstanding");
+      return NextResponse.json({ data: updated });
+    }
+
     if (b.action === "remove") {
       const { data: row } = await supabaseAdmin.from("statement_files").select("id, file_path").eq("id", String(b.id)).maybeSingle();
       if (!row) return NextResponse.json({ error: "Not found." }, { status: 404 });
