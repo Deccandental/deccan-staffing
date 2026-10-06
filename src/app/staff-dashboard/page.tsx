@@ -34,7 +34,7 @@ import { formatMoney } from "@/lib/format";
 import { loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
 import { hygieneYear, hygieneYearDetail, HygienePeriodRow } from "@/lib/compOwed";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
-import ReviewBanner from "@/components/ReviewBanner";
+import { getSessionToken } from "@/lib/secureData";
 
 const REASON_LABELS: Record<string, string> = {
   sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other",
@@ -93,6 +93,19 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const isManager = identity.canAdmin;
   const [staff, setStaff] = useState<Employee[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(identity.mode === "staff" ? (identity.employeeId ?? null) : null);
+  // Documents this person has been asked to review and hasn't yet (shown as a chip with the other warnings).
+  const [reviewCounts, setReviewCounts] = useState<{ pending: number; overdue: number }>({ pending: 0, overdue: 0 });
+  useEffect(() => {
+    setReviewCounts({ pending: 0, overdue: 0 });
+    if (selectedId == null) return;
+    const own = identity.mode === "staff" && identity.employeeId === selectedId;
+    let cancelled = false;
+    fetch(own ? "/api/reviews/mine" : "/api/reviews/admin", {
+      method: "POST", headers: { "Content-Type": "application/json", "x-session-token": getSessionToken() },
+      body: JSON.stringify(own ? { action: "count" } : { action: "countFor", employeeId: selectedId }),
+    }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (!cancelled && j && typeof j.pending === "number") setReviewCounts({ pending: j.pending, overdue: j.overdue ?? 0 }); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedId, identity]);
   // Compensation is visible on your OWN dashboard always, but on someone
   // else's only to people with payroll permission. Plain canAdmin lets a
   // manager view other dashboards (schedules, certs, leave) without that
@@ -501,8 +514,6 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
           )}
         </header>
 
-        <ReviewBanner show={identity.mode === "staff" && identity.employeeId != null && identity.employeeId === selectedId} />
-
         {selectedId == null ? (
           <div className="rounded-2xl bg-white p-10 text-center shadow max-w-lg">
             <p className="text-slate-400">Select a staff member above to view their dashboard.</p>
@@ -565,7 +576,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
             <div className="grid gap-5 lg:grid-cols-3">
 
-            {(missingOrExpiredCertCount > 0 || pendingPolicies.length > 0 || pendingRsvpCount > 0 || checkinDue || checkinUpcoming) && (
+            {(missingOrExpiredCertCount > 0 || pendingPolicies.length > 0 || pendingRsvpCount > 0 || checkinDue || checkinUpcoming || reviewCounts.pending > 0) && (
               <div className="lg:col-span-3 flex flex-wrap gap-3">
                 {missingOrExpiredCertCount > 0 && (
                   <a href="#certifications-card" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
@@ -586,6 +597,15 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       {pendingRsvpCount} event{pendingRsvpCount !== 1 ? "s" : ""} awaiting {viewingOwnDashboard ? "your" : "their"} rsvp
                     </span>
                   </button>
+                )}
+                {reviewCounts.pending > 0 && (
+                  <a href={viewingOwnDashboard ? "/review" : "/review-admin"} className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90"
+                    style={reviewCounts.overdue > 0 ? { background: "#FCEBEB", border: "1.5px solid #E24B4A" } : { background: "#FAEEDA", border: "1.5px solid #D9891A" }}>
+                    <span style={{ fontSize: 18 }}>📄</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: reviewCounts.overdue > 0 ? "#A32D2D" : "#854F0B", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
+                      {reviewCounts.pending} document{reviewCounts.pending !== 1 ? "s" : ""} to review{reviewCounts.overdue > 0 ? ` · ${reviewCounts.overdue} past due` : ""}
+                    </span>
+                  </a>
                 )}
                 {pendingPolicies.length > 0 && (
                   <a href="/handbook" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>

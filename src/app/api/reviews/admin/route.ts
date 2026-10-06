@@ -32,6 +32,17 @@ export async function POST(req: NextRequest) {
   const by = session.mode === "super" ? "Manager passcode" : (session.employeeName ?? "Admin");
 
   try {
+    if (b.action === "countFor") {
+      const id = Number(b.employeeId);
+      if (!Number.isFinite(id)) return NextResponse.json({ error: "Bad request." }, { status: 400 });
+      const { data: waiting } = await supabaseAdmin.from("review_assignments").select("doc_id").eq("employee_id", id).is("reviewed_at", null);
+      const ids = (waiting ?? []).map((a: any) => a.doc_id);
+      if (ids.length === 0) return NextResponse.json({ pending: 0, overdue: 0 });
+      const { data: docs } = await supabaseAdmin.from("review_docs").select("id, due_date").in("id", ids).eq("closed", false);
+      const today = new Date().toISOString().slice(0, 10);
+      return NextResponse.json({ pending: (docs ?? []).length, overdue: (docs ?? []).filter((d: any) => d.due_date && d.due_date < today).length });
+    }
+
     if (b.action === "upload-url") {
       const name = String(b.fileName ?? "");
       if (!/\.pdf$/i.test(name)) return NextResponse.json({ error: "Only PDF files can be sent." }, { status: 400 });
