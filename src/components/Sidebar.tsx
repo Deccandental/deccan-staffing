@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 
 import { loadLatestBalances, loadCashAccounts } from "@/lib/cashflow";
 import { supabase } from "@/lib/supabase";
+import { getSessionToken } from "@/lib/secureData";
 
 // Kept as a raw string (not imported from AppIdentityGate) to avoid a
 // circular import, since AppIdentityGate itself renders <Sidebar />.
@@ -127,6 +128,16 @@ function usePendingSignature(identity: StoredIdentity | null): boolean {
 
 function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   const identity = useIdentity();
+  const [reviewCount, setReviewCount] = useState(0);   // documents waiting for this person to review
+  useEffect(() => {
+    if (identity?.mode !== "staff" || identity.employeeId == null) { setReviewCount(0); return; }
+    let cancelled = false;
+    fetch("/api/reviews/mine", { method: "POST", headers: { "Content-Type": "application/json", "x-session-token": getSessionToken() }, body: JSON.stringify({ action: "count" }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled && j && typeof j.pending === "number") setReviewCount(j.pending); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [identity]);
   const lowBalanceWarning = useLowBalanceWarning(identity);
   const pendingSignature = usePendingSignature(identity);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set(["Admin", "Finances"]));
@@ -198,6 +209,9 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
               >
                 <span className="text-base leading-none w-5 text-center flex-shrink-0" style={{ opacity: accessible ? 1 : 0.4 }}>{item.icon}</span>
                 <span className="flex-1">{item.label}</span>
+                {item.href === "/review" && reviewCount > 0 && (
+                  <span className="text-[10px] font-bold rounded-full px-1.5 py-0.5 flex-shrink-0" style={{ background: "#dc2626", color: "#fff" }} title="Documents waiting for your review">{reviewCount}</span>
+                )}
                 {item.href === "/cashflow" && lowBalanceWarning && (
                   <span className="text-xs flex-shrink-0" title="Cash balance is low">🚨</span>
                 )}

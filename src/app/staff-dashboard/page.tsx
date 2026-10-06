@@ -34,6 +34,7 @@ import { formatMoney } from "@/lib/format";
 import { loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
 import { hygieneYear, hygieneYearDetail, HygienePeriodRow } from "@/lib/compOwed";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
+import ReviewBanner from "@/components/ReviewBanner";
 
 const REASON_LABELS: Record<string, string> = {
   sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other",
@@ -499,6 +500,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             </div>
           )}
         </header>
+
+        <ReviewBanner show={identity.mode === "staff" && identity.employeeId != null && identity.employeeId === selectedId} />
 
         {selectedId == null ? (
           <div className="rounded-2xl bg-white p-10 text-center shadow max-w-lg">

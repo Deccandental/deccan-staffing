@@ -21,6 +21,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ items });
     }
 
+    if (b.action === "count") {
+      const { data: waiting } = await supabaseAdmin.from("review_assignments").select("doc_id").eq("employee_id", session.employeeId).is("reviewed_at", null);
+      const ids = (waiting ?? []).map((a: any) => a.doc_id);
+      if (ids.length === 0) return NextResponse.json({ pending: 0, overdue: 0 });
+      const { data: docs } = await supabaseAdmin.from("review_docs").select("id, due_date").in("id", ids).eq("closed", false);
+      const today = new Date().toISOString().slice(0, 10);
+      return NextResponse.json({ pending: (docs ?? []).length, overdue: (docs ?? []).filter((d: any) => d.due_date && d.due_date < today).length });
+    }
+
     // Look up an assignment that belongs to THIS person; anything else is refused.
     const { data: a } = await supabaseAdmin.from("review_assignments").select("*").eq("id", String(b.assignmentId ?? "")).eq("employee_id", session.employeeId).maybeSingle();
     if (!a) return NextResponse.json({ error: "Not found." }, { status: 404 });
