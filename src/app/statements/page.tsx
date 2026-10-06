@@ -85,6 +85,13 @@ export default function StatementsPage() {
   const [payMethod, setPayMethod] = useState<"check" | "ach" | "card" | "other">("check");
   const [payCheckNo, setPayCheckNo] = useState("");
   const [payEditing, setPayEditing] = useState(false);
+  // Edit an invoice itself (vendor, date, number, amount)
+  const [editInv, setEditInv] = useState<FileRow | null>(null);
+  const [eVendor, setEVendor] = useState("");
+  const [eDate, setEDate] = useState("");
+  const [eNumber, setENumber] = useState("");
+  const [eAmount, setEAmount] = useState("");
+  const [eError, setEError] = useState("");
   // Check register
   const [checks, setChecks] = useState<CheckRow[]>([]);
   const [chkAccount, setChkAccount] = useState("");
@@ -464,6 +471,33 @@ export default function StatementsPage() {
     loadInvoices(); loadChecks();
   }
 
+  function openEditInvoice(f: FileRow) {
+    setEError("");
+    setEVendor(f.account_id); setEDate(f.invoice_date ?? ""); setENumber(f.invoice_number ?? ""); setEAmount(f.amount != null ? String(f.amount) : "");
+    setEditInv(f);
+  }
+  async function saveEditInvoice(ignoreDup = false) {
+    if (!editInv) return;
+    if (!eDate) { setEError("Enter the invoice date."); return; }
+    if (!eNumber.trim()) { setEError("Enter the invoice number."); return; }
+    if (eAmount.trim() === "" || isNaN(Number(eAmount))) { setEError("Enter the invoice amount."); return; }
+    setBusy(true); setEError("");
+    const r = await api("/api/statements/manage", { action: "editInvoice", id: editInv.id, accountId: eVendor, invoiceDate: eDate, invoiceNumber: eNumber, amount: eAmount, ignoreDup });
+    setBusy(false);
+    if (r.status === 409 && r.json.error === "duplicate") {
+      const m = (r.json.matches ?? [])[0];
+      if (window.confirm(`This looks like a duplicate of ${m?.account_name ?? "another invoice"} #${m?.invoice_number || "(no number)"} (${m?.reason ?? "same details"}). Save it anyway?`)) saveEditInvoice(true);
+      return;
+    }
+    if (!r.ok) { setEError(r.json.error ?? "Couldn't save the changes."); return; }
+    const newMonth = eDate.slice(0, 7);
+    setEditInv(null);
+    setMsg(`Invoice ${eNumber.trim()} updated.`);
+    // If the date moved it into another month, show that month so it doesn't seem to vanish.
+    if (!unpaidOnly && newMonth !== invMonth) setInvMonth(newMonth); else loadInvoices();
+    loadPending(); loadChecks();
+  }
+
   async function newCategory(): Promise<string> {
     const c = (window.prompt("New category name:") ?? "").trim().slice(0, 40);
     if (c) setUsedCategories((u) => (u.includes(c) ? u : [...u, c]));
@@ -803,6 +837,41 @@ export default function StatementsPage() {
     </div>
   );
 
+  const editInvDialog = editInv && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.35)" }}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-3">
+        <h3 className="font-bold text-slate-800">Edit invoice</h3>
+        <p className="text-xs text-slate-400">The PDF stays as filed.{editInv.paid ? " If it was paid by check, that check on the register is updated too (unless it has already cleared)." : ""}</p>
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">Vendor</label>
+          <select value={eVendor} onChange={(e) => setEVendor(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
+            {!invVendors.some((v) => v.id === eVendor) && <option value={eVendor}>{editInv.account_name}</option>}
+            {invVendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        </div>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="block text-xs font-semibold text-slate-500 mb-1">Invoice date</label>
+            <input type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs font-semibold text-slate-500 mb-1">Invoice #</label>
+            <input value={eNumber} onChange={(e) => setENumber(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1">Amount</label>
+          <input type="number" step="0.01" value={eAmount} onChange={(e) => setEAmount(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
+        </div>
+        {eError && <p className="text-sm font-semibold text-red-600">{eError}</p>}
+        <div className="flex items-center gap-3 pt-1">
+          <button onClick={() => saveEditInvoice()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>{busy ? "Saving…" : "Save changes"}</button>
+          <button onClick={() => setEditInv(null)} className="text-sm text-slate-400 hover:underline">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+
   const selAccount = sel ? accounts.find((a) => acctKey(a.kind, a.id) === sel.key) : null;
   const selFiles = selAccount && sel ? filesFor(selAccount.kind, selAccount.id, sel.month) : [];
   const monthLabel = (m: string) => `${MONTHS[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`;
@@ -834,6 +903,7 @@ export default function StatementsPage() {
       </div>
 
       {payDialog}
+      {editInvDialog}
       {pendingBanner}
 
       {tab === "invoices" ? (
@@ -1015,6 +1085,7 @@ export default function StatementsPage() {
                       </td>
                       <td className="px-2 py-1.5 text-right whitespace-nowrap">
                         <button onClick={() => download(f)} className="rounded-lg px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: "#0f766e" }}>Download</button>
+                        {finance && <button onClick={() => openEditInvoice(f)} disabled={busy} className="ml-3 text-xs text-slate-500 hover:underline">Edit invoice</button>}
                         {finance && <button onClick={() => removeInvoice(f)} disabled={busy} className="ml-3 text-xs text-red-500 hover:underline">Remove</button>}
                       </td>
                     </tr>
