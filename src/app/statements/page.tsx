@@ -3,6 +3,7 @@
 import { Fragment, useState, useEffect, useCallback } from "react";
 import type { DragEvent } from "react";
 import { Sidebar } from "@/components/Sidebar";
+import StatementsMonth from "@/components/StatementsMonth";
 import { supabase } from "@/lib/supabase";
 import { loadStaff } from "@/lib/staffStore";
 import { getSessionToken, storeSessionToken, clearSessionToken, hasSessionToken } from "@/lib/secureData";
@@ -646,7 +647,7 @@ export default function StatementsPage() {
         {pendingOld.length > 0 && <> — <strong>{pendingOld.length} more than 30 days old</strong> (oldest: {pendingOld[0].account_name}, {pendingOld[0].invoice_date ? new Date(pendingOld[0].invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""})</>}
         . They count in Need to collect until you mark them paid.
       </span>
-      <button onClick={() => { setTab("invoices"); setUnpaidOnly(true); }} className="underline font-semibold">Review unpaid</button>
+      <button onClick={() => setTab("statements")} className="underline font-semibold">Review unpaid</button>
     </div>
   );
 
@@ -878,254 +879,33 @@ export default function StatementsPage() {
 
   const content = (
     <div className="max-w-6xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Statements</h1>
-          <p className="text-sm text-slate-500">{finance ? "Upload each month's statements and tick them off. The CPA can view and download anything filed here." : "View and download any statement. This page is read-only."}</p>
+      {(tab !== "statements" || !finance) && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {tab !== "statements" ? (
+            <div>
+              <h1 className="text-2xl font-bold">Statements</h1>
+              <p className="text-sm text-slate-500">{finance ? "The check register and the month-end package for your CPA. The CPA can view and download anything filed." : "View and download any statement. This page is read-only."}</p>
+            </div>
+          ) : <span />}
+          {!finance && <button onClick={logout} className="text-sm text-slate-500 hover:underline">Log out</button>}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="flex items-center gap-2" style={{ visibility: tab === "statements" ? "visible" : "hidden" }}>
-            <button onClick={() => setYear((y) => y - 1)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm">←</button>
-            <span className="font-bold text-slate-700 w-14 text-center">{year}</span>
-            <button onClick={() => setYear((y) => y + 1)} disabled={year >= thisYear} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm disabled:opacity-40">→</button>
-          </span>
-          {!finance && <button onClick={logout} className="ml-2 text-sm text-slate-500 hover:underline">Log out</button>}
-        </div>
-      </div>
+      )}
 
       <div className="flex gap-2">
-        {(["statements", "invoices", "checks", "package"] as const).filter((t) => finance || t !== "package").map((t) => (
+        {(["statements", "checks", "package"] as const).filter((t) => finance || t !== "package").map((t) => (
           <button key={t} onClick={() => { setTab(t); setMsg(""); }} className="px-4 py-2 text-sm font-semibold rounded-lg border-2 transition"
             style={tab === t ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "white", color: "#475569", borderColor: "#cbd5e1" }}>
-            {t === "statements" ? "Monthly statements" : t === "invoices" ? "Invoices" : t === "checks" ? "Check register" : "CPA package"}
+            {t === "statements" ? "Statements" : t === "checks" ? "Check register" : "CPA package"}
           </button>
         ))}
       </div>
 
       {payDialog}
       {editInvDialog}
-      {pendingBanner}
+      {tab !== "statements" && pendingBanner}
 
-      {tab === "invoices" ? (
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm font-semibold text-slate-600">Month</label>
-          <input type="month" value={invMonth} onChange={(e) => e.target.value && setInvMonth(e.target.value)} disabled={unpaidOnly} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none disabled:opacity-40" />
-          {unpaidOnly && <span className="text-xs text-slate-500">Showing unpaid invoices from every month</span>}
-          <input value={invSearch} onChange={(e) => setInvSearch(e.target.value)} placeholder="Search vendor or invoice #…" className="w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
-          <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-            <option value="">All categories</option>
-            {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          {finance && <button onClick={() => setShowVendors((v) => !v)} className="text-sm font-semibold text-orange-500 hover:underline">{showVendors ? "Hide vendors" : "Vendors"}</button>}
-          <label className="flex items-center gap-1.5 text-sm text-slate-600"><input type="checkbox" checked={unpaidOnly} onChange={(e) => setUnpaidOnly(e.target.checked)} /> Unpaid only</label>
-        </div>
-        {loadError && <p className="text-sm text-red-600 font-semibold">⚠️ {loadError}</p>}
-
-        {finance && showVendors && (
-          <div className="rounded-2xl bg-white shadow px-5 py-3 space-y-1">
-            <h3 className="font-bold text-sm text-slate-700">Vendors</h3>
-            <p className="text-xs text-slate-500">Everyone you've saved for invoices. Vendors added here only send invoices, so they never appear on the monthly statement checklist.</p>
-            {vendorsAll.length === 0 && <p className="text-xs text-slate-400 pt-1">No vendors saved yet. Choose "+ Add a new vendor…" in the Add an invoice form.</p>}
-            {vendorsAll.map((v) => (
-              <div key={v.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm border-t border-slate-100 pt-1.5" style={{ opacity: v.active ? 1 : 0.5 }}>
-                <span className="font-medium text-slate-700 w-48 truncate">{v.name}{!v.active && <span className="ml-1 text-xs font-normal text-slate-400">retired</span>}</span>
-                <select value={v.category} onChange={(e) => updateVendor(v.id, { category: e.target.value })} className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none">
-                  <option>Lab</option><option>Supplier</option><option>Insurance</option><option>Other</option>
-                </select>
-                <button onClick={() => renameDirVendor(v)} className="text-xs text-slate-400 hover:text-slate-600" title="Rename">✎ Rename</button>
-                <button onClick={() => updateVendor(v.id, { active: !v.active })} className="text-xs text-slate-400 hover:text-slate-600">{v.active ? "Retire" : "Restore"}</button>
-                <select value="" onChange={(e) => { if (e.target.value) mergeVendor(v, e.target.value); }} className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs text-slate-500 focus:outline-none" title="Move everything filed under this vendor into another one">
-                  <option value="">Merge into…</option>
-                  {vendorsAll.filter((x) => x.id !== v.id).map((x) => <option key={x.id} value={x.id}>{x.name}{!x.active ? " (retired)" : ""}</option>)}
-                </select>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {finance && (
-          <div className="rounded-2xl bg-white shadow px-5 py-3">
-            {!invAdding ? (
-              <button onClick={() => setInvAdding(true)} className="text-sm font-semibold text-orange-500 hover:underline">+ Add an invoice</button>
-            ) : (
-              <div className="space-y-3 rounded-xl" {...dropProps("invoice", setIFile)} style={{ outline: dragOver === "invoice" ? "2px dashed #e8622a" : "none", outlineOffset: 6, background: dragOver === "invoice" ? "#fff7ed" : "transparent" }}>
-                <div className="flex flex-wrap items-end gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Vendor</label>
-                    <select value={iVendor} onChange={(e) => setIVendor(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" style={{ minWidth: 200 }}>
-                      <option value="">Choose a vendor…</option>
-                      {invVendors.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.category})</option>)}
-                      <option value="__new">+ Add a new vendor…</option>
-                    </select>
-                  </div>
-                  {iVendor === "__new" && (
-                    <>
-                      <div style={{ flex: "1 1 180px" }}>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">New vendor name</label>
-                        <input value={nvName} onChange={(e) => setNvName(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">Type</label>
-                        <select value={nvType} onChange={(e) => setNvType(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-                          <option>Lab</option><option>Supplier</option><option>Insurance</option><option>Other</option>
-                        </select>
-                      </div>
-                      <button onClick={addVendorHere} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>Add vendor</button>
-                      <button onClick={() => { setIVendor(""); setNvName(""); }} className="text-sm text-slate-400 hover:underline pb-2">Cancel</button>
-                    </>
-                  )}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Invoice date</label>
-                    <input type="date" value={iDate} onChange={(e) => setIDate(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Invoice # (required)</label>
-                    <input value={iNumber} onChange={(e) => setINumber(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 130 }} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Amount (required)</label>
-                    <input type="number" step="0.01" value={iAmount} onChange={(e) => setIAmount(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 120 }} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Category</label>
-                    <select value={iCategory} onChange={async (e) => { if (e.target.value === "__new") { const c = await newCategory(); if (c) setICategory(c); } else setICategory(e.target.value); }}
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" style={{ minWidth: 150 }}>
-                      <option value="">None</option>
-                      {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                      <option value="__new">+ New category…</option>
-                    </select>
-                  </div>
-                </div>
-                {iMatch ? (
-                  <div className="rounded-lg px-3 py-2 text-sm" style={{ background: "#dbeafe", color: "#1e4e8c" }}>
-                    Linked to scheduled bill <strong>{iMatch.billName}</strong> (${iMatch.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}, due {new Date(iMatch.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}). It won't be counted twice in Need to collect.
-                    <button onClick={() => setIMatch(null)} className="ml-2 underline font-semibold">Unlink</button>
-                  </div>
-                ) : suggestions.length > 0 && (
-                  <div className="rounded-lg px-3 py-2 text-sm space-y-1" style={{ background: "#eef6ff", color: "#1e4e8c" }}>
-                    <p className="font-semibold">This may be a bill you've already scheduled:</p>
-                    {suggestions.map((sg) => (
-                      <p key={sg.bill.id}>
-                        {sg.bill.name} — ${sg.bill.estimatedAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}, due {new Date(sg.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                        {sg.diff != null && sg.diff <= 0.25 ? " (amount is close)" : sg.diff != null ? " (amount differs)" : ""}
-                        <button onClick={() => setIMatch({ billId: sg.bill.id, dueDate: sg.dueDate, billName: sg.bill.name, amount: sg.bill.estimatedAmount })} className="ml-2 underline font-semibold">Link this invoice to it</button>
-                      </p>
-                    ))}
-                  </div>
-                )}
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-50">
-                    Choose PDF
-                    <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={busy}
-                      onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setIFile(f); }} />
-                  </label>
-                  <span className="text-sm text-slate-500">
-                    {iFile ? <>📄 <strong className="text-slate-700">{iFile.name}</strong> <button onClick={() => setIFile(null)} className="ml-1 text-slate-400 hover:text-slate-600" title="Remove">✕</button></> : "or drag the invoice PDF anywhere on this form"}
-                  </span>
-                  <button onClick={() => (iFile ? addInvoice(iFile) : setMsg("Drop or choose the invoice PDF first."))} disabled={busy}
-                    className="rounded-lg px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>{busy ? "Working…" : "File invoice"}</button>
-                  <button onClick={() => setInvAdding(false)} className="text-sm text-slate-400 hover:underline">Close</button>
-                </div>
-              </div>
-            )}
-            {dupBanner && <div className="mt-3">{dupBanner}</div>}
-            {msg && <p className="text-sm font-semibold text-slate-600 mt-2">{msg}</p>}
-          </div>
-        )}
-
-        {(() => {
-          const q = invSearch.trim().toLowerCase();
-          const shown = invFiles.filter((f) => (!unpaidOnly || !f.paid) && (!catFilter || (f.category ?? "") === catFilter) && (!q || f.account_name.toLowerCase().includes(q) || (f.invoice_number ?? "").toLowerCase().includes(q)));
-          const total = shown.reduce((n, f) => n + (f.amount ?? 0), 0);
-          const withAmount = shown.filter((f) => f.amount != null).length;
-          return (
-            <div className="rounded-2xl bg-white shadow overflow-x-auto">
-              <table className="w-full text-sm border-collapse" style={{ minWidth: 640 }}>
-                <thead>
-                  <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
-                    <th className="px-4 py-2 font-medium">Date</th><th className="px-2 py-2 font-medium">Vendor</th><th className="px-2 py-2 font-medium">Category</th><th className="px-2 py-2 font-medium">Invoice #</th>
-                    <th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {shown.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-slate-400">{loading ? "Loading…" : "No invoices dated or paid in this month."}</td></tr>}
-                  {shown.map((f) => (
-                    <tr key={f.id} className="border-b border-slate-50">
-                      <td className="px-4 py-1.5 text-slate-600 whitespace-nowrap">
-                        {f.invoice_date ? new Date(f.invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
-                        {!unpaidOnly && (() => {
-                          const datedHere = f.month === invMonth;
-                          const paidHere = !!f.paid && !!f.paid_date && f.paid_date.startsWith(invMonth);
-                          if (datedHere && f.paid && !paidHere && f.paid_date) return <span className="block text-[11px] text-slate-400">paid {new Date(f.paid_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>;
-                          if (!datedHere && paidHere) return <span className="block text-[11px] text-slate-400">paid this month</span>;
-                          return null;
-                        })()}
-                      </td>
-                      <td className="px-2 py-1.5 font-medium text-slate-700">{f.account_name}</td>
-                      <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">
-                        {finance ? (
-                          <select value={f.category ?? ""} onChange={(e) => changeCategory(f, e.target.value)} className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none">
-                            <option value="">—</option>
-                            {[...new Set([...categoryOptions, ...(f.category ? [f.category] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
-                            <option value="__new">+ New…</option>
-                          </select>
-                        ) : (f.category || "—")}
-                      </td>
-                      <td className="px-2 py-1.5 text-slate-600">{f.invoice_number || "—"}{f.dup_ignored && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "#FAEEDA", color: "#854F0B" }} title="Filed even though the app warned it might be a duplicate">dup?</span>}</td>
-                      <td className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{f.amount != null ? `$${Number(f.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
-                      <td className="px-2 py-1.5 text-xs whitespace-nowrap">
-                        {f.paid ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#e7f6ec", color: "#166534" }} title={f.paid_note || undefined}>Paid{f.paid_date ? ` ${new Date(f.paid_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}{f.paid_from_name ? ` · ${f.paid_from_name}` : ""}{f.paid_method === "check" && f.paid_check_number ? ` · check #${f.paid_check_number}` : f.paid_method === "ach" ? " · ACH" : ""}</span>
-                          : f.matched_bill_id ? <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#dbeafe", color: "#1e4e8c" }} title="Counted through its scheduled bill">Scheduled bill{f.matched_due_date ? ` · ${new Date(f.matched_due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</span>
-                          : <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: "#fef3c7", color: "#92400e" }}>Unpaid</span>}
-                        {finance && !f.paid && <button onClick={() => openPay(f)} disabled={busy} className="ml-2 underline text-slate-500 hover:text-slate-700">Mark paid</button>}
-                        {finance && f.paid && <button onClick={() => openEditPay(f)} disabled={busy} className="ml-2 underline text-slate-500 hover:text-slate-700">Edit</button>}
-                        {finance && f.paid && <button onClick={() => undoPaid(f)} disabled={busy} className="ml-2 underline text-slate-400 hover:text-slate-600">Undo</button>}
-                        {finance && f.matched_bill_id && !f.paid && <button onClick={() => unlinkInvoice(f)} className="ml-2 underline text-slate-400 hover:text-slate-600">Unlink</button>}
-                      </td>
-                      <td className="px-2 py-1.5 text-right whitespace-nowrap">
-                        <button onClick={() => download(f)} className="rounded-lg px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: "#0f766e" }}>Download</button>
-                        {finance && <button onClick={() => openEditInvoice(f)} disabled={busy} className="ml-3 text-xs text-slate-500 hover:underline">Edit invoice</button>}
-                        {finance && <button onClick={() => removeInvoice(f)} disabled={busy} className="ml-3 text-xs text-red-500 hover:underline">Remove</button>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                {shown.length > 0 && (
-                  <tfoot>
-                    <tr className="border-t-2 border-slate-200 font-semibold text-slate-700">
-                      <td className="px-4 py-2" colSpan={4}>{shown.length} invoice{shown.length === 1 ? "" : "s"}</td>
-                      <td className="px-2 py-2 whitespace-nowrap" colSpan={3}>{unpaidOnly && withAmount > 0 ? `$${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""}</td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-              {(() => {
-                const sum = (list: FileRow[]) => list.reduce((n, f) => n + (f.amount ?? 0), 0);
-                const cats = (list: FileRow[]) => Object.entries(list.reduce<Record<string, number>>((m, f) => { const k = f.category || "Uncategorized"; m[k] = (m[k] ?? 0) + (f.amount ?? 0); return m; }, {}))
-                  .filter(([, v]) => v !== 0).sort((a, z) => z[1] - a[1]);
-                const monthName = new Date(invMonth + "-01T00:00:00").toLocaleDateString("en-US", { month: "long", year: "numeric" });
-                const line = (label: string, list: FileRow[], extra?: string) => (
-                  <div className="px-4 py-2 border-t border-slate-100 text-xs text-slate-500">
-                    <span className="font-semibold text-slate-700">{label}</span> · {list.length} invoice{list.length === 1 ? "" : "s"} · <span className="font-semibold text-slate-700">{money(sum(list))}</span>{extra}
-                    {cats(list).length > 0 && <span className="block mt-0.5">{cats(list).map(([k, v], i) => <span key={k}>{i > 0 && " · "}<span className="font-semibold text-slate-600">{k}</span> {money(v)}</span>)}</span>}
-                  </div>
-                );
-                if (unpaidOnly) return shown.length > 0 ? line("Unpaid, all months", shown) : null;
-                const paidHere = shown.filter((f) => f.paid && f.paid_date && f.paid_date.startsWith(invMonth));
-                const datedHere = shown.filter((f) => f.month === invMonth);
-                const unpaidDated = datedHere.filter((f) => !f.paid).length;
-                return (
-                  <>
-                    {line(`Paid in ${monthName}`, paidHere)}
-                    {line(`Dated in ${monthName}`, datedHere, unpaidDated > 0 ? ` (${unpaidDated} unpaid)` : "")}
-                  </>
-                );
-              })()}
-            </div>
-          );
-        })()}
-      </div>
+      {tab === "statements" ? (
+      <StatementsMonth finance={finance} onAuthLost={logout} onChanged={loadPending} />
       ) : tab === "checks" ? (
       <div className="space-y-4">
         {(() => {
@@ -1333,148 +1113,7 @@ export default function StatementsPage() {
         </div>
         <p className="text-xs text-slate-400">The emailed link works for 7 days and the file stays in your private storage. Delete a package once your CPA has it. "Email new link" sends a fresh 7-day link, and links already sent keep working until they expire.</p>
       </div>
-      ) : (
-      <>
-      {finance && year === thisYear && lastDue >= 1 && (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: missingLast.length ? "#FAEEDA" : "#e7f6ec", color: missingLast.length ? "#854F0B" : "#166534" }}>
-          {missingLast.length === 0 ? <>All {MONTHS[lastDue - 1]} statements are filed.</> : (
-            <>
-              <strong>{MONTHS[lastDue - 1]} statements still missing ({missingLast.length}):</strong>{" "}
-              {missingLast.map((a, i) => (
-                <span key={acctKey(a.kind, a.id)}>{i > 0 && ", "}<button className="underline font-semibold" onClick={() => setSel({ key: acctKey(a.kind, a.id), month: mkey(year, lastDue) })}>{a.name}</button></span>
-              ))}
-            </>
-          )}
-          {totalMissing > missingLast.length && <span className="block text-xs mt-1 opacity-80">{totalMissing} missing across {year} in total.</span>}
-        </div>
-      )}
-
-      <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search accounts…" className="w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
-      {loadError && <p className="text-sm text-red-600 font-semibold">⚠️ {loadError}</p>}
-
-      <div className="rounded-2xl bg-white shadow overflow-x-auto">
-        <table className="w-full text-sm border-collapse" style={{ minWidth: 760 }}>
-          <thead>
-            <tr className="text-xs text-slate-400 border-b border-slate-100">
-              <th className="text-left font-medium px-4 py-2 sticky left-0 bg-white">Account</th>
-              {MONTHS.map((m) => <th key={m} className="font-medium px-1 py-2 text-center">{m}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && accounts.length === 0 && <tr><td colSpan={13} className="px-4 py-6 text-slate-400">Loading…</td></tr>}
-            {[
-              ...(["bank", "card", "loan"] as const).map((kind) => ({ key: kind, label: KIND_LABEL[kind], list: visible.filter((a) => a.kind === kind) })),
-              ...(["Lab", "Supplier", "Insurance", "Other"] as const).map((cat) => ({ key: `v-${cat}`, label: VENDOR_LABEL[cat], list: visible.filter((a) => a.kind === "vendor" && (a.category ?? "Other") === cat) })),
-            ].map((group) => {
-              const list = group.list;
-              if (list.length === 0) return null;
-              return (
-                <FragmentRows key={group.key} label={group.label}>
-                  {list.map((a) => (
-                    <tr key={acctKey(a.kind, a.id)} className="border-b border-slate-50">
-                      <td className="px-4 py-1.5 font-medium text-slate-700 whitespace-nowrap sticky left-0 bg-white" style={{ opacity: a.active === false ? 0.5 : 1 }}>
-                        {a.name}
-                        {finance && a.kind === "vendor" && (
-                          <span className="ml-2 text-xs font-normal">
-                            <button onClick={() => renameVendor(a)} className="text-slate-400 hover:text-slate-600" title="Rename">✎</button>
-                            <button onClick={() => toggleVendor(a)} className="ml-1.5 text-slate-400 hover:text-slate-600" title={a.active === false ? "Start expecting statements again" : "Stop expecting statements"}>{a.active === false ? "↺" : "✕"}</button>
-                          </span>
-                        )}
-                      </td>
-                      {MONTHS.map((_, i) => {
-                        const m = i + 1; const st = status(a, m); const k = acctKey(a.kind, a.id);
-                        const isSel = sel?.key === k && sel.month === mkey(year, m);
-                        const style = st === "have" ? { color: "#166534", background: "#e7f6ec" } : st === "missing" ? { color: "#92400e", background: "#fef3c7" } : st === "none" ? { color: "#475569", background: "#f1f5f9" } : { color: "#cbd5e1", background: "transparent" };
-                        return (
-                          <td key={m} className="px-0.5 py-1 text-center">
-                            <button onClick={() => setSel({ key: k, month: mkey(year, m) })} disabled={st === "future" && !finance}
-                              className="rounded-md text-[11px] font-semibold w-full py-1" style={{ ...style, outline: isSel ? "2px solid #e8622a" : "none" }}>
-                              {st === "have" ? "✓" : st === "missing" ? "Missing" : st === "none" ? "None" : "·"}
-                            </button>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </FragmentRows>
-              );
-            })}
-            {!loading && accounts.length === 0 && !loadError && <tr><td colSpan={13} className="px-4 py-6 text-slate-400">No accounts found.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-
-      {finance && (
-        <div className="rounded-2xl bg-white shadow px-5 py-3">
-          {!adding ? (
-            <button onClick={() => setAdding(true)} className="text-sm font-semibold text-orange-500 hover:underline">+ Add a lab or other vendor</button>
-          ) : (
-            <div className="flex flex-wrap items-end gap-3">
-              <div style={{ flex: "1 1 200px" }}>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Name</label>
-                <input value={vName} onChange={(e) => setVName(e.target.value)} placeholder="e.g. Glidewell Dental Lab" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Type</label>
-                <select value={vCategory} onChange={(e) => setVCategory(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-                  <option>Lab</option><option>Supplier</option><option>Insurance</option><option>Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">First statement month</label>
-                <input type="month" value={vStart} onChange={(e) => setVStart(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-              </div>
-              <label className="flex items-center gap-1.5 text-sm text-slate-600 pb-2"><input type="checkbox" checked={vExpects} onChange={(e) => setVExpects(e.target.checked)} /> Sends a monthly statement</label>
-              <button onClick={addVendor} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>Add</button>
-              <button onClick={() => setAdding(false)} className="text-sm text-slate-400 hover:underline pb-2">Cancel</button>
-            </div>
-          )}
-          {msg && !sel && <p className="text-sm font-semibold text-slate-600 mt-2">{msg}</p>}
-        </div>
-      )}
-
-      {selAccount && sel && (
-        <div className="rounded-2xl bg-white shadow px-5 py-4 space-y-3" {...(finance ? dropProps("statement", setSFile) : {})} style={{ outline: dragOver === "statement" ? "2px dashed #e8622a" : "none", background: dragOver === "statement" ? "#fff7ed" : undefined }}>
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="font-bold text-slate-800">{selAccount.name} — {monthLabel(sel.month)}</h2>
-            <button onClick={() => setSel(null)} className="text-slate-400 hover:text-slate-600">✕</button>
-          </div>
-          {selFiles.length === 0 && <p className="text-sm text-slate-500">Nothing filed for this month.</p>}
-          {selFiles.map((f) => (
-            <div key={f.id} className="flex items-center gap-3 text-sm border-t border-slate-100 pt-2">
-              <span className="flex-1 min-w-0 truncate text-slate-700">
-                {f.no_statement ? `No statement this month${f.note ? ` — ${f.note}` : ""}` : f.file_name}{!f.no_statement && f.amount != null && <span className="font-semibold text-slate-700"> · {money(f.amount)}</span>}{f.dup_ignored && <span className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "#FAEEDA", color: "#854F0B" }}>filed despite duplicate warning</span>}
-                <span className="text-xs text-slate-400"> · {f.uploaded_by} · {new Date(f.uploaded_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{f.size_bytes ? ` · ${(f.size_bytes / 1024 / 1024).toFixed(1)} MB` : ""}</span>
-              </span>
-              {!f.no_statement && <button onClick={() => download(f)} className="rounded-lg px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: "#0f766e" }}>Download</button>}
-              {finance && <button onClick={() => remove(f)} disabled={busy} className="text-xs text-red-500 hover:underline">Remove</button>}
-            </div>
-          ))}
-          {finance && (
-            <div className="flex flex-wrap items-end gap-3 border-t border-slate-100 pt-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Statement amount (required)</label>
-                <input type="number" step="0.01" value={sAmount} onChange={(e) => setSAmount(e.target.value)} placeholder="Ending balance or total" className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 190 }} />
-              </div>
-              <label className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-50">
-                Choose PDF
-                <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={busy}
-                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setSFile(f); }} />
-              </label>
-              <span className="text-sm text-slate-500 pb-2">
-                {sFile ? <>📄 <strong className="text-slate-700">{sFile.name}</strong> <button onClick={() => setSFile(null)} className="ml-1 text-slate-400 hover:text-slate-600" title="Remove">✕</button></> : "or drag the statement PDF onto this panel"}
-              </span>
-              <button onClick={() => (sFile ? upload(selAccount, sel.month, sFile) : setMsg("Drop or choose the statement PDF first."))} disabled={busy}
-                className="rounded-lg px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>{busy ? "Working…" : "File statement"}</button>
-              {selFiles.length === 0 && <button onClick={() => markNone(selAccount, sel.month)} disabled={busy} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">No statement this month</button>}
-            </div>
-          )}
-          {dupBanner}
-          {msg && <p className="text-sm font-semibold text-slate-600">{msg}</p>}
-        </div>
-      )}
-      </>
-      )}
+      ) : null}
     </div>
   );
 

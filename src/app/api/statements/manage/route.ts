@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { statementsAccess, whoIs, BUCKET, KINDS, MONTH_RE, CATEGORIES } from "@/lib/statementsAuth";
+import { practiceToday } from "@/lib/statementsAutopay";
 
 // Records an uploaded statement or invoice, checks for duplicates, marks "no statement this month",
 // manages vendors, or removes a file. Finance users only.
 
-const COLS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category, paid_from_name, paid_note, paid_method, paid_check_number, paid_from_kind, paid_from_id";
+const COLS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category, paid_from_name, paid_note, paid_method, paid_check_number, paid_from_kind, paid_from_id, due_date, paid_amount, overpaid_credit, credit_applied_to, autopay, paid_auto";
 
 // What Cash Flow holds as this account's statement balance for a month (null if nothing).
 async function cashFlowBalance(kind: string, id: string, month: string): Promise<number | null> {
@@ -32,6 +33,15 @@ async function syncStatementBalance(kind: string, id: string, month: string, bal
   if (newest?.month === month) await supabaseAdmin.from(cfg.acct).update({ statement_balance: balance, statement_balance_updated_at: now }).eq("id", id);
   return true;
 }
+
+// Remembered per-vendor settings (category, autopay account, expected every month).
+async function savePrefs(key: string, patch: Record<string, unknown>) {
+  const { data: cur } = await supabaseAdmin.from("statement_prefs").select("key").eq("key", key).maybeSingle();
+  const row = { ...patch, updated_at: new Date().toISOString() };
+  if (cur) return supabaseAdmin.from("statement_prefs").update(row).eq("key", key);
+  return supabaseAdmin.from("statement_prefs").insert({ key, ...row });
+}
+const money2 = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const toAmount = (v: unknown): number | null => (v === "" || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
 
@@ -98,10 +108,27 @@ export async function POST(req: NextRequest) {
         amount, dup_ignored: b.dupIgnored === true,
         ...(isInvoice ? {
           doc_type: "invoice", invoice_date: invoiceDate, invoice_number: invoiceNumber, category: String(b.category ?? "").trim().slice(0, 40),
+          ...(/^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate ?? "")) ? { due_date: b.dueDate } : {}),
+          ...(b.autopay === true ? {
+            autopay: true,
+            paid_from_kind: ["bank", "card"].includes(b.paidFromKind) ? b.paidFromKind : null,
+            paid_from_id: b.paidFromId ? String(b.paidFromId) : null,
+            paid_from_name: String(b.paidFromName ?? "").trim().slice(0, 80),
+          } : {}),
           ...(b.matchedBillId && /^\d{4}-\d{2}-\d{2}$/.test(String(b.matchedDueDate ?? "")) ? { matched_bill_id: String(b.matchedBillId), matched_due_date: b.matchedDueDate } : {}),
         } : {}),
       }).select(COLS).single();
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      // A vendor's category and autopay choice are remembered for next month.
+      if (isInvoice && b.accountKind === "vendor" && b.accountId) {
+        await savePrefs(`vendor:${String(b.accountId)}`, {
+          ...(b.category ? { category: String(b.category).trim().slice(0, 40) } : {}),
+          autopay: b.autopay === true,
+          autopay_from_kind: b.autopay === true && ["bank", "card"].includes(b.paidFromKind) ? b.paidFromKind : null,
+          autopay_from_id: b.autopay === true && b.paidFromId ? String(b.paidFromId) : null,
+          autopay_from_name: b.autopay === true ? String(b.paidFromName ?? "").trim().slice(0, 80) : "",
+        });
+      }
       // A statement's amount becomes that month's statement balance in Cash Flow.
       const synced = !isInvoice && b.accountKind !== "vendor" && b.accountKind !== "other" ? await syncStatementBalance(b.accountKind, String(b.accountId), month, amount) : false;
       return NextResponse.json({ data, synced });
@@ -160,63 +187,139 @@ export async function POST(req: NextRequest) {
     }
 
     if (b.action === "markInvoicePaid") {
-      const paid = b.paid === true;
       const id = String(b.id);
-      const paidDate = paid && /^\d{4}-\d{2}-\d{2}$/.test(String(b.paidDate ?? "")) ? b.paidDate : paid ? new Date().toISOString().slice(0, 10) : null;
-      const method = paid && ["check", "ach", "card", "other"].includes(b.method) ? b.method : null;
-      const checkNumber = method === "check" ? String(b.checkNumber ?? "").trim().slice(0, 20) : "";
-      const accountId = b.paidFromId ? String(b.paidFromId) : null;
+      const paid = b.paid === true;
+      const { data: row } = await supabaseAdmin.from("statement_files").select("id, account_kind, account_id, account_name, invoice_number, amount, paid, paid_amount, note, paid_note").eq("id", id).maybeSingle();
+      if (!row) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-      // A check already logged for this invoice (when editing a payment that was already marked paid).
+      // The check(s) already logged for this invoice.
       const { data: linkedRows } = await supabaseAdmin.from("check_register").select("id, memo").eq("invoice_id", id).neq("status", "void");
-      const mine = new Set((linkedRows ?? []).map((l: any) => l.id));
 
-      // Paying by check: it needs a number and a bank account, and the number must not already be on the register.
-      if (paid && method === "check") {
-        if (!checkNumber) return NextResponse.json({ error: "Enter the check number." }, { status: 400 });
-        if (b.paidFromKind !== "bank" || !accountId) return NextResponse.json({ error: "Choose the bank account the check is drawn on." }, { status: 400 });
-        if (!b.allowDuplicateCheck) {
-          const { data: same } = await supabaseAdmin.from("check_register").select("id, payee, amount, check_date, status").eq("account_id", accountId).ilike("check_number", checkNumber.replace(/[%_]/g, "")).neq("status", "void");
-          // This invoice's own check doesn't count as a duplicate of itself.
-          const others = (same ?? []).filter((r: any) => !mine.has(r.id));
-          if (others.length > 0) return NextResponse.json({ error: "duplicate", duplicate: others[0] }, { status: 409 });
-        }
-      }
-
-      // Which account it was paid from, and an optional note. Both are cleared if the payment is undone.
-      const from = paid ? {
-        paid_from_kind: ["bank", "card", "other"].includes(b.paidFromKind) ? b.paidFromKind : null,
-        paid_from_id: accountId,
-        paid_from_name: String(b.paidFromName ?? "").trim().slice(0, 80),
-        paid_note: String(b.paidNote ?? "").trim().slice(0, 120),
-        paid_method: method, paid_check_number: checkNumber,
-      } : { paid_from_kind: null, paid_from_id: null, paid_from_name: "", paid_note: "", paid_method: null, paid_check_number: "" };
-      const { data: inv, error } = await supabaseAdmin.from("statement_files").update({ paid, paid_date: paidDate, ...from }).eq("id", id).eq("doc_type", "invoice").select("account_name, invoice_number, amount").single();
-      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-
-      const checkFields = {
-        check_number: checkNumber, account_kind: "bank", account_id: accountId, account_name: from.paid_from_name, check_date: paidDate,
-        payee: inv?.account_name ?? "", amount: inv?.amount ?? null, memo: `Invoice ${inv?.invoice_number ?? ""}`.trim(), category: "Vendor invoice",
-      };
-      if (paid && method === "check") {
-        // The check is on the register, linked to this invoice: updated if it was already there, added if not.
-        if ((linkedRows ?? []).length > 0) await supabaseAdmin.from("check_register").update(checkFields).eq("id", linkedRows![0].id);
-        else await supabaseAdmin.from("check_register").insert({ ...checkFields, invoice_id: id, created_by: whoIs(acc.session) });
-      } else {
-        // No longer a check (the payment was undone, or changed to another method): the old check is voided,
-        // unless another invoice was paid with the same check. The number stays on the register as used.
+      // ---- Undo: back to unpaid, checks voided, and any credit it used is released ----
+      if (!paid) {
         for (const c of linkedRows ?? []) {
           const { data: chk } = await supabaseAdmin.from("check_register").select("account_id, check_number").eq("id", c.id).maybeSingle();
           let shared = false;
           if (chk?.account_id) {
-            const { data: others } = await supabaseAdmin.from("statement_files").select("id").eq("doc_type", "invoice").eq("paid", true).eq("paid_method", "check")
+            const { data: others } = await supabaseAdmin.from("statement_files").select("id").eq("paid", true).eq("paid_method", "check")
               .eq("paid_from_id", chk.account_id).eq("paid_check_number", chk.check_number).neq("id", id).limit(1);
             shared = (others ?? []).length > 0;
           }
           if (shared) await supabaseAdmin.from("check_register").update({ invoice_id: null }).eq("id", c.id);
-          else await supabaseAdmin.from("check_register").update({ status: "void", memo: `${c.memo} (${paid ? "payment method changed" : "payment undone"})`.trim() }).eq("id", c.id);
+          else await supabaseAdmin.from("check_register").update({ status: "void", memo: `${c.memo} (payment undone)`.trim() }).eq("id", c.id);
+        }
+        await supabaseAdmin.from("statement_files").update({ credit_applied_to: null }).eq("credit_applied_to", id);
+        const { error } = await supabaseAdmin.from("statement_files").update({
+          paid: false, paid_date: null, paid_amount: null, overpaid_credit: 0, paid_auto: false,
+          paid_from_kind: null, paid_from_id: null, paid_from_name: "", paid_note: "", paid_method: null, paid_check_number: "",
+        }).eq("id", id);
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        return NextResponse.json({ data: null });
+      }
+
+      const editing = b.editing === true && row.paid === true;
+      const paidDate = /^\d{4}-\d{2}-\d{2}$/.test(String(b.paidDate ?? "")) ? String(b.paidDate) : practiceToday();
+      const method = ["check", "ach", "card", "other"].includes(b.method) ? b.method : "other";
+      const checkNumber = method === "check" ? String(b.checkNumber ?? "").trim().slice(0, 20) : "";
+      const accountId = b.paidFromId ? String(b.paidFromId) : null;
+      const mine = new Set((linkedRows ?? []).map((l: any) => l.id));
+
+      // Paying by check: it needs a number and a bank account, and the number must not already be on the register.
+      if (method === "check") {
+        if (!checkNumber) return NextResponse.json({ error: "Enter the check number." }, { status: 400 });
+        if (b.paidFromKind !== "bank" || !accountId) return NextResponse.json({ error: "Choose the bank account the check is drawn on." }, { status: 400 });
+        if (!b.allowDuplicateCheck) {
+          const { data: same } = await supabaseAdmin.from("check_register").select("id, payee, amount, check_date, status").eq("account_id", accountId).ilike("check_number", checkNumber.replace(/[%_]/g, "")).neq("status", "void");
+          const others = (same ?? []).filter((r: any) => !(editing && mine.has(r.id)));
+          if (others.length > 0) return NextResponse.json({ error: "duplicate", duplicate: others[0] }, { status: 409 });
         }
       }
+
+      // ---- The money: what was due, what was paid, and what to do with any difference ----
+      const amountDue = Number(row.amount ?? 0);
+      const { data: appliedRows } = await supabaseAdmin.from("statement_files").select("id, overpaid_credit").eq("credit_applied_to", id);
+      const appliedPrev = (appliedRows ?? []).reduce((n: number, r: any) => n + Number(r.overpaid_credit ?? 0), 0);
+      const prior = editing ? 0 : row.paid ? 0 : Number(row.paid_amount ?? 0); // earlier partial payments
+      let creditUse = 0, leftover = 0;
+      if (!editing && b.useCredit === true && row.account_kind === "vendor") {
+        const { data: avail } = await supabaseAdmin.from("statement_files").select("id, overpaid_credit").eq("account_id", row.account_id).eq("account_kind", "vendor").gt("overpaid_credit", 0).is("credit_applied_to", null).neq("id", id);
+        const total = (avail ?? []).reduce((n: number, r: any) => n + Number(r.overpaid_credit), 0);
+        if (total > 0) {
+          const needed = Math.max(0, amountDue - appliedPrev - prior);
+          creditUse = Math.min(total, needed);
+          leftover = Math.round((total - creditUse) * 100) / 100;
+          await supabaseAdmin.from("statement_files").update({ credit_applied_to: id }).in("id", (avail ?? []).map((r: any) => r.id));
+        }
+      }
+      const due = Math.max(0, amountDue - appliedPrev - creditUse);
+      const pay = toAmount(b.paidAmount) ?? Math.max(0, due - prior);
+      const total = Math.round((prior + pay) * 100) / 100;
+      const delta = Math.round((total - due) * 100) / 100;
+      let fullyPaid = true, overpaid = leftover;
+      if (delta < -0.004 && b.diff === "partial") fullyPaid = false;
+      if (delta > 0.004 && b.diff === "credit") overpaid = Math.round((leftover + delta) * 100) / 100;
+      const paidAmount = Math.abs(total - amountDue) < 0.005 ? null : total;
+
+      const from = {
+        paid_from_kind: ["bank", "card", "other"].includes(b.paidFromKind) ? b.paidFromKind : null,
+        paid_from_id: accountId,
+        paid_from_name: String(b.paidFromName ?? "").trim().slice(0, 80),
+        paid_method: method, paid_check_number: checkNumber,
+      };
+      const note = String(b.paidNote ?? "").trim().slice(0, 120);
+      const patch: Record<string, unknown> = fullyPaid
+        ? { paid: true, paid_date: paidDate, paid_amount: paidAmount, overpaid_credit: overpaid, paid_auto: false, paid_note: note, ...from }
+        : { paid: false, paid_date: null, paid_amount: total, overpaid_credit: overpaid, paid_auto: false, paid_note: `Partial: ${money2(total)} paid ${paidDate}${note ? ` · ${note}` : ""}`.slice(0, 120), ...from };
+      const { error } = await supabaseAdmin.from("statement_files").update(patch).eq("id", id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+      // ---- The check register: one entry per check, for the amount actually paid ----
+      const checkFields = {
+        check_number: checkNumber, account_kind: "bank", account_id: accountId, account_name: from.paid_from_name, check_date: paidDate,
+        payee: row.account_name ?? "", amount: pay, memo: `Invoice ${row.invoice_number ?? ""}`.trim(), category: "Vendor invoice",
+      };
+      if (method === "check") {
+        if (editing && (linkedRows ?? []).length > 0) await supabaseAdmin.from("check_register").update(checkFields).eq("id", linkedRows![0].id);
+        else await supabaseAdmin.from("check_register").insert({ ...checkFields, invoice_id: id, created_by: whoIs(acc.session) });
+      } else if (editing) {
+        // The payment is no longer a check: the old check is voided unless another invoice was paid with it.
+        for (const c of linkedRows ?? []) {
+          const { data: chk } = await supabaseAdmin.from("check_register").select("account_id, check_number").eq("id", c.id).maybeSingle();
+          let shared = false;
+          if (chk?.account_id) {
+            const { data: others } = await supabaseAdmin.from("statement_files").select("id").eq("paid", true).eq("paid_method", "check")
+              .eq("paid_from_id", chk.account_id).eq("paid_check_number", chk.check_number).neq("id", id).limit(1);
+            shared = (others ?? []).length > 0;
+          }
+          if (shared) await supabaseAdmin.from("check_register").update({ invoice_id: null }).eq("id", c.id);
+          else await supabaseAdmin.from("check_register").update({ status: "void", memo: `${c.memo} (payment method changed)`.trim() }).eq("id", c.id);
+        }
+      }
+      return NextResponse.json({ data: { fullyPaid, paidAmount: total, due, credit: overpaid } });
+    }
+
+    // ---- Autopay that did not go through: back to unpaid, and no longer on autopay for this statement ----
+    if (b.action === "autopayFailed") {
+      const { error } = await supabaseAdmin.from("statement_files").update({
+        paid: false, paid_date: null, paid_auto: false, autopay: false, paid_method: null, paid_amount: null,
+        paid_from_kind: null, paid_from_id: null, paid_from_name: "", paid_check_number: "", paid_note: "Autopay did not go through",
+      }).eq("id", String(b.id));
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data: null });
+    }
+
+    // ---- Remembered settings for a vendor ----
+    if (b.action === "setPrefs") {
+      const key = String(b.key ?? "");
+      if (!/^(vendor|bank|card|loan):[\w-]{1,64}$/.test(key)) return NextResponse.json({ error: "Bad request." }, { status: 400 });
+      const patch: Record<string, unknown> = {};
+      if (typeof b.category === "string") patch.category = b.category.trim().slice(0, 40);
+      if (typeof b.autopay === "boolean") patch.autopay = b.autopay;
+      if (["bank", "card"].includes(b.autopayFromKind)) { patch.autopay_from_kind = b.autopayFromKind; patch.autopay_from_id = String(b.autopayFromId ?? ""); patch.autopay_from_name = String(b.autopayFromName ?? "").slice(0, 80); }
+      if (["monthly", "never"].includes(b.expect)) patch.expect = b.expect;
+      if (Object.keys(patch).length === 0) return NextResponse.json({ error: "Nothing to change." }, { status: 400 });
+      const { error } = await savePrefs(key, patch);
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
       return NextResponse.json({ data: null });
     }
 
@@ -259,6 +362,8 @@ export async function POST(req: NextRequest) {
       // An invoice's month always comes from its own date. The PDF itself is not moved or changed.
       const { data: updated, error } = await supabaseAdmin.from("statement_files").update({
         invoice_date: invoiceDate, month: invoiceDate.slice(0, 7), invoice_number: invoiceNumber, amount, dup_ignored: matches.length > 0,
+        due_date: /^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate ?? "")) ? b.dueDate : null,
+        ...(typeof b.category === "string" ? { category: b.category.trim().slice(0, 40) } : {}),
         ...(vendorChanged ? { account_kind: "vendor", account_id: accountId, account_name: accountName } : {}),
       }).eq("id", id).eq("doc_type", "invoice").select(COLS).single();
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
