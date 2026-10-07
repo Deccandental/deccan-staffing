@@ -10,6 +10,7 @@ import {
   createCertification, updateCertification, deleteCertification, deleteCertificatesByTitle, uploadCertFile,
 } from "@/lib/certsStore";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
+import BusinessLicenses from "@/components/BusinessLicenses";
 import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredCertsSection";
 import {
   RequiredCertType, RequiredCertRole, RequiredCertStatus, CeCourseEntry, GroupedRequiredType,
@@ -540,7 +541,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
   const [allCerts, setAllCerts] = useState<Certification[]>([]);
   const [titleOptions, setTitleOptions] = useState<string[]>([]);
   const [useCustomTitle, setUseCustomTitle] = useState(false);
-  const [view, setView] = useState<"mine" | "all" | "manage">("mine");
+  const [view, setView] = useState<"mine" | "all" | "business" | "manage">("mine");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -747,6 +748,10 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
               style={view === "all" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
               All Certifications & Licenses
             </button>
+            <button onClick={() => setView("business")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
+              style={view === "business" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
+              Business Licenses
+            </button>
             <button onClick={() => setView("manage")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"
               style={view === "manage" ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280" }}>
               Manage Required Types
@@ -915,6 +920,23 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
               })}
             </div>
           </div>
+        )}
+
+        {isManager && view === "business" && (
+          <BusinessLicenses
+            licenses={allCerts.filter((c) => c.ownerType === "business")}
+            showForm={showForm}
+            onAdd={() => openNewManager("business")}
+            onEdit={startEdit}
+            onDelete={handleDelete}
+            onRemind={handleSendNow}
+            notifyMsg={notifyMsg}
+            formNode={
+              <CertForm editingCert={allCerts.find((x) => x.id === editingId) ?? null} form={form} setForm={setForm} file={file} setFile={setFile} error={error} saving={saving}
+                staff={staff} lockOwner={false} editingId={editingId} onSave={handleSave} onCancel={closeForm} onDelete={editingId ? handleDeleteFromForm : undefined}
+                titleOptions={titleOptions} useCustomTitle={useCustomTitle} setUseCustomTitle={setUseCustomTitle} requiredTypes={requiredTypes} />
+            }
+          />
         )}
 
         {isManager && view === "manage" && (
