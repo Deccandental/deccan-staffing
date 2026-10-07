@@ -84,7 +84,7 @@ function Pill({ text, bg, fg }: { text: string; bg: string; fg: string }) {
 const Icon = ({ d, size = 18, sw = 1.8 }: { d: string; size?: number; sw?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: "none" }}><path d={d} /></svg>
 );
-const P = { left: "M15 6l-6 6 6 6", right: "M9 6l6 6-6 6", doc: "M7 3.5h7l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1zM14 3.5V8h4", more: "M5 12h.01M12 12h.01M19 12h.01", plus: "M12 5v14M5 12h14", check: "M5 12.5l4.5 4.5L19 7.5", search: "M16 16l4.5 4.5M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13z", upload: "M12 16V5M7.5 9.5L12 5l4.5 4.5M5 19h14", clock: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM12 7.5V12l3 2", refresh: "M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5", x: "M6 6l12 12M18 6L6 18" };
+const P = { cal: "M3.5 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM8 3v4M16 3v4M3.5 10h17", down: "M6 9l6 6 6-6", print: "M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2M7 14h10v6H7z", exp: "M12 15V4M8 8l4-4 4 4M5 13v6h14v-6", sliders: "M4 7h9M17 7h3M4 17h3M11 17h9M15 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM9 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4z", left: "M15 6l-6 6 6 6", right: "M9 6l6 6-6 6", doc: "M7 3.5h7l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1zM14 3.5V8h4", more: "M5 12h.01M12 12h.01M19 12h.01", plus: "M12 5v14M5 12h14", check: "M5 12.5l4.5 4.5L19 7.5", search: "M16 16l4.5 4.5M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13z", upload: "M12 16V5M7.5 9.5L12 5l4.5 4.5M5 19h14", clock: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM12 7.5V12l3 2", refresh: "M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5", x: "M6 6l12 12M18 6L6 18" };
 
 const btnBase = "inline-flex items-center justify-center gap-1.5 rounded-lg font-semibold whitespace-nowrap disabled:opacity-50";
 const inputCls = "w-full rounded-lg border px-3 py-2 text-sm focus:outline-none bg-white";
@@ -103,6 +103,17 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const [search, setSearch] = useState("");
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [showAccounts, setShowAccounts] = useState(true);
+  const [catFilter, setCatFilter] = useState("");
+  const [dueFilter, setDueFilter] = useState<"all" | "overdue" | "week">("all");
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Rows ticked for "mark paid" in one go
+  const [sel, setSel] = useState<Record<string, boolean>>({});
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bDate, setBDate] = useState("");
+  const [bMethod, setBMethod] = useState<"check" | "ach" | "card" | "other">("ach");
+  const [bFrom, setBFrom] = useState("");
+  const [bCheck, setBCheck] = useState("");
+  const [bErr, setBErr] = useState("");
 
   // Add statement
   const [addOpen, setAddOpen] = useState(false);
@@ -144,6 +155,10 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const [eCat, setECat] = useState("");
   const [eErr, setEErr] = useState("");
 
+  // Merge two vendors that are really one
+  const [mergeDlg, setMergeDlg] = useState<{ fromId: string; intoId: string } | null>(null);
+  const [mErr, setMErr] = useState("");
+
   // Account statement (bank / card / loan)
   const [acctDlg, setAcctDlg] = useState<Acct | null>(null);
   const [sAmount, setSAmount] = useState("");
@@ -160,6 +175,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     setData(r.json as MonthData);
   }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setSel({}); }, [month]);
   const changed = () => { load(); onChanged?.(); };
 
   useEffect(() => {
@@ -201,14 +217,15 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       normCat(fileCat) || normCat(prefMap[`vendor:${id}`]?.category) || normCat(data.history[id]?.lastCategory) || (srcMap[id] ? SOURCE_TO_CAT[srcMap[id].category] ?? "" : "") || "Other";
     const isVendorKind = (k: string) => k === "vendor" || k === "other";
 
+    const nameOf = (f: FileRow) => (isVendorKind(f.account_kind) ? srcMap[f.account_id]?.name : undefined) ?? f.account_name;
     const rows: Row[] = [];
     for (const f of data.files) {
       if (f.no_statement) {
-        if (isVendorKind(f.account_kind)) rows.push({ kind: "skipped", cat: catFor(f.account_id, f.category), vendor: f.account_name, vendorId: f.account_id, f });
+        if (isVendorKind(f.account_kind)) rows.push({ kind: "skipped", cat: catFor(f.account_id, f.category), vendor: nameOf(f), vendorId: f.account_id, f });
       } else if (f.doc_type === "invoice") {
-        rows.push({ kind: "bill", cat: catFor(f.account_id, f.category), vendor: f.account_name, vendorId: f.account_id, f });
+        rows.push({ kind: "bill", cat: catFor(f.account_id, f.category), vendor: nameOf(f), vendorId: f.account_id, f });
       } else if (isVendorKind(f.account_kind)) {
-        rows.push({ kind: "doc", cat: catFor(f.account_id, f.category), vendor: f.account_name, vendorId: f.account_id, f });
+        rows.push({ kind: "doc", cat: catFor(f.account_id, f.category), vendor: nameOf(f), vendorId: f.account_id, f });
       }
     }
     // Vendors you've filed before (or are set to expect) wait here until this month's statement arrives or is skipped.
@@ -224,7 +241,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
         rows.push({ kind: "waiting", cat: catFor(s.id), vendor: s.name, vendorId: s.id });
       }
     }
-    const sortKey = (r: Row) => `${r.vendor.toLowerCase()}|${"f" in r ? r.f.invoice_date ?? r.f.month : ""}|${"f" in r ? r.f.invoice_number ?? "" : ""}`;
+    const sortKey = (r: Row) => `${r.vendor.toLowerCase()}|${r.kind === "waiting" ? "0" : "1"}|${"f" in r ? r.f.invoice_date ?? r.f.month : ""}|${"f" in r ? r.f.invoice_number ?? "" : ""}`;
     rows.sort((a, z) => sortKey(a).localeCompare(sortKey(z)));
 
     const matches = (r: Row, fl: Filter) => {
@@ -236,7 +253,8 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       return r.kind === "skipped";
     };
     const q = search.trim().toLowerCase();
-    const shown = rows.filter((r) => matches(r, filter) && (!q || r.vendor.toLowerCase().includes(q) || ("f" in r && (r.f.invoice_number ?? "").toLowerCase().includes(q))));
+    const dueOk = (r: Row) => dueFilter === "all" || (r.kind === "bill" && !r.f.paid && !!r.f.due_date && (dueFilter === "overdue" ? !r.f.autopay && r.f.due_date < data.today : r.f.due_date >= data.today && daysBetween(r.f.due_date, data.today) <= 7));
+    const shown = rows.filter((r) => matches(r, filter) && (!catFilter || r.cat === catFilter) && dueOk(r) && (!q || r.vendor.toLowerCase().includes(q) || ("f" in r && (r.f.invoice_number ?? "").toLowerCase().includes(q))));
     const counts: Record<Filter, number> = { all: rows.length, unpaid: 0, autopay: 0, waiting: 0, paid: 0, skipped: 0 };
     for (const r of rows) for (const fl of ["unpaid", "autopay", "waiting", "paid", "skipped"] as Filter[]) if (matches(r, fl)) counts[fl]++;
 
@@ -247,8 +265,18 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       return ra - rz || a.localeCompare(z);
     });
     const waiting = rows.filter((r) => r.kind === "waiting");
-    return { rows, shown, counts, cats, waiting, prefMap, srcMap, catFor };
-  }, [data, filter, search]);
+    // Two vendors whose names are nearly the same (one just the other plus a short word) may be one vendor entered twice.
+    const norm = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const seenV = new Map<string, string>();
+    for (const r of rows) if (srcMap[r.vendorId]) seenV.set(r.vendorId, r.vendor);
+    const vlist = [...seenV.entries()].map(([id, name]) => ({ id, name, n: norm(name) }));
+    const dupPairs: { from: { id: string; name: string }; into: { id: string; name: string } }[] = [];
+    for (let i = 0; i < vlist.length; i++) for (let j = i + 1; j < vlist.length; j++) {
+      const [sh, lo] = vlist[i].n.length <= vlist[j].n.length ? [vlist[i], vlist[j]] : [vlist[j], vlist[i]];
+      if (sh.n.length >= 4 && sh.n !== lo.n && lo.n.startsWith(sh.n) && lo.n.length - sh.n.length <= 10) dupPairs.push({ from: { id: sh.id, name: sh.name }, into: { id: lo.id, name: lo.name } });
+    }
+    return { rows, shown, counts, cats, waiting, prefMap, srcMap, catFor, dupPairs };
+  }, [data, filter, search, catFilter, dueFilter]);
 
   const paidSum = (f: FileRow) => (f.paid ? Number(f.paid_amount ?? f.amount ?? 0) : Number(f.paid_amount ?? 0));
   const owedOf = (f: FileRow) => (f.paid ? 0 : Math.max(0, Number(f.amount ?? 0) - Number(f.paid_amount ?? 0) - Number(f.credit_applied ?? 0)));
@@ -295,6 +323,25 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (await manage({ action: "autopayFailed", id: f.id })) changed();
   }
   async function unlinkBill(f: FileRow) { if (await manage({ action: "matchInvoice", id: f.id, billId: null })) changed(); }
+
+  // ---------------- Vendors: rename, merge ----------------
+  async function renameVendor(id: string, current: string) {
+    const name = (window.prompt("Rename this vendor:", current) ?? "").trim().slice(0, 80);
+    if (!name || name === current) return;
+    if (await manage({ action: "updateSource", id, name })) changed();
+  }
+  function openMerge(fromId: string, intoId = "") { setMErr(""); setMergeDlg({ fromId, intoId }); }
+  async function doMerge() {
+    if (!mergeDlg || !data) return;
+    if (!mergeDlg.intoId) { setMErr("Choose the vendor to keep."); return; }
+    const from = data.sources.find((x) => x.id === mergeDlg.fromId), into = data.sources.find((x) => x.id === mergeDlg.intoId);
+    if (!from || !into) return;
+    setBusy(true); setMErr("");
+    const r = await api("/api/statements/manage", { action: "mergeSource", fromId: from.id, intoId: into.id });
+    setBusy(false);
+    if (!r.ok) { setMErr(r.json.error ?? "Couldn't merge."); return; }
+    setMergeDlg(null); setMsg(`Merged ${from.name} into ${into.name}${r.json.moved ? ` (${r.json.moved} statement${r.json.moved === 1 ? "" : "s"} moved)` : ""}.`); changed();
+  }
 
   // ---------------- Add a statement ----------------
   const vendorByName = (name: string) => data?.sources.find((s) => s.name.trim().toLowerCase() === name.trim().toLowerCase());
@@ -514,39 +561,64 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const monthWord = FULL[Number(month.slice(5)) - 1];
   const grand = totals(view.shown);
   const all = totals(view.rows);
-  let credits = 0, nUnpaid = 0, nAuto = 0, nOver = 0, overAmt = 0, nPaid = 0, nBills = 0;
+  let credits = 0, nUnpaid = 0, nAuto = 0, nAutoUnpaid = 0, autoAmt = 0, nOver = 0, overAmt = 0, nPaid = 0, nBills = 0;
   for (const r of view.rows) if (r.kind === "bill") {
     nBills++;
+    if (r.f.autopay) nAuto++;
     if (r.f.paid) { nPaid++; credits += Math.max(0, Number(r.f.amount ?? 0) - paidSum(r.f)); }
     else {
       nUnpaid++;
-      if (r.f.autopay) nAuto++;
+      if (r.f.autopay) { nAutoUnpaid++; autoAmt += owedOf(r.f); }
       else if (r.f.due_date && r.f.due_date < today) { nOver++; overAmt += owedOf(r.f); }
     }
   }
   const waitNames = view.waiting.map((w) => w.vendor);
-  const waitText = waitNames.length <= 6 ? waitNames.join(", ").replace(/, ([^,]*)$/, waitNames.length > 1 ? " and $1" : "$1") : `${waitNames.slice(0, 6).join(", ")} and ${waitNames.length - 6} more`;
-  const notExpected = data.sources.filter((s) => s.active && view.prefMap[`vendor:${s.id}`]?.expect === "never");
+  const waitUnique = [...new Set(waitNames)].sort((x, y) => x.localeCompare(y, undefined, { sensitivity: "base" }));
+  const waitText = waitUnique.length <= 6 ? waitUnique.join(", ").replace(/, ([^,]*)$/, waitUnique.length > 1 ? " and $1" : "$1") : `${waitUnique.slice(0, 6).join(", ")} and ${waitUnique.length - 6} more`;
+  const notExpected = data.sources.filter((x) => x.active && view.prefMap[`vendor:${x.id}`]?.expect === "never");
 
-  const th = "px-2.5 py-3 text-left text-xs font-bold uppercase text-slate-500";
-  const td: React.CSSProperties = { padding: "10px", verticalAlign: "middle", borderTop: "1px solid #F0E9D8" };
-  const seg = (fl: Filter, label: string) => (
-    <button key={fl} type="button" onClick={() => setFilter(fl)} className="rounded-full font-semibold"
-      style={{ height: 40, padding: "0 16px", fontSize: 13, ...(filter === fl ? { background: INK, color: "#fff", border: `1px solid ${INK}` } : { background: "#fff", color: INK, border: "1px solid #CFC6AF" }) }}>
-      {label} <span style={{ opacity: 0.75, fontWeight: 500 }}>{view.counts[fl]}</span>
+  // ---- the table look: flat grid, pale blue-grey header, thin lines between columns and rows ----
+  const QINK = "#393A3D", QMUTED = "#6B6C72", QBORDER = "#D4D7DC", QROW = "#E3E5E8", QHEAD = "#E6ECF3", QLINK = "#0A5EB0";
+  const cell: React.CSSProperties = { height: 60, padding: "6px 14px", verticalAlign: "middle", borderTop: `1px solid ${QROW}`, borderRight: `1px solid ${QBORDER}` };
+  const thS: React.CSSProperties = { padding: 14, fontSize: 15, fontWeight: 700, color: QINK, background: QHEAD, borderRight: "1px solid #fff", textAlign: "left" };
+  const dash = <span style={{ color: "#8a8b90" }}>—</span>;
+  const chk = (checked: boolean, onChange: () => void, label: string) => (
+    <input type="checkbox" aria-label={label} checked={checked} onChange={onChange} style={{ width: 20, height: 20, accentColor: DEEP, cursor: "pointer", verticalAlign: "middle" }} />
+  );
+  const selectable = (r: Row) => r.kind === "bill" && !r.f.paid && !r.f.autopay;
+  const selRows = view.shown.filter((r) => selectable(r) && sel[(r as any).f.id]) as Extract<Row, { kind: "bill" }>[];
+  const selTotal = selRows.reduce((n, r) => n + owedOf(r.f), 0);
+  const allSelectable = view.shown.filter(selectable);
+  const allTicked = allSelectable.length > 0 && allSelectable.every((r) => sel[(r as any).f.id]);
+
+  const tabBtn = (fl: Filter, label: string) => (
+    <button key={fl} type="button" onClick={() => setFilter(fl)} aria-pressed={filter === fl}
+      style={{ height: 44, padding: "0 22px", borderRadius: 6, fontSize: 16, ...(filter === fl ? { background: "#fff", color: QINK, border: `1px solid ${QBORDER}`, boxShadow: "0 1px 2px rgba(0,0,0,0.06)", fontWeight: 600 } : { background: "transparent", color: "#4a4b50", border: "1px solid transparent" }) }}>
+      {label} ({view.counts[fl]})
     </button>
   );
+  const card = (fl: Filter, label: string, big: string, sub: string, badge: number, tone = QINK) => {
+    const on = filter === fl;
+    return (
+      <button key={fl} type="button" onClick={() => setFilter(fl)} aria-pressed={on} className="text-left"
+        style={{ flex: "1 1 250px", minWidth: 0, background: "#fff", border: on ? `2px solid ${DEEP}` : `1px solid ${QBORDER}`, borderRadius: 10, padding: on ? "15px 19px" : "16px 20px", display: "flex", flexDirection: "column", gap: 6 }}>
+        <span className="flex items-center justify-between" style={{ fontSize: 15, color: "#4a4b50" }}>{label}<span className="inline-flex items-center justify-center" style={{ minWidth: 26, height: 26, padding: "0 6px", borderRadius: 999, background: "#4F5258", color: "#fff", fontSize: 13, fontWeight: 700 }}>{badge}</span></span>
+        <span style={{ fontSize: 26, fontWeight: 700, color: tone, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{big}</span>
+        <span style={{ fontSize: 14, color: QMUTED }}>{sub}</span>
+      </button>
+    );
+  };
 
   const dueCell = (f: FileRow) => {
-    if (!f.due_date) return <span style={{ color: "#7a7a7a" }}>—</span>;
-    if (f.paid) return <span className="font-medium">{dlabel(f.due_date)}</span>;
+    if (!f.due_date) return dash;
+    if (f.paid) return <span>{dlabel(f.due_date)}</span>;
     const n = daysBetween(f.due_date, today);
-    const p = f.autopay ? <Pill text={n > 0 ? `In ${n} days` : "Today"} bg="#EEE9DD" fg="#4a4a4a" />
+    const p = f.autopay ? <Pill text={n > 0 ? `In ${n} days` : "Today"} bg="#E8EAED" fg="#4a4b50" />
       : n < 0 ? <Pill text={`Overdue ${-n} days`} bg="#FADBD8" fg="#8E1F1A" />
       : n === 0 ? <Pill text="Due today" bg="#FDEBC8" fg="#7A4208" />
       : n <= 7 ? <Pill text={`Due in ${n} days`} bg="#FDEBC8" fg="#7A4208" />
-      : <Pill text={`In ${n} days`} bg="#EEE9DD" fg="#4a4a4a" />;
-    return <div className="flex flex-col gap-1 items-start"><span className="font-medium">{dlabel(f.due_date)}</span>{p}</div>;
+      : <Pill text={`In ${n} days`} bg="#E8EAED" fg="#4a4b50" />;
+    return <div className="flex flex-col gap-1 items-start"><span>{dlabel(f.due_date)}</span>{p}</div>;
   };
   const paidCell = (r: Extract<Row, { kind: "bill" }>) => {
     const f = r.f;
@@ -555,22 +627,15 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       const diffNote = Math.abs(paid - amt) > 0.004 ? (paid < amt ? `Paid ${money(paid)} · ${money(amt - paid)} credit` : `Paid ${money(paid)} · ${money(paid - amt)} over`) : "";
       return (
         <div>
-          <span className="inline-flex items-center gap-1.5 font-semibold" style={{ color: "#14532D" }}><Icon d={P.check} size={16} />{dlabel(f.paid_date)}{f.paid_auto && <span className="font-medium" style={{ color: "#4a4a4a" }}>· Auto</span>}</span>
-          {diffNote && <div className="text-xs mt-0.5" style={{ color: "#5f5f5f" }}>{diffNote}</div>}
-          {Number(f.overpaid_credit ?? 0) > 0 && <div className="text-xs mt-0.5" style={{ color: "#5f5f5f" }}>{money(Number(f.overpaid_credit))} credit with vendor</div>}
+          <span className="inline-flex items-center gap-1.5 font-semibold" style={{ color: "#14532D" }}><Icon d={P.check} size={16} />{dlabel(f.paid_date)}{f.paid_auto && <span className="font-medium" style={{ color: "#55565b" }}>· Auto</span>}</span>
+          {diffNote && <div className="text-xs mt-0.5" style={{ color: QMUTED }}>{diffNote}</div>}
+          {Number(f.overpaid_credit ?? 0) > 0 && <div className="text-xs mt-0.5" style={{ color: QMUTED }}>{money(Number(f.overpaid_credit))} credit with vendor</div>}
         </div>
       );
     }
-    if (f.autopay) {
-      return <span className="inline-flex items-center gap-1.5 rounded-full font-bold whitespace-nowrap" style={{ height: 32, padding: "0 12px", background: "#E4ECF8", color: "#1B3A6B", fontSize: 13 }}><Icon d={P.refresh} size={15} />Autopay {f.due_date ? dlabel(f.due_date) : ""}</span>;
-    }
-    const partial = Number(f.paid_amount ?? 0) > 0;
-    return finance ? (
-      <div>
-        <button type="button" onClick={() => openPay(f, false)} disabled={busy} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 13, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Mark paid</button>
-        {partial && <div className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Paid {money(Number(f.paid_amount))} · {money(owedOf(f))} left</div>}
-      </div>
-    ) : <span style={{ color: "#7a7a7a" }}>—</span>;
+    if (f.autopay) return <span className="inline-flex items-center gap-1.5 rounded-full font-bold whitespace-nowrap" style={{ height: 30, padding: "0 12px", background: "#E4ECF8", color: "#1B3A6B", fontSize: 13 }}><Icon d={P.refresh} size={15} />Autopay {f.due_date ? dlabel(f.due_date) : ""}</span>;
+    if (Number(f.paid_amount ?? 0) > 0) return <div className="text-xs" style={{ color: QMUTED }}>Paid {money(Number(f.paid_amount))}<br />{money(owedOf(f))} left</div>;
+    return dash;
   };
   const fromCell = (f: FileRow) => {
     const nm = f.paid_from_name || "";
@@ -582,146 +647,167 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       return <span>{nm || "Other"}</span>;
     }
     if (f.autopay) return <span>Autopay · {nm}</span>;
-    return <span style={{ color: "#7a7a7a" }}>—</span>;
+    return dash;
   };
   const menuItem = "block w-full text-left px-3 py-2 text-sm hover:bg-slate-50";
-  const rowMenu = (key: string, items: { label: string; onClick: () => void; danger?: boolean }[]) => (
-    <span className="relative inline-block">
-      <button type="button" aria-label="More actions" onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === key ? null : key); }}
-        className="inline-flex items-center justify-center rounded-lg" style={{ width: 40, height: 40, color: "#4a4a4a" }}><Icon d={P.more} sw={3.6} /></button>
-      {menuFor === key && (
-        <div className="absolute right-0 z-30 mt-1 rounded-xl bg-white shadow-lg py-1" style={{ minWidth: 230, border: `1px solid ${LINE}` }} onClick={(e) => e.stopPropagation()}>
-          {items.map((it) => <button key={it.label} type="button" className={menuItem} style={it.danger ? { color: "#b91c1c" } : undefined} onClick={() => { setMenuFor(null); it.onClick(); }}>{it.label}</button>)}
-        </div>
+  // The blue action link, a thin divider, and a drop-down arrow for the rest of the row's actions.
+  const actionCell = (key: string, label: string, onClick: () => void, items: { label: string; onClick: () => void; danger?: boolean }[] = []) => (
+    <div className="flex items-center">
+      <button type="button" onClick={onClick} disabled={busy} className="font-semibold" style={{ color: QLINK, fontSize: 15, height: 40, whiteSpace: "nowrap" }}>{label}</button>
+      {items.length > 0 && (
+        <>
+          <span aria-hidden="true" style={{ width: 1, height: 22, background: QBORDER, margin: "0 6px 0 10px" }} />
+          <span className="relative inline-block">
+            <button type="button" aria-label="More actions" onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === key ? null : key); }} className="inline-flex items-center justify-center rounded-lg" style={{ width: 36, height: 40, color: "#4a4b50" }}><Icon d={P.down} /></button>
+            {menuFor === key && (
+              <div className="absolute right-0 z-30 mt-1 rounded-xl bg-white shadow-lg py-1" style={{ minWidth: 230, border: `1px solid ${LINE}` }} onClick={(e) => e.stopPropagation()}>
+                {items.map((it) => <button key={it.label} type="button" className={menuItem} style={it.danger ? { color: "#b91c1c" } : undefined} onClick={() => { setMenuFor(null); it.onClick(); }}>{it.label}</button>)}
+              </div>
+            )}
+          </span>
+        </>
       )}
-    </span>
+    </div>
   );
-  const vendorCell = (r: Row) => {
+  const vendorCell = (r: Row, showName = true) => {
     const f = "f" in r ? r.f : null;
     const carry = f && f.doc_type === "invoice" && f.month < month && !f.paid;
     const moved = f && f.doc_type === "invoice" && f.month < month && f.paid;
-    const sub = f?.invoice_number ? `Invoice #${f.invoice_number}` : "";
+    const chips = (
+      <>
+        {carry && f && <Pill text={`From ${MON[Number(f.month.slice(5)) - 1]}`} bg="#EFE6D2" fg="#5A4510" />}
+        {moved && f && <Pill text={`Dated ${dlabel(f.invoice_date ?? f.month + "-01")}`} bg="#EFE6D2" fg="#5A4510" />}
+        {r.kind === "doc" && <Pill text="Statement" bg="#E8EAED" fg="#4a4b50" />}
+      </>
+    );
+    if (!showName) {
+      const label = r.kind === "waiting" || r.kind === "skipped" ? `${monthWord} statement` : f?.invoice_number ? `Invoice #${f.invoice_number}` : "Statement";
+      return (
+        <td style={{ ...cell, paddingLeft: 32 }}>
+          <div className="flex items-center gap-2 flex-wrap" style={{ color: r.kind === "waiting" || r.kind === "skipped" ? "#55565b" : QINK, fontWeight: r.kind === "bill" ? 600 : 500, fontStyle: r.kind === "waiting" ? "italic" : "normal" }}>{label}{chips}</div>
+        </td>
+      );
+    }
+    const sub = f?.invoice_number ? `Invoice #${f.invoice_number}` : r.kind === "waiting" ? `${monthWord} statement` : "";
     return (
-      <td style={{ ...td, paddingLeft: 16 }}>
-        <div className="font-semibold flex items-center gap-2 flex-wrap" style={{ color: r.kind === "waiting" || r.kind === "skipped" ? "#4a4a4a" : INK }}>
-          {r.vendor}
-          {carry && f && <Pill text={`From ${MON[Number(f.month.slice(5)) - 1]}`} bg="#EFE6D2" fg="#5A4510" />}
-          {moved && f && <Pill text={`Dated ${dlabel(f.invoice_date ?? f.month + "-01")}`} bg="#EFE6D2" fg="#5A4510" />}
-          {r.kind === "doc" && <Pill text="Statement" bg="#EEE9DD" fg="#4a4a4a" />}
-        </div>
-        {sub && <div className="text-xs mt-0.5" style={{ color: "#6b6b6b" }}>{sub}</div>}
+      <td style={cell}>
+        <div className="flex items-center gap-2 flex-wrap" style={{ fontWeight: 600, color: r.kind === "skipped" ? "#55565b" : QINK }}>{r.vendor}{chips}</div>
+        {sub && <div className="text-xs mt-px" style={{ color: QMUTED, fontStyle: r.kind === "waiting" ? "italic" : "normal" }}>{sub}</div>}
       </td>
     );
   };
-  const pdfBtn = (f: FileRow) => f.file_name ? (
-    <button type="button" aria-label="Open PDF" onClick={() => download(f)} className="inline-flex items-center justify-center rounded-lg" style={{ width: 40, height: 40, color: "#4a4a4a" }}><Icon d={P.doc} /></button>
-  ) : null;
+  const vendorItems = (vendorId: string, vendor: string) => (view.srcMap[vendorId]
+    ? [{ label: "Rename vendor…", onClick: () => renameVendor(vendorId, vendor) }, { label: "Merge into another vendor…", onClick: () => openMerge(vendorId) }]
+    : []);
+  const checkCell = (r: Row) => (
+    <td style={{ ...cell, padding: 0, textAlign: "center" }}>
+      {finance && selectable(r) ? chk(!!sel[(r as any).f.id], () => setSel((m) => ({ ...m, [(r as any).f.id]: !m[(r as any).f.id] })), `Select ${r.vendor}`) : null}
+    </td>
+  );
 
-  const renderRow = (r: Row) => {
+  const renderRow = (r: Row, showName = true) => {
     if (r.kind === "waiting") {
       return (
         <tr key={`w:${r.vendorId}`}>
-          {vendorCell(r)}
-          <td style={{ ...td, color: "#6b6b6b", fontStyle: "italic" }} colSpan={2}>Hasn’t come in yet</td>
-          <td style={td}><Pill text="Waiting" bg="#EEE9DD" fg="#3d3d3d" /></td>
-          <td style={td} colSpan={2}>
-            {finance && (
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={() => openAdd({ vendor: r.vendor })} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 13, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}><Icon d={P.plus} size={16} />Add statement</button>
-                <button type="button" onClick={() => skipVendor(r.vendorId, r.vendor)} disabled={busy} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 13, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Skip this month</button>
-              </div>
-            )}
-          </td>
-          <td style={{ ...td, paddingRight: 8 }}>{finance && rowMenu(`w:${r.vendorId}`, [{ label: "Only expect when they bill", onClick: () => setExpect(r.vendorId, "never") }])}</td>
+          {checkCell(r)}{vendorCell(r, showName)}
+          <td style={{ ...cell, color: QMUTED, fontStyle: "italic" }} colSpan={2}>Hasn’t come in yet</td>
+          <td style={cell}><Pill text="Waiting" bg="#E8EAED" fg="#3d3e42" /></td>
+          <td style={cell} colSpan={2}>{dash}</td>
+          <td style={cell}>{finance && actionCell(`w:${r.vendorId}`, "Add statement", () => openAdd({ vendor: r.vendor }), [
+            { label: "Skip this month", onClick: () => skipVendor(r.vendorId, r.vendor) },
+            { label: "Only expect when they bill", onClick: () => setExpect(r.vendorId, "never") },
+            ...vendorItems(r.vendorId, r.vendor),
+          ])}</td>
         </tr>
       );
     }
     if (r.kind === "skipped") {
       return (
-        <tr key={`s:${r.f.id}`} style={{ background: "#FCFAF4" }}>
-          {vendorCell(r)}
-          <td style={{ ...td, color: "#6b6b6b", fontStyle: "italic" }} colSpan={4}>Skipped for {monthWord}</td>
-          <td style={td} colSpan={2}>{finance && <button type="button" onClick={() => undoSkip(r.f)} disabled={busy} className="underline font-semibold" style={{ color: DEEP, height: 40 }}>Undo skip</button>}</td>
+        <tr key={`s:${r.f.id}`} style={{ background: "#FAFAFB" }}>
+          {checkCell(r)}{vendorCell(r, showName)}
+          <td style={{ ...cell, color: QMUTED, fontStyle: "italic" }} colSpan={5}>Skipped for {monthWord}</td>
+          <td style={cell}>{finance && actionCell(`s:${r.f.id}`, "Undo skip", () => undoSkip(r.f))}</td>
         </tr>
       );
     }
     const f = r.f;
+    const pdf = f.file_name ? [{ label: "Open PDF", onClick: () => download(f) }] : [];
     if (r.kind === "doc") {
       return (
         <tr key={f.id}>
-          {vendorCell(r)}
-          <td style={td}>{dlabel(f.invoice_date ?? `${f.month}-01`)}</td>
-          <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{money(f.amount)}</td>
-          <td style={td}><span style={{ color: "#7a7a7a" }}>—</span></td>
-          <td style={td}><span style={{ color: "#7a7a7a" }}>—</span></td>
-          <td style={td}><span style={{ color: "#7a7a7a" }}>—</span></td>
-          <td style={{ ...td, paddingRight: 8, whiteSpace: "nowrap" }}>{pdfBtn(f)}{finance && rowMenu(f.id, [{ label: "Delete", onClick: () => removeFile(f), danger: true }])}</td>
+          {checkCell(r)}{vendorCell(r, showName)}
+          <td style={cell}>{dlabel(f.invoice_date ?? `${f.month}-01`)}</td>
+          <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(f.amount)}</td>
+          <td style={cell}>{dash}</td><td style={cell}>{dash}</td><td style={cell}>{dash}</td>
+          <td style={cell}>{f.file_name ? actionCell(`d:${f.id}`, "View PDF", () => download(f), finance ? [{ label: "Delete", onClick: () => removeFile(f), danger: true }] : []) : null}</td>
         </tr>
       );
     }
-    const items: { label: string; onClick: () => void; danger?: boolean }[] = [
-      { label: "Add another for this vendor", onClick: () => openAdd({ vendor: r.vendor }) },
-      { label: "Edit invoice", onClick: () => openEdit(f) },
-    ];
+    // A bill: the main link depends on its state, the arrow holds the rest.
+    const items: { label: string; onClick: () => void; danger?: boolean }[] = [...pdf];
+    let primary = { label: "Mark paid", onClick: () => openPay(f, false) };
+    if (f.paid || f.autopay) primary = { label: "Edit", onClick: () => openEdit(f) };
+    if (!f.paid && !f.autopay) items.push({ label: "Edit invoice", onClick: () => openEdit(f) });
     if (f.paid) { items.push({ label: "Edit payment", onClick: () => openPay(f, true) }); items.push({ label: "Undo paid", onClick: () => undoPaid(f) }); }
     else if (Number(f.paid_amount ?? 0) > 0) items.push({ label: "Undo partial payment", onClick: () => undoPaid(f) });
     if (f.autopay && f.paid_auto) items.push({ label: "Autopay didn’t go through", onClick: () => autopayFailed(f) });
     if (f.matched_bill_id && !f.paid) items.push({ label: "Unlink scheduled bill", onClick: () => unlinkBill(f) });
+    items.push({ label: "Add another for this vendor", onClick: () => openAdd({ vendor: r.vendor }) });
+    items.push(...vendorItems(r.vendorId, r.vendor));
     items.push({ label: "Delete", onClick: () => removeFile(f), danger: true });
     return (
-      <tr key={f.id}>
-        {vendorCell(r)}
-        <td style={td}>{dlabel(f.invoice_date ?? `${f.month}-01`)}</td>
-        <td style={{ ...td, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(f.amount)}</td>
-        <td style={td}>{dueCell(f)}</td>
-        <td style={td}>{paidCell(r)}</td>
-        <td style={{ ...td, fontSize: 13 }}>{fromCell(f)}</td>
-        <td style={{ ...td, paddingRight: 8, whiteSpace: "nowrap" }}>{pdfBtn(f)}{finance && rowMenu(f.id, items)}</td>
+      <tr key={f.id} style={sel[f.id] ? { background: "#FFF8F0" } : undefined}>
+        {checkCell(r)}{vendorCell(r, showName)}
+        <td style={cell}>{dlabel(f.invoice_date ?? `${f.month}-01`)}</td>
+        <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(f.amount)}</td>
+        <td style={cell}>{dueCell(f)}</td>
+        <td style={cell}>{paidCell(r)}</td>
+        <td style={{ ...cell, fontSize: 14 }}>{fromCell(f)}</td>
+        <td style={cell}>{finance ? actionCell(f.id, primary.label, primary.onClick, items) : f.file_name ? actionCell(f.id, "View PDF", () => download(f)) : null}</td>
       </tr>
     );
   };
 
-  // Account statements section
-  const acctRows = data.accounts.filter((a) => a.name.toLowerCase().includes(search.trim().toLowerCase()));
-  const acctSection = acctRows.length > 0 && (filter === "all") && (
-    <div className="rounded-2xl bg-white overflow-x-auto" style={{ border: `1px solid ${LINE}` }}>
-      <button type="button" onClick={() => setShowAccounts(!showAccounts)} className="w-full flex items-center justify-between px-4 py-3 text-left" style={{ background: BAND }}>
-        <span className="font-semibold" style={{ fontFamily: "Poppins, sans-serif" }}>Account statements <span className="font-normal text-sm" style={{ color: "#5f5f5f" }}>· bank, card and loan statements. The balance goes to Cash Flow.</span></span>
-        <span className="text-sm font-semibold" style={{ color: DEEP }}>{showAccounts ? "Hide" : "Show"}</span>
+  // ---- account statements: bank accounts, cards and loans, in the same columns, each group alphabetical ----
+  const byName = (x: Acct, y: Acct) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: "base" });
+  const acctRows = data.accounts.filter((x) => x.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const acctGroups = ([["bank", "Bank accounts", "#3F7CAC"], ["card", "Credit cards", "#B25D7A"], ["loan", "Loans", "#6F8A2E"]] as const)
+    .map(([k, label, color]) => ({ k, label, color, list: acctRows.filter((x) => x.kind === k).sort(byName) }))
+    .filter((g) => g.list.length > 0);
+  const showAcct = acctGroups.length > 0 && filter === "all" && !catFilter && dueFilter === "all";
+  const acctRow = (a: Acct) => {
+    const fs = data.files.filter((f) => f.account_kind === a.kind && f.account_id === a.id && f.doc_type !== "invoice");
+    const filed = fs.find((f) => !f.no_statement), none = fs.find((f) => f.no_statement);
+    const late = month < data.currentMonth;
+    const status = filed ? <Pill text="Filed" bg="#E3F3E9" fg="#14532D" /> : none ? <Pill text={`No statement${none.note ? `: ${none.note}` : ""}`.slice(0, 36)} bg="#E8EAED" fg="#4a4b50" /> : late ? <Pill text="Waiting" bg="#FDEBC8" fg="#7A4208" /> : <Pill text="Not out yet" bg="#E8EAED" fg="#4a4b50" />;
+    let action: React.ReactNode = null;
+    if (filed) action = actionCell(`a:${a.kind}:${a.id}`, "View PDF", () => download(filed), finance ? [{ label: "Remove", onClick: () => removeFile(filed), danger: true }] : []);
+    else if (none) action = finance ? actionCell(`a:${a.kind}:${a.id}`, "Undo", () => undoSkip(none)) : null;
+    else if (finance) action = actionCell(`a:${a.kind}:${a.id}`, "File statement", () => openAcct(a), [{ label: "No statement this month", onClick: () => skipAcct(a) }]);
+    return (
+      <tr key={`${a.kind}:${a.id}`}>
+        <td style={cell} />
+        <td style={{ ...cell, fontWeight: 600 }}>{a.name}</td>
+        <td style={cell}>{filed ? `${MON[Number(month.slice(5)) - 1]} ${month.slice(0, 4)}` : dash}</td>
+        <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{filed ? money(filed.amount) : dash}</td>
+        <td style={cell}>{dash}</td>
+        <td style={cell}>{status}</td>
+        <td style={{ ...cell, fontSize: 14 }}>{filed?.file_name ?? dash}</td>
+        <td style={cell}>{action}</td>
+      </tr>
+    );
+  };
+  const bandRow = (key: string, color: string, name: string, count: string, open: boolean, toggle: () => void, bg = "#F4F5F8", big = false) => (
+    <tr key={key}><td colSpan={8} style={{ padding: 0, background: bg, borderTop: `1px solid ${QBORDER}` }}>
+      <button type="button" onClick={toggle} aria-expanded={open} className="w-full flex items-center gap-2.5 text-left" style={{ padding: "12px 14px" }}>
+        <span className="inline-flex" style={{ color: "#55565b", transform: open ? "none" : "rotate(-90deg)" }}><Icon d={P.down} size={18} /></span>
+        <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: "50%", background: color, display: "inline-block" }} />
+        <span style={{ fontWeight: 700, fontSize: big ? 18 : 16 }}>{name}</span>
+        <span style={{ fontSize: 14, color: QMUTED }}>{count}</span>
       </button>
-      {showAccounts && (
-        <table className="w-full text-sm" style={{ minWidth: 700, borderCollapse: "collapse" }}>
-          <thead><tr><th className={th} style={{ paddingLeft: 16 }}>Account</th><th className={th}>Statement</th><th className={th} style={{ textAlign: "right" }}>Balance</th><th className={th}>Status</th><th className={th} /></tr></thead>
-          <tbody>
-            {acctRows.map((a) => {
-              const fs = data.files.filter((f) => f.account_kind === a.kind && f.account_id === a.id && f.doc_type !== "invoice");
-              const filed = fs.find((f) => !f.no_statement), none = fs.find((f) => f.no_statement);
-              const late = month < data.currentMonth;
-              return (
-                <tr key={`${a.kind}:${a.id}`}>
-                  <td style={{ ...td, paddingLeft: 16, fontWeight: 600 }}>{a.name} <span className="text-xs font-normal" style={{ color: "#6b6b6b" }}>{a.kind === "bank" ? "Bank" : a.kind === "card" ? "Card" : "Loan"}</span></td>
-                  <td style={td}>{filed ? <span>{filed.file_name}</span> : <span style={{ color: "#7a7a7a" }}>—</span>}</td>
-                  <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{filed ? money(filed.amount) : "—"}</td>
-                  <td style={td}>{filed ? <Pill text="Filed" bg="#E3F3E9" fg="#14532D" /> : none ? <Pill text={`No statement${none.note ? `: ${none.note}` : ""}`.slice(0, 40)} bg="#EEE9DD" fg="#4a4a4a" /> : late ? <Pill text="Waiting" bg="#FDEBC8" fg="#7A4208" /> : <Pill text="Not out yet" bg="#EEE9DD" fg="#4a4a4a" />}</td>
-                  <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
-                    {filed && pdfBtn(filed)}
-                    {finance && filed && <button type="button" onClick={() => removeFile(filed)} className="text-xs underline px-2" style={{ color: "#b91c1c", height: 40 }}>Remove</button>}
-                    {finance && none && <button type="button" onClick={() => undoSkip(none)} className="text-xs underline px-2" style={{ color: DEEP, height: 40 }}>Undo</button>}
-                    {finance && !filed && !none && (
-                      <>
-                        <button type="button" onClick={() => openAcct(a)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 13, background: late ? ORANGE : "#fff", color: INK, border: `1px solid ${late ? ORANGE : "#CFC6AF"}` }}>File statement</button>
-                        <button type="button" onClick={() => skipAcct(a)} className="text-xs underline px-2" style={{ color: "#5f5f5f", height: 40 }}>No statement</button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
+    </td></tr>
   );
+  const allCollapsed = view.cats.length > 0 && view.cats.every((c) => collapsed[c]);
 
   const modal = (children: React.ReactNode, wide = false) => (
     <div className="fixed inset-0 z-50 flex items-start justify-center px-4 py-6 overflow-y-auto" style={{ background: "rgba(15,23,42,0.35)" }}>
@@ -743,128 +829,322 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const matchedVendor = vendorByName(aVendor);
   const vendorCredit = matchedVendor ? data.credits[matchedVendor.id] ?? 0 : 0;
 
+  // ---- print / export / pay several at once ----
+  function exportCsv() {
+    const q = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [["Category", "Vendor", "Invoice #", "Statement date", "Amount", "Due by", "Paid", "Paid date", "Amount paid", "Paid from"].map(q).join(",")];
+    for (const r of view!.shown) if (r.kind === "bill") {
+      const f = r.f;
+      lines.push([r.cat, r.vendor, f.invoice_number ?? "", f.invoice_date ?? f.month, f.amount ?? "", f.due_date ?? "", f.paid ? "Yes" : "No", f.paid_date ?? "", f.paid ? paidSum(f) : "", f.paid_from_name ?? ""].map(q).join(","));
+    }
+    const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `statements-${month}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  function openBulk() {
+    setBErr(""); setBDate(today); setBMethod("ach");
+    const first = data!.payAccounts[0]; setBFrom(first ? `${first.kind}:${first.id}` : "other"); setBCheck("");
+    setBulkOpen(true);
+  }
+  async function doBulk() {
+    const acct = data!.payAccounts.find((a) => `${a.kind}:${a.id}` === bFrom);
+    if (bMethod === "check") {
+      if (!acct || acct.kind !== "bank") { setBErr("Choose the bank account the checks are drawn on."); return; }
+      if (!/^\d+$/.test(bCheck.trim())) { setBErr("Enter the first check number (numbers only). The rest follow in order."); return; }
+    }
+    const list = [...selRows].sort((x, z) => x.vendor.localeCompare(z.vendor, undefined, { sensitivity: "base" }));
+    setBusy(true); setBErr("");
+    let n = bMethod === "check" ? Number(bCheck.trim()) : 0, done = 0;
+    for (const r of list) {
+      const res = await api("/api/statements/manage", {
+        action: "markInvoicePaid", id: r.f.id, paid: true, paidDate: bDate, method: bMethod, checkNumber: bMethod === "check" ? String(n) : "",
+        paidFromKind: acct ? acct.kind : "other", paidFromId: acct?.id ?? "", paidFromName: acct ? acct.name : "Other", paidNote: "", paidAmount: owedOf(r.f),
+      });
+      if (!res.ok) { setBusy(false); setBErr(`${done} of ${list.length} marked paid. Stopped at ${r.vendor}: ${res.json.error === "duplicate" ? `check #${n} is already on the register. Try a different first number.` : res.json.error ?? "couldn’t save."}`); setSel((m) => { const c = { ...m }; for (const x of list.slice(0, done)) delete c[x.f.id]; return c; }); changed(); return; }
+      done++; if (bMethod === "check") n++;
+    }
+    setBusy(false); setBulkOpen(false); setSel({}); setMsg(`Marked ${done} statement${done === 1 ? "" : "s"} paid.`); changed();
+  }
+
   return (
-    <div className="space-y-3.5" style={{ color: INK }}>
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 28, lineHeight: 1.15 }}>Statements</h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1.5 rounded-xl bg-white" style={{ border: "1px solid #CFC6AF", padding: 4 }}>
-            <button type="button" aria-label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))} className="inline-flex items-center justify-center rounded-lg" style={{ width: 40, height: 40 }}><Icon d={P.left} /></button>
-            <select aria-label="Month" value={Number(month.slice(5))} onChange={(e) => setMonth(`${month.slice(0, 4)}-${String(e.target.value).padStart(2, "0")}`)} className="rounded-lg bg-transparent focus:outline-none" style={{ height: 40, padding: "0 4px", fontFamily: "Poppins, sans-serif", fontWeight: 600, fontSize: 15 }}>
-              {FULL.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-            </select>
-            <select aria-label="Year" value={month.slice(0, 4)} onChange={(e) => setMonth(`${e.target.value}-${month.slice(5)}`)} className="rounded-lg bg-transparent focus:outline-none" style={{ height: 40, padding: "0 4px", fontFamily: "Poppins, sans-serif", fontWeight: 600, fontSize: 15 }}>
-              {Array.from({ length: 8 }, (_, i) => Number(data.currentMonth.slice(0, 4)) - 6 + i).map((y) => <option key={y} value={String(y)}>{y}</option>)}
-            </select>
-            <button type="button" aria-label="Next month" onClick={() => setMonth(shiftMonth(month, 1))} className="inline-flex items-center justify-center rounded-lg" style={{ width: 40, height: 40 }}><Icon d={P.right} /></button>
-          </div>
-          {month !== data.currentMonth && <button type="button" onClick={() => setMonth(data.currentMonth)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 13, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>This month</button>}
-          {finance && <button type="button" onClick={() => openAdd()} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}><Icon d={P.plus} size={16} />Add statement</button>}
+    <div className="space-y-5" style={{ color: QINK }}>
+      <style>{`.stm td:last-child,.stm th:last-child{border-right:none !important}.stm tr.grand td{border-right:1px solid rgba(255,255,255,0.22) !important}@media print{.no-print{display:none !important}}`}</style>
+
+      {/* Title row */}
+      <div className="flex flex-wrap items-center justify-between gap-4 no-print">
+        <h1 className="m-0" style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 500, fontSize: 36, lineHeight: 1.15 }}>Statements</h1>
+        <div className="flex items-center gap-5">
+          <button type="button" onClick={() => load()} className="inline-flex items-center gap-2 font-semibold" style={{ color: QLINK, fontSize: 17, height: 44 }}><Icon d={P.refresh} size={20} />Update</button>
+          {finance && (
+            <div className="relative flex items-stretch rounded-lg" style={{ background: ORANGE, color: INK }}>
+              <button type="button" onClick={() => openAdd()} className="font-bold" style={{ fontSize: 17, height: 48, padding: "0 22px" }}>Add statement</button>
+              <button type="button" aria-label="More ways to add" onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === "add" ? null : "add"); }} className="inline-flex items-center justify-center" style={{ width: 46, borderLeft: "1px solid rgba(35,38,52,0.35)" }}><Icon d={P.down} size={20} /></button>
+              {menuFor === "add" && (
+                <div className="absolute right-0 top-full z-30 mt-1 rounded-xl bg-white shadow-lg py-1" style={{ minWidth: 230, border: `1px solid ${LINE}` }} onClick={(e) => e.stopPropagation()}>
+                  <button type="button" className={menuItem} onClick={() => { setMenuFor(null); openAdd(); }}>Add statement</button>
+                  <button type="button" className={menuItem} onClick={() => { setMenuFor(null); setShowAccounts(true); setFilter("all"); document.getElementById("acct-section")?.scrollIntoView({ behavior: "smooth" }); }}>Go to account statements</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
+      </div>
+
+      {/* Month heading */}
+      <div className="flex flex-wrap items-center gap-4 no-print">
+        <span className="inline-flex items-center justify-center rounded-full" style={{ width: 56, height: 56, background: "#1F6FB2", color: "#fff" }}><Icon d={P.cal} size={28} /></span>
+        <div className="flex items-center gap-2">
+          <select aria-label="Month" value={Number(month.slice(5))} onChange={(e) => setMonth(`${month.slice(0, 4)}-${String(e.target.value).padStart(2, "0")}`)} className="bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 32, fontWeight: 500 }}>
+            {FULL.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+          <select aria-label="Year" value={month.slice(0, 4)} onChange={(e) => setMonth(`${e.target.value}-${month.slice(5)}`)} className="bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 32, fontWeight: 500 }}>
+            {Array.from({ length: 8 }, (_, i) => Number(data.currentMonth.slice(0, 4)) - 6 + i).map((y) => <option key={y} value={String(y)}>{y}</option>)}
+          </select>
+        </div>
+        <button type="button" aria-label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))} className="inline-flex items-center justify-center rounded-lg bg-white" style={{ width: 40, height: 40, border: `1px solid ${QBORDER}` }}><Icon d={P.left} /></button>
+        <button type="button" aria-label="Next month" onClick={() => setMonth(shiftMonth(month, 1))} className="inline-flex items-center justify-center rounded-lg bg-white" style={{ width: 40, height: 40, border: `1px solid ${QBORDER}` }}><Icon d={P.right} /></button>
+        {month !== data.currentMonth && <button type="button" onClick={() => setMonth(data.currentMonth)} className="font-semibold" style={{ color: QLINK, fontSize: 15 }}>Go to this month</button>}
       </div>
 
       {loadError && <p className="text-sm text-red-600 font-semibold">⚠️ {loadError}</p>}
       {msg && <p className="text-sm font-semibold text-slate-600">{msg}</p>}
 
-      {/* Summary strip */}
-      <div className="flex flex-wrap bg-white overflow-hidden" style={{ border: `1px solid ${LINE}`, borderRadius: 14 }}>
-        {[
-          { l: "All statements", v: money(all.t), s: `${nBills} statements · ${new Set(view.rows.filter((r) => r.kind === "bill").map((r) => r.cat)).size} categories`, c: INK },
-          { l: "Paid", v: money(all.p), s: `${nPaid} statements${credits > 0.004 ? ` · ${money(credits)} in credits` : ""}`, c: "#14532D" },
-          { l: "Still owed", v: money(all.o), s: `${nUnpaid} unpaid${nAuto ? `, ${nAuto} on autopay` : ""}${nOver ? ` · ${nOver} overdue (${money(overAmt)})` : ""}`, c: "#8E1F1A" },
-        ].map((c, i) => (
-          <div key={c.l} className="flex flex-col" style={{ flex: "1 1 200px", padding: "10px 18px", gap: 1, borderLeft: i === 0 ? undefined : `1px solid ${LINE}` }}>
-            <div className="uppercase" style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: "#5f5f5f" }}>{c.l}</div>
-            <div style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 20, lineHeight: 1.25, color: c.c, fontVariantNumeric: "tabular-nums" }}>{c.v}</div>
-            <div style={{ fontSize: 12, color: "#5f5f5f" }}>{c.s}</div>
-          </div>
-        ))}
+      {/* Cards: they filter the list too */}
+      <div className="flex flex-wrap gap-4 no-print">
+        {card("all", "All statements", money(all.t), `Paid: ${money(all.p)}${credits > 0.004 ? ` · ${money(credits)} in credits` : ""}`, nBills)}
+        {card("unpaid", "Still owed", money(all.o), `${nOver} overdue (${money(overAmt)})`, nUnpaid, "#8E1F1A")}
+        {card("autopay", "On autopay", money(autoAmt), `${nAutoUnpaid} scheduled · ${nAuto - nAutoUnpaid} paid so far`, nAuto)}
+        {card("waiting", "Waiting on", `${waitUnique.length} vendor${waitUnique.length === 1 ? "" : "s"}`, waitUnique.length === 0 ? "Nothing outstanding" : waitUnique.length <= 2 ? waitUnique.join(", ") : `${waitUnique.slice(0, 2).join(", ")} +${waitUnique.length - 2} more`, view.counts.waiting)}
       </div>
 
       {/* Waiting bar */}
-      {(waitNames.length > 0 || (data.prevMissing.length > 0)) && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl" style={{ background: "#FDEBC8", color: "#5E3306", padding: "8px 8px 8px 16px" }}>
+      {(waitNames.length > 0 || data.prevMissing.length > 0) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl no-print" style={{ background: "#FDEBC8", color: "#5E3306", padding: "8px 8px 8px 16px" }}>
           <span className="inline-flex" style={{ color: "#7A4208" }}><Icon d={P.clock} size={20} /></span>
-          <div className="text-sm leading-snug" style={{ flex: "1 1 420px" }}>
-            {waitNames.length > 0 && <div><strong>Waiting on {waitNames.length} vendor{waitNames.length === 1 ? "" : "s"} for {monthWord}:</strong> {waitText}. Add each one when it arrives, or skip it if you don’t expect one this month.</div>}
-            {data.prevMissing.length > 0 && <div className={waitNames.length > 0 ? "mt-1" : ""}><strong>{FULL[Number(data.prevMonth.slice(5)) - 1]} account statements still missing:</strong> {data.prevMissing.join(", ")}.</div>}
+          <div className="leading-snug" style={{ flex: "1 1 420px", fontSize: 15 }}>
+            {waitUnique.length > 0 && <div><strong>Waiting on {waitUnique.length} vendor{waitUnique.length === 1 ? "" : "s"} for {monthWord}:</strong> {waitText}. Add each one when it arrives, or skip it if you don’t expect one this month.</div>}
+            {data.prevMissing.length > 0 && <div className={waitUnique.length > 0 ? "mt-1" : ""}><strong>{FULL[Number(data.prevMonth.slice(5)) - 1]} account statements still missing:</strong> {[...data.prevMissing].sort((x, y) => x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" })).join(", ")}.</div>}
           </div>
           <div className="flex gap-2">
-            {waitNames.length > 0 && <button type="button" onClick={() => setFilter("waiting")} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 13, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Show only waiting</button>}
-            {data.prevMissing.length > 0 && <button type="button" onClick={() => setMonth(data.prevMonth)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 13, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Go to {FULL[Number(data.prevMonth.slice(5)) - 1]}</button>}
+            {waitUnique.length > 0 && <button type="button" onClick={() => setFilter("waiting")} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Show only waiting</button>}
+            {data.prevMissing.length > 0 && <button type="button" onClick={() => setMonth(data.prevMonth)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Go to {FULL[Number(data.prevMonth.slice(5)) - 1]}</button>}
           </div>
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-2">{seg("all", "All")}{seg("unpaid", "Unpaid")}{seg("autopay", "Autopay")}{seg("waiting", "Waiting")}{seg("paid", "Paid")}{seg("skipped", "Skipped")}</div>
-        <label className="flex items-center gap-2 rounded-lg bg-white px-3" style={{ border: "1px solid #CFC6AF", height: 40, color: "#5f5f5f", minWidth: 260 }}>
-          <Icon d={P.search} /><span className="sr-only">Search vendors</span>
-          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search vendors" className="w-full bg-transparent focus:outline-none" style={{ color: INK }} />
-        </label>
+      {finance && view.dupPairs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl no-print" style={{ background: "#E4ECF8", color: "#1B3A6B", padding: "8px 8px 8px 16px" }}>
+          <div className="leading-snug" style={{ flex: "1 1 420px", fontSize: 15 }}>
+            <strong>These may be the same vendor:</strong> {view.dupPairs.slice(0, 3).map((d, i) => <span key={d.from.id + d.into.id}>{i > 0 && "; "}{d.from.name} / {d.into.name}</span>)}. Merge them so their statements sit under one title.
+          </div>
+          <button type="button" onClick={() => openMerge(view.dupPairs[0].from.id, view.dupPairs[0].into.id)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Merge…</button>
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div className="inline-flex self-start rounded-lg no-print" style={{ background: "#E9EBEF", padding: 4, gap: 2, border: `1px solid ${QBORDER}` }}>
+        {tabBtn("all", "All")}{tabBtn("unpaid", "Unpaid")}{tabBtn("paid", "Paid")}{tabBtn("waiting", "Waiting")}{tabBtn("autopay", "Autopay")}{tabBtn("skipped", "Skipped")}
       </div>
 
-      {/* The list */}
-      <div className="bg-white overflow-x-auto" style={{ border: `1px solid ${LINE}`, borderRadius: 16 }}>
-        <table className="w-full" style={{ minWidth: 1000, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 14 }}>
-          <caption className="sr-only">Statements for {mlabel(month)}, grouped by category</caption>
-          <colgroup><col /><col style={{ width: 100 }} /><col style={{ width: 110 }} /><col style={{ width: 126 }} /><col style={{ width: 150 }} /><col style={{ width: 180 }} /><col style={{ width: 92 }} /></colgroup>
-          <thead>
-            <tr style={{ background: "#fff" }}>
-              <th scope="col" className={th} style={{ paddingLeft: 16 }}>Vendor</th><th scope="col" className={th}>Statement date</th><th scope="col" className={`${th} text-right`}>Amount</th>
-              <th scope="col" className={th}>Due by</th><th scope="col" className={th}>Paid</th><th scope="col" className={th}>Paid from</th><th scope="col" className={th}><span className="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {view.shown.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-slate-500">{loading ? "Loading…" : filter === "all" && !search ? `Nothing for ${mlabel(month)} yet. Use Add statement, or drop a PDF on this page.` : "Nothing matches."}</td></tr>}
-            {view.cats.map((cat) => {
-              const rs = view.shown.filter((r) => r.cat === cat);
-              const t = totals(rs);
-              const nb = rs.filter((r) => r.kind === "bill").length, nw = rs.filter((r) => r.kind === "waiting").length;
-              return (
-                <Fragment key={cat}>
-                  <tr><td colSpan={7} style={{ padding: "14px 16px 10px", background: BAND, borderTop: `1px solid ${LINE}` }}>
-                    <div className="flex items-center gap-2.5">
-                      <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: "50%", background: CAT_DOT[cat] ?? "#6b7a8f", display: "inline-block" }} />
-                      <span style={{ fontFamily: "Poppins, sans-serif", fontWeight: 600, fontSize: 15 }}>{cat}</span>
-                      <span className="text-sm" style={{ color: "#5f5f5f" }}>{nb} statement{nb === 1 ? "" : "s"}{nw ? ` · ${nw} waiting` : ""}</span>
-                    </div>
-                  </td></tr>
-                  {rs.map(renderRow)}
-                  <tr style={{ background: "#FBF8F0" }}>
-                    <td style={{ padding: "12px 16px", borderTop: `1px solid ${LINE}`, fontWeight: 700 }}>{cat} total</td>
-                    <td style={{ borderTop: `1px solid ${LINE}` }} />
-                    <td style={{ padding: 12, borderTop: `1px solid ${LINE}`, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(t.t)}</td>
-                    <td style={{ borderTop: `1px solid ${LINE}` }} />
-                    <td style={{ padding: 12, borderTop: `1px solid ${LINE}`, fontWeight: 600, color: "#14532D" }}>Paid {money(t.p)}</td>
-                    <td style={{ padding: 12, borderTop: `1px solid ${LINE}`, fontWeight: 600, color: t.o > 0.004 ? "#8E1F1A" : "#14532D" }}>Still owed {money(t.o)}</td>
-                    <td style={{ borderTop: `1px solid ${LINE}` }} />
-                  </tr>
-                </Fragment>
-              );
-            })}
-            {view.shown.length > 0 && (
-              <tr style={{ background: INK, color: "#fff" }}>
-                <td style={{ padding: 16, fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 15 }}>{monthWord} total</td><td />
-                <td style={{ padding: "16px 12px", textAlign: "right", fontWeight: 700, fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{money(grand.t)}</td><td />
-                <td style={{ padding: "16px 12px", fontWeight: 700 }}>Paid {money(grand.p)}</td>
-                <td style={{ padding: "16px 12px", fontWeight: 700 }}>Still owed {money(grand.o)}</td><td />
+      {/* Toolbar + table */}
+      <div className="bg-white overflow-hidden" style={{ border: `1px solid ${QBORDER}`, borderRadius: 10 }}>
+        <div className="flex flex-wrap items-center justify-between gap-3 no-print" style={{ padding: "18px 20px" }}>
+          <div className="flex flex-wrap gap-3">
+            <label className="flex items-center justify-between gap-2 rounded-lg" style={{ width: 280, height: 52, border: `1px solid ${QBORDER}`, padding: "0 14px", color: QMUTED }}>
+              <span className="sr-only">Search vendors</span>
+              <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" className="w-full bg-transparent focus:outline-none" style={{ fontSize: 17, color: QINK }} />
+              <Icon d={P.search} size={22} />
+            </label>
+            <label className="flex items-center gap-2 rounded-lg" style={{ width: 220, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px", color: QMUTED }}>
+              <span className="sr-only">Filter by due date</span>
+              <select value={dueFilter} onChange={(e) => setDueFilter(e.target.value as typeof dueFilter)} className="w-full bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 17, color: QINK }}>
+                <option value="all">All due dates</option><option value="overdue">Overdue</option><option value="week">Due in 7 days</option>
+              </select>
+              <Icon d={P.cal} size={22} />
+            </label>
+            <label className="flex items-center gap-2 rounded-lg" style={{ width: 260, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px" }}>
+              <span className="sr-only">Filter by category</span>
+              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-full bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 17, color: QINK }}>
+                <option value="">All categories</option>
+                {allCats.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="flex items-center gap-5" style={{ color: QMUTED, fontSize: 16 }}>
+            <span>1-{view.shown.length} of {view.shown.length}</span>
+            <span className="inline-flex items-center gap-1.5"><span style={{ color: "#B5B7BC" }}><Icon d={P.left} size={18} /></span>Page <span className="inline-block text-center rounded-md" style={{ minWidth: 44, border: `1px solid ${QBORDER}`, padding: "8px 0", color: QINK }}>1</span> of 1 <span style={{ color: "#B5B7BC" }}><Icon d={P.right} size={18} /></span></span>
+            <span className="inline-flex gap-4" style={{ color: "#4a4b50" }}>
+              <button type="button" aria-label="Print" onClick={() => window.print()} className="inline-flex"><Icon d={P.print} size={26} /></button>
+              <button type="button" aria-label="Export to a spreadsheet file" onClick={exportCsv} className="inline-flex"><Icon d={P.exp} size={26} /></button>
+              <button type="button" aria-label={allCollapsed ? "Expand all categories" : "Collapse all categories"} onClick={() => setCollapsed(allCollapsed ? {} : Object.fromEntries(view.cats.map((c) => [c, true])))} className="inline-flex"><Icon d={P.sliders} size={26} /></button>
+            </span>
+          </div>
+        </div>
+
+        {finance && selRows.length > 0 && (
+          <div className="flex flex-wrap items-center gap-4 no-print" style={{ background: "#FFF8F0", borderTop: `1px solid ${QBORDER}`, padding: "10px 20px" }}>
+            <strong>{selRows.length} selected</strong><span style={{ color: QMUTED }}>{money(selTotal)} due</span>
+            <button type="button" onClick={openBulk} className={btnBase} style={{ height: 40, padding: "0 16px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>Mark paid…</button>
+            <button type="button" onClick={() => setSel({})} className="font-semibold" style={{ color: QLINK }}>Clear</button>
+          </div>
+        )}
+
+        <div className="overflow-x-auto">
+          <table className="stm w-full" style={{ minWidth: 1060, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
+            <caption className="sr-only">Statements for {mlabel(month)}, grouped by category</caption>
+            <colgroup><col style={{ width: 52 }} /><col /><col style={{ width: 130 }} /><col style={{ width: 120 }} /><col style={{ width: 150 }} /><col style={{ width: 170 }} /><col style={{ width: 210 }} /><col style={{ width: 170 }} /></colgroup>
+            <thead>
+              <tr>
+                <th scope="col" style={{ ...thS, padding: 0, textAlign: "center" }}>{finance && allSelectable.length > 0 ? chk(allTicked, () => setSel(allTicked ? {} : Object.fromEntries(allSelectable.map((r) => [(r as any).f.id, true]))), "Select all unpaid statements") : null}</th>
+                <th scope="col" style={thS}>Vendor</th><th scope="col" style={thS}>Statement date</th><th scope="col" style={{ ...thS, textAlign: "right" }}>Amount</th>
+                <th scope="col" style={thS}>Due by</th><th scope="col" style={thS}>Paid</th><th scope="col" style={thS}>Paid from</th><th scope="col" style={thS}>Action</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {view.shown.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-slate-500">{loading ? "Loading…" : filter === "all" && !search && !catFilter && dueFilter === "all" ? `Nothing for ${mlabel(month)} yet. Use Add statement, or drop a PDF on this page.` : "Nothing matches."}</td></tr>}
+              {view.cats.map((cat) => {
+                const rs = view.shown.filter((r) => r.cat === cat);
+                const t = totals(rs);
+                const nb = rs.filter((r) => r.kind === "bill").length, nw = rs.filter((r) => r.kind === "waiting").length;
+                const open = !collapsed[cat];
+                return (
+                  <Fragment key={cat}>
+                    {bandRow(`c:${cat}`, CAT_DOT[cat] ?? "#6b7a8f", cat, `${nb} statement${nb === 1 ? "" : "s"}${nw ? ` · ${nw} waiting` : ""}`, open, () => setCollapsed((m) => ({ ...m, [cat]: !m[cat] })))}
+                    {open && (() => {
+                      const groups: Row[][] = [];
+                      for (const r of rs) {
+                        const last = groups[groups.length - 1];
+                        if (last && last[0].vendor.toLowerCase() === r.vendor.toLowerCase()) last.push(r); else groups.push([r]);
+                      }
+                      return groups.map((g) => {
+                        if (g.length === 1) return renderRow(g[0], true);
+                        const nbb = g.filter((x) => x.kind === "bill" || x.kind === "doc").length, nww = g.filter((x) => x.kind === "waiting").length;
+                        const gi = vendorItems(g[0].vendorId, g[0].vendor);
+                        return (
+                          <Fragment key={`g:${g[0].vendorId}:${g[0].vendor}`}>
+                            <tr>
+                              <td style={{ ...cell, height: "auto", padding: 0 }} />
+                              <td style={{ ...cell, height: "auto", padding: "10px 14px 4px" }}>
+                                <div className="flex items-baseline gap-2.5 flex-wrap"><span className="font-bold">{g[0].vendor}</span><span className="text-xs" style={{ color: QMUTED }}>{nbb} statement{nbb === 1 ? "" : "s"}{nww ? " · waiting for this month’s" : ""}</span></div>
+                              </td>
+                              <td style={{ ...cell, height: "auto", padding: "10px 14px 4px" }} colSpan={5} />
+                              <td style={{ ...cell, height: "auto", padding: "4px 14px 0" }}>{finance && gi.length > 0 && (
+                                <span className="relative inline-block">
+                                  <button type="button" aria-label="Vendor actions" onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === `g:${g[0].vendorId}` ? null : `g:${g[0].vendorId}`); }} className="inline-flex items-center justify-center rounded-lg" style={{ width: 36, height: 32, color: "#4a4b50" }}><Icon d={P.down} /></button>
+                                  {menuFor === `g:${g[0].vendorId}` && (
+                                    <div className="absolute right-0 z-30 mt-1 rounded-xl bg-white shadow-lg py-1" style={{ minWidth: 230, border: `1px solid ${LINE}` }} onClick={(e) => e.stopPropagation()}>
+                                      {gi.map((it) => <button key={it.label} type="button" className={menuItem} onClick={() => { setMenuFor(null); it.onClick(); }}>{it.label}</button>)}
+                                    </div>
+                                  )}
+                                </span>
+                              )}</td>
+                            </tr>
+                            {g.map((x) => renderRow(x, false))}
+                          </Fragment>
+                        );
+                      });
+                    })()}
+                    <tr style={{ background: "#FAFAFB" }}>
+                      <td style={{ ...cell, height: 48 }} />
+                      <td style={{ ...cell, height: 48, fontWeight: 700 }}>{cat} total</td>
+                      <td style={{ ...cell, height: 48 }} />
+                      <td style={{ ...cell, height: 48, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(t.t)}</td>
+                      <td style={{ ...cell, height: 48 }} />
+                      <td style={{ ...cell, height: 48, fontWeight: 600, color: "#14532D" }}>Paid {money(t.p)}</td>
+                      <td style={{ ...cell, height: 48, fontWeight: 600, color: t.o > 0.004 ? "#8E1F1A" : "#14532D" }}>Still owed {money(t.o)}</td>
+                      <td style={{ ...cell, height: 48 }} />
+                    </tr>
+                  </Fragment>
+                );
+              })}
+              {view.shown.length > 0 && (
+                <tr className="grand" style={{ background: QINK, color: "#fff" }}>
+                  <td /><td style={{ padding: 16, fontWeight: 700, fontSize: 16 }}>{monthWord} total</td><td />
+                  <td style={{ padding: "16px 14px", textAlign: "right", fontWeight: 700, fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{money(grand.t)}</td><td />
+                  <td style={{ padding: "16px 14px", fontWeight: 700 }}>Paid {money(grand.p)}</td>
+                  <td style={{ padding: "16px 14px", fontWeight: 700 }}>Still owed {money(grand.o)}</td><td />
+                </tr>
+              )}
 
-      {acctSection}
+              {showAcct && (
+                <>
+                  <tr id="acct-section"><td colSpan={8} style={{ padding: 0, background: "#fff", borderTop: `2px solid ${QBORDER}` }}>
+                    <button type="button" onClick={() => setShowAccounts(!showAccounts)} aria-expanded={showAccounts} className="w-full flex items-center gap-2.5 text-left" style={{ padding: "20px 14px 14px" }}>
+                      <span className="inline-flex" style={{ color: "#55565b", transform: showAccounts ? "none" : "rotate(-90deg)" }}><Icon d={P.down} size={18} /></span>
+                      <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: "50%", background: "#6F7B8B", display: "inline-block" }} />
+                      <span style={{ fontWeight: 700, fontSize: 18 }}>Account statements</span>
+                      <span style={{ fontSize: 14, color: QMUTED }}>{acctRows.length} account{acctRows.length === 1 ? "" : "s"} · the balance goes to Cash Flow</span>
+                    </button>
+                  </td></tr>
+                  {showAccounts && (
+                    <>
+                      <tr>
+                        {["", "Account", "Statement date", "Balance", "Due by", "Status", "File", "Action"].map((h, i) => <td key={i} style={{ ...thS, borderTop: `1px solid ${QBORDER}`, textAlign: i === 3 ? "right" : "left" }}>{h}</td>)}
+                      </tr>
+                      {acctGroups.map((g) => (
+                        <Fragment key={g.k}>
+                          {bandRow(`a:${g.k}`, g.color, g.label, `${g.list.length} account${g.list.length === 1 ? "" : "s"}`, true, () => {})}
+                          {g.list.map(acctRow)}
+                        </Fragment>
+                      ))}
+                    </>
+                  )}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex items-center justify-end gap-5 no-print" style={{ padding: "14px 20px", color: QMUTED, fontSize: 15, borderTop: `1px solid ${QBORDER}` }}>
+          <span>1-{view.shown.length} of {view.shown.length} items</span>
+          <span className="inline-flex items-center gap-2.5"><span style={{ color: "#B5B7BC" }}><Icon d={P.left} size={18} /></span><span className="inline-flex items-center justify-center rounded-md font-bold" style={{ width: 36, height: 36, background: "#DADDE1", color: QINK }}>1</span><span style={{ color: "#B5B7BC" }}><Icon d={P.right} size={18} /></span></span>
+        </div>
+      </div>
 
       {finance && notExpected.length > 0 && (
-        <p className="text-sm" style={{ color: "#5f5f5f" }}>
-          Only expected when they bill: {notExpected.map((s, i) => (<span key={s.id}>{i > 0 && ", "}{s.name} <button type="button" className="underline font-semibold" style={{ color: DEEP }} onClick={() => setExpect(s.id, "monthly")}>expect every month</button></span>))}
+        <p className="text-sm no-print" style={{ color: QMUTED }}>
+          Only expected when they bill: {notExpected.map((x, i) => (<span key={x.id}>{i > 0 && ", "}{x.name} <button type="button" className="underline font-semibold" style={{ color: DEEP }} onClick={() => setExpect(x.id, "monthly")}>expect every month</button></span>))}
         </p>
       )}
-      {finance && <div className="flex items-center gap-2.5 text-sm" style={{ color: "#5f5f5f" }}><Icon d={P.upload} />Drop statement PDFs anywhere on this page to file them.</div>}
+      {finance && <div className="flex items-center gap-2.5 text-sm no-print" style={{ color: QMUTED }}><Icon d={P.upload} />Drop statement PDFs anywhere on this page to file them.</div>}
+
+      {/* ---------------- Mark several paid ---------------- */}
+      {bulkOpen && modal(
+        <>
+          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Mark {selRows.length} paid</h2>{closeX(() => setBulkOpen(false))}</div>
+          <p className="text-sm" style={{ color: "#4a4a4a" }}>Each is paid for the amount still due, <strong style={{ color: INK }}>{money(selTotal)}</strong> in all.</p>
+          <div className="rounded-lg overflow-y-auto" style={{ maxHeight: 150, border: `1px solid ${LINE}` }}>
+            {selRows.map((r) => <div key={r.f.id} className="flex justify-between gap-3 px-3 py-1.5 text-sm" style={{ borderTop: `1px solid ${LINE}` }}><span className="truncate">{r.vendor}{r.f.invoice_number ? ` · #${r.f.invoice_number}` : ""}</span><span className="font-semibold">{money(owedOf(r.f))}</span></div>)}
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1"><label htmlFor="bk-date" className={lbl}>Date paid</label><input id="bk-date" type="date" value={bDate} onChange={(e) => setBDate(e.target.value)} className={inputCls} style={inputBorder} /></div>
+            <div className="flex-1">
+              <label htmlFor="bk-how" className={lbl}>How was it paid?</label>
+              <select id="bk-how" value={bMethod} onChange={(e) => { const m = e.target.value as typeof bMethod; setBMethod(m); if (m === "check" && bFrom.startsWith("bank:") && !bCheck) setBCheck(String((data.lastCheck[bFrom.slice(5)] ?? 0) + 1 || "")); }} className={inputCls} style={inputBorder}>
+                <option value="ach">ACH / bank transfer</option><option value="check">Check</option><option value="card">Credit card</option><option value="other">Cash / other</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label htmlFor="bk-from" className={lbl}>Paid from</label>
+            <select id="bk-from" value={bFrom} onChange={(e) => { const v = e.target.value; setBFrom(v); if (bMethod === "check" && v.startsWith("bank:")) setBCheck(String((data.lastCheck[v.slice(5)] ?? 0) + 1)); }} className={inputCls} style={inputBorder}>
+              <optgroup label="Bank accounts">{data.payAccounts.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
+              <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
+              <option value="other">Other (cash, owner, etc.)</option>
+            </select>
+          </div>
+          {bMethod === "check" && (
+            <div>
+              <label htmlFor="bk-chk" className={lbl}>First check number</label>
+              <input id="bk-chk" value={bCheck} onChange={(e) => setBCheck(e.target.value)} className={inputCls} style={inputBorder} />
+              <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>The checks are numbered in order from this one, by vendor name, and each goes into the check register.</p>
+            </div>
+          )}
+          {bErr && <p className="text-sm font-semibold text-red-600">{bErr}</p>}
+          <div className="flex items-center gap-3 pt-1">
+            <button type="button" onClick={doBulk} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Saving…" : `Mark ${selRows.length} paid`}</button>
+            <button type="button" onClick={() => setBulkOpen(false)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
+          </div>
+        </>)}
 
       {/* ---------------- Add statement ---------------- */}
       {addOpen && modal(
@@ -1036,6 +1316,31 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
             <button type="button" onClick={() => setEditInv(null)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
           </div>
         </>)}
+
+      {/* ---------------- Merge vendors ---------------- */}
+      {mergeDlg && (() => {
+        const from = data.sources.find((x) => x.id === mergeDlg.fromId);
+        const others = data.sources.filter((x) => x.id !== mergeDlg.fromId).sort((x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: "base" }));
+        const into = data.sources.find((x) => x.id === mergeDlg.intoId);
+        return modal(
+          <>
+            <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Merge vendors</h2>{closeX(() => setMergeDlg(null))}</div>
+            <p className="text-sm" style={{ color: "#4a4a4a" }}>Everything filed under <strong style={{ color: INK }}>{from?.name}</strong> moves to the vendor you keep, and <strong style={{ color: INK }}>{from?.name}</strong> is removed from your list. Statements and PDFs aren’t deleted.</p>
+            <div>
+              <label htmlFor="merge-into" className={lbl}>Keep this vendor</label>
+              <select id="merge-into" value={mergeDlg.intoId} onChange={(e) => setMergeDlg({ ...mergeDlg, intoId: e.target.value })} className={inputCls} style={inputBorder}>
+                <option value="">Choose…</option>
+                {others.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </div>
+            {into && from && <button type="button" onClick={() => setMergeDlg({ fromId: into.id, intoId: from.id })} className="text-xs underline font-semibold" style={{ color: DEEP }}>Keep {from.name} instead</button>}
+            {mErr && <p className="text-sm font-semibold text-red-600">{mErr}</p>}
+            <div className="flex items-center gap-3 pt-1">
+              <button type="button" onClick={doMerge} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Merging…" : "Merge"}</button>
+              <button type="button" onClick={() => setMergeDlg(null)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
+            </div>
+          </>);
+      })()}
 
       {/* ---------------- Account statement ---------------- */}
       {acctDlg && modal(
