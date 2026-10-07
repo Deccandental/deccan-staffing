@@ -106,14 +106,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const [catFilter, setCatFilter] = useState("");
   const [dueFilter, setDueFilter] = useState<"all" | "overdue" | "week">("all");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  // Rows ticked for "mark paid" in one go
-  const [sel, setSel] = useState<Record<string, boolean>>({});
-  const [bulkOpen, setBulkOpen] = useState(false);
-  const [bDate, setBDate] = useState("");
-  const [bMethod, setBMethod] = useState<"check" | "ach" | "card" | "other">("ach");
-  const [bFrom, setBFrom] = useState("");
-  const [bCheck, setBCheck] = useState("");
-  const [bErr, setBErr] = useState("");
 
   // Add statement
   const [addOpen, setAddOpen] = useState(false);
@@ -175,7 +167,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     setData(r.json as MonthData);
   }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setSel({}); }, [month]);
   const changed = () => { load(); onChanged?.(); };
 
   useEffect(() => {
@@ -587,15 +578,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const cell: React.CSSProperties = { height: 52, padding: "6px 12px", verticalAlign: "middle", borderTop: `1px solid ${QROW}`, borderRight: `1px solid ${QBORDER}` };
   const thS: React.CSSProperties = { padding: "14px 12px", fontSize: 15, fontWeight: 700, color: QINK, background: QHEAD, borderRight: "1px solid #fff", textAlign: "left" };
   const dash = <span style={{ color: "#8a8b90" }}>—</span>;
-  const chk = (checked: boolean, onChange: () => void, label: string) => (
-    <input type="checkbox" aria-label={label} checked={checked} onChange={onChange} style={{ width: 20, height: 20, accentColor: DEEP, cursor: "pointer", verticalAlign: "middle" }} />
-  );
-  const selectable = (r: Row) => r.kind === "bill" && !r.f.paid && !r.f.autopay;
-  const selRows = view.shown.filter((r) => selectable(r) && sel[(r as any).f.id]) as Extract<Row, { kind: "bill" }>[];
-  const selTotal = selRows.reduce((n, r) => n + owedOf(r.f), 0);
-  const allSelectable = view.shown.filter(selectable);
-  const allTicked = allSelectable.length > 0 && allSelectable.every((r) => sel[(r as any).f.id]);
-
   const tabBtn = (fl: Filter, label: string) => (
     <button key={fl} type="button" onClick={() => setFilter(fl)} aria-pressed={filter === fl}
       style={{ height: 44, padding: "0 22px", borderRadius: 6, fontSize: 16, ...(filter === fl ? { background: "#fff", color: QINK, border: `1px solid ${QBORDER}`, boxShadow: "0 1px 2px rgba(0,0,0,0.06)", fontWeight: 600 } : { background: "transparent", color: "#4a4b50", border: "1px solid transparent" }) }}>
@@ -697,17 +679,11 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const vendorItems = (vendorId: string, vendor: string) => (view.srcMap[vendorId]
     ? [{ label: "Rename vendor…", onClick: () => renameVendor(vendorId, vendor) }, { label: "Merge into another vendor…", onClick: () => openMerge(vendorId) }]
     : []);
-  const checkCell = (r: Row) => (
-    <td style={{ ...cell, padding: 0, textAlign: "center" }}>
-      {finance && selectable(r) ? chk(!!sel[(r as any).f.id], () => setSel((m) => ({ ...m, [(r as any).f.id]: !m[(r as any).f.id] })), `Select ${r.vendor}`) : null}
-    </td>
-  );
-
   const renderRow = (r: Row, showName: boolean) => {
     if (r.kind === "waiting") {
       return (
         <tr key={`w:${r.vendorId}`}>
-          {checkCell(r)}{vendorCell(r, showName)}<td style={cell}>{dash}</td>{categoryCell(r)}
+          {vendorCell(r, showName)}<td style={cell}>{dash}</td>{categoryCell(r)}
           <td style={{ ...cell, color: QMUTED, fontStyle: "italic" }} colSpan={2}><div style={clip}>{monthWord} statement hasn’t come in yet</div></td>
           <td style={cell}><Pill text="Waiting" bg="#E8EAED" fg="#3d3e42" /></td>
           <td style={cell}>{dash}</td>
@@ -722,7 +698,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (r.kind === "skipped") {
       return (
         <tr key={`s:${r.f.id}`} style={{ background: "#FAFAFB" }}>
-          {checkCell(r)}{vendorCell(r, showName)}<td style={cell}>{dash}</td>{categoryCell(r)}
+          {vendorCell(r, showName)}<td style={cell}>{dash}</td>{categoryCell(r)}
           <td style={{ ...cell, color: QMUTED, fontStyle: "italic" }} colSpan={3}><div style={clip}>Skipped for {monthWord}</div></td>
           <td style={cell}>{dash}</td>
           <td style={cell}>{finance && actionCell(`s:${r.f.id}`, "Undo skip", () => undoSkip(r.f))}</td>
@@ -733,7 +709,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (r.kind === "doc") {
       return (
         <tr key={f.id}>
-          {checkCell(r)}{vendorCell(r, showName)}{invoiceCell(r)}{categoryCell(r)}
+          {vendorCell(r, showName)}{invoiceCell(r)}{categoryCell(r)}
           <td style={cell}><div style={clip}>{dlabel(f.invoice_date ?? `${f.month}-01`)}</div></td>
           <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(f.amount)}</td>
           <td style={cell}>{dash}</td><td style={cell}>{dash}</td>
@@ -755,8 +731,8 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     items.push(...vendorItems(r.vendorId, r.vendor));
     items.push({ label: "Delete", onClick: () => removeFile(f), danger: true });
     return (
-      <tr key={f.id} style={sel[f.id] ? { background: "#FFF8F0" } : undefined}>
-        {checkCell(r)}{vendorCell(r, showName)}{invoiceCell(r)}{categoryCell(r)}
+      <tr key={f.id}>
+        {vendorCell(r, showName)}{invoiceCell(r)}{categoryCell(r)}
         <td style={cell}>{datesCell(f)}</td>
         <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(f.amount)}</td>
         <td style={cell}>{statusCell(r)}</td>
@@ -766,12 +742,13 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     );
   };
 
-  // ---- account statements: bank accounts, then cards, then loans; each group alphabetical, so one bank's accounts sit together ----
-  const ACCT_ORDER: Record<string, number> = { bank: 0, card: 1, loan: 2 };
-  const ACCT_TYPE: Record<string, string> = { bank: "Bank account", card: "Credit card", loan: "Loan" };
-  const acctRows = data.accounts.filter((x) => x.name.toLowerCase().includes(search.trim().toLowerCase()))
-    .sort((x, y) => ACCT_ORDER[x.kind] - ACCT_ORDER[y.kind] || x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: "base" }));
-  const showAcct = acctRows.length > 0 && filter === "all" && !catFilter && dueFilter === "all";
+  // ---- account statements join the list: banks, credit cards and loans, each group alphabetical (one bank's accounts sit together) ----
+  const ACCT_CAT: Record<string, string> = { bank: "Bank", card: "Credit card", loan: "Loan" };
+  const acctSort = (x: Acct, y: Acct) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: "base" });
+  const acctVisible = (x: Acct) => filter === "all" && dueFilter === "all" && (!catFilter || catFilter === ACCT_CAT[x.kind]) && x.name.toLowerCase().includes(search.trim().toLowerCase());
+  const bankAccts = data.accounts.filter((x) => x.kind === "bank" && acctVisible(x)).sort(acctSort);
+  const cardAccts = data.accounts.filter((x) => x.kind === "card" && acctVisible(x)).sort(acctSort);
+  const loanAccts = data.accounts.filter((x) => x.kind === "loan" && acctVisible(x)).sort(acctSort);
   const acctRow = (a: Acct) => {
     const fs = data.files.filter((f) => f.account_kind === a.kind && f.account_id === a.id && f.doc_type !== "invoice");
     const filed = fs.find((f) => !f.no_statement), none = fs.find((f) => f.no_statement);
@@ -783,10 +760,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     else if (finance) action = actionCell(`a:${a.kind}:${a.id}`, "File statement", () => openAcct(a), [{ label: "No statement this month", onClick: () => skipAcct(a) }]);
     return (
       <tr key={`${a.kind}:${a.id}`}>
-        <td style={cell} />
         <td style={cell}><div style={{ ...clip, fontWeight: 700, fontSize: 15 }} title={a.name}>{a.name}</div></td>
         <td style={cell}>{dash}</td>
-        <td style={cell}><div style={clip}>{ACCT_TYPE[a.kind]}</div></td>
+        <td style={cell}><div style={clip}>{ACCT_CAT[a.kind]}</div></td>
         <td style={cell}>{filed ? <div style={clip}>{MON[Number(month.slice(5)) - 1]} {month.slice(0, 4)}</div> : dash}</td>
         <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{filed ? money(filed.amount) : dash}</td>
         <td style={cell}>{status}</td>
@@ -795,6 +771,23 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       </tr>
     );
   };
+  // Main headings only: Vendors, Banks, Credit Cards, Loans. The category is a column, not a heading.
+  const mainBand = (key: string, title: string, count: string) => {
+    const open = !collapsed[`main:${key}`];
+    return (
+      <tr key={`main:${key}`}><td colSpan={8} style={{ padding: 0, background: "#D9E3EE", borderTop: `2px solid ${QBORDER}` }}>
+        <button type="button" onClick={() => setCollapsed((m) => ({ ...m, [`main:${key}`]: !m[`main:${key}`] }))} aria-expanded={open} className="w-full flex items-center gap-3 text-left" style={{ padding: "14px 14px" }}>
+          <span className="inline-flex" style={{ color: "#3b4a5c", transform: open ? "none" : "rotate(-90deg)" }}><Icon d={P.down} size={20} /></span>
+          <span style={{ fontWeight: 800, fontSize: 19, letterSpacing: "0.01em" }}>{title}</span>
+          <span style={{ fontSize: 14, color: "#4a5868" }}>{count}</span>
+        </button>
+      </td></tr>
+    );
+  };
+  const stmtCount = (rs: Row[]) => rs.filter((r) => r.kind === "bill" || r.kind === "doc").length;
+  const waitCount = (rs: Row[]) => rs.filter((r) => r.kind === "waiting").length;
+  const countText = (rs: Row[]) => `${stmtCount(rs)} statement${stmtCount(rs) === 1 ? "" : "s"}${waitCount(rs) ? ` · ${waitCount(rs)} waiting` : ""}`;
+  const blocks = (rs: Row[]) => rs.map((r, i) => renderRow(r, i === 0 || rs[i - 1].vendor.toLowerCase() !== r.vendor.toLowerCase()));
 
   const modal = (children: React.ReactNode, wide = false) => (
     <div className="fixed inset-0 z-50 flex items-start justify-center px-4 py-6 overflow-y-auto" style={{ background: "rgba(15,23,42,0.35)" }}>
@@ -816,7 +809,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const matchedVendor = vendorByName(aVendor);
   const vendorCredit = matchedVendor ? data.credits[matchedVendor.id] ?? 0 : 0;
 
-  // ---- print / export / pay several at once ----
+  // ---- export ----
   function exportCsv() {
     const q = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = [["Category", "Vendor", "Invoice #", "Statement date", "Amount", "Due by", "Paid", "Paid date", "Amount paid", "Paid from"].map(q).join(",")];
@@ -828,31 +821,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `statements-${month}.csv`;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
-  function openBulk() {
-    setBErr(""); setBDate(today); setBMethod("ach");
-    const first = data!.payAccounts[0]; setBFrom(first ? `${first.kind}:${first.id}` : "other"); setBCheck("");
-    setBulkOpen(true);
-  }
-  async function doBulk() {
-    const acct = data!.payAccounts.find((a) => `${a.kind}:${a.id}` === bFrom);
-    if (bMethod === "check") {
-      if (!acct || acct.kind !== "bank") { setBErr("Choose the bank account the checks are drawn on."); return; }
-      if (!/^\d+$/.test(bCheck.trim())) { setBErr("Enter the first check number (numbers only). The rest follow in order."); return; }
-    }
-    const list = [...selRows].sort((x, z) => x.vendor.localeCompare(z.vendor, undefined, { sensitivity: "base" }));
-    setBusy(true); setBErr("");
-    let n = bMethod === "check" ? Number(bCheck.trim()) : 0, done = 0;
-    for (const r of list) {
-      const res = await api("/api/statements/manage", {
-        action: "markInvoicePaid", id: r.f.id, paid: true, paidDate: bDate, method: bMethod, checkNumber: bMethod === "check" ? String(n) : "",
-        paidFromKind: acct ? acct.kind : "other", paidFromId: acct?.id ?? "", paidFromName: acct ? acct.name : "Other", paidNote: "", paidAmount: owedOf(r.f),
-      });
-      if (!res.ok) { setBusy(false); setBErr(`${done} of ${list.length} marked paid. Stopped at ${r.vendor}: ${res.json.error === "duplicate" ? `check #${n} is already on the register. Try a different first number.` : res.json.error ?? "couldn’t save."}`); setSel((m) => { const c = { ...m }; for (const x of list.slice(0, done)) delete c[x.f.id]; return c; }); changed(); return; }
-      done++; if (bMethod === "check") n++;
-    }
-    setBusy(false); setBulkOpen(false); setSel({}); setMsg(`Marked ${done} statement${done === 1 ? "" : "s"} paid.`); changed();
-  }
-
   return (
     <div className="space-y-5" style={{ color: QINK }}>
       <style>{`.stm td:last-child,.stm th:last-child{border-right:none !important}.stm tr.grand td{border-right:1px solid rgba(255,255,255,0.22) !important}@media print{.no-print{display:none !important}}`}</style>
@@ -863,16 +831,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
         <div className="flex items-center gap-5">
           <button type="button" onClick={() => load()} className="inline-flex items-center gap-2 font-semibold" style={{ color: QLINK, fontSize: 17, height: 44 }}><Icon d={P.refresh} size={20} />Update</button>
           {finance && (
-            <div className="relative flex items-stretch rounded-lg" style={{ background: ORANGE, color: INK }}>
-              <button type="button" onClick={() => openAdd()} className="font-bold" style={{ fontSize: 17, height: 48, padding: "0 22px" }}>Add statement</button>
-              <button type="button" aria-label="More ways to add" onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === "add" ? null : "add"); }} className="inline-flex items-center justify-center" style={{ width: 46, borderLeft: "1px solid rgba(35,38,52,0.35)" }}><Icon d={P.down} size={20} /></button>
-              {menuFor === "add" && (
-                <div className="absolute right-0 top-full z-30 mt-1 rounded-xl bg-white shadow-lg py-1" style={{ minWidth: 230, border: `1px solid ${LINE}` }} onClick={(e) => e.stopPropagation()}>
-                  <button type="button" className={menuItem} onClick={() => { setMenuFor(null); openAdd(); }}>Add statement</button>
-                  <button type="button" className={menuItem} onClick={() => { setMenuFor(null); setShowAccounts(true); setFilter("all"); document.getElementById("acct-section")?.scrollIntoView({ behavior: "smooth" }); }}>Go to account statements</button>
-                </div>
-              )}
-            </div>
+            <button type="button" onClick={() => openAdd()} className="rounded-lg font-bold" style={{ background: ORANGE, color: INK, fontSize: 17, height: 48, padding: "0 26px" }}>Add statement</button>
           )}
         </div>
       </div>
@@ -953,7 +912,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
               <span className="sr-only">Filter by category</span>
               <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-full bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 17, color: QINK }}>
                 <option value="">All categories</option>
-                {allCats.map((c) => <option key={c} value={c}>{c}</option>)}
+                {[...allCats.filter((c) => c !== "Other"), "Bank", "Credit card", "Other"].map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
           </div>
@@ -967,71 +926,53 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
           </div>
         </div>
 
-        {finance && selRows.length > 0 && (
-          <div className="flex flex-wrap items-center gap-4 no-print" style={{ background: "#FFF8F0", borderTop: `1px solid ${QBORDER}`, padding: "10px 20px" }}>
-            <strong>{selRows.length} selected</strong><span style={{ color: QMUTED }}>{money(selTotal)} due</span>
-            <button type="button" onClick={openBulk} className={btnBase} style={{ height: 40, padding: "0 16px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>Mark paid…</button>
-            <button type="button" onClick={() => setSel({})} className="font-semibold" style={{ color: QLINK }}>Clear</button>
-          </div>
-        )}
-
         <div className="overflow-x-auto">
-          <table className="stm w-full" style={{ minWidth: 1000, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
+          <table className="stm w-full" style={{ minWidth: 960, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
             <caption className="sr-only">Statements for {mlabel(month)}, sorted by category and then by vendor</caption>
-            <colgroup><col style={{ width: 40 }} /><col /><col style={{ width: 96 }} /><col style={{ width: 124 }} /><col style={{ width: 142 }} /><col style={{ width: 100 }} /><col style={{ width: 124 }} /><col style={{ width: 160 }} /><col style={{ width: 118 }} /></colgroup>
+            <colgroup><col /><col style={{ width: 96 }} /><col style={{ width: 124 }} /><col style={{ width: 142 }} /><col style={{ width: 100 }} /><col style={{ width: 124 }} /><col style={{ width: 160 }} /><col style={{ width: 118 }} /></colgroup>
             <thead>
               <tr>
-                <th scope="col" style={{ ...thS, padding: 0, textAlign: "center" }}>{finance && allSelectable.length > 0 ? chk(allTicked, () => setSel(allTicked ? {} : Object.fromEntries(allSelectable.map((r) => [(r as any).f.id, true]))), "Select all unpaid statements") : null}</th>
                 <th scope="col" style={thS}>Vendor</th><th scope="col" style={thS}>Invoice #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Statement / Due</th>
                 <th scope="col" style={{ ...thS, textAlign: "right" }}>Amount</th><th scope="col" style={thS}>Status</th><th scope="col" style={thS}>Paid from</th><th scope="col" style={thS}>Action</th>
               </tr>
             </thead>
             <tbody>
-              {view.shown.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-slate-500">{loading ? "Loading…" : filter === "all" && !search && !catFilter && dueFilter === "all" ? `Nothing for ${mlabel(month)} yet. Use Add statement, or drop a PDF on this page.` : "Nothing matches."}</td></tr>}
-              {view.cats.map((cat) => {
-                const rs = view.shown.filter((r) => r.cat === cat);
-                const t = totals(rs);
+              {(() => {
+                const vendorCats = view.cats.filter((c) => c !== "Loan");
+                const vendorRows = view.shown.filter((r) => r.cat !== "Loan");
+                const loanVendorRows = view.shown.filter((r) => r.cat === "Loan");
+                // Loans: loan payments to a lender and the loan accounts' own statements, mixed alphabetically
+                const entries: { name: string; nodes: React.ReactNode[] }[] = [];
+                const byVendor = new Map<string, Row[]>();
+                for (const r of loanVendorRows) { const k = r.vendor.toLowerCase(); byVendor.set(k, [...(byVendor.get(k) ?? []), r]); }
+                for (const rs of byVendor.values()) entries.push({ name: rs[0].vendor, nodes: rs.map((r, i) => renderRow(r, i === 0)) });
+                for (const x of loanAccts) entries.push({ name: x.name, nodes: [acctRow(x)] });
+                entries.sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: "base" }));
+                const loanCount = stmtCount(loanVendorRows) + loanAccts.length;
+                const nothing = vendorRows.length === 0 && bankAccts.length === 0 && cardAccts.length === 0 && entries.length === 0;
                 return (
-                  <Fragment key={cat}>
-                    {rs.map((r, i) => renderRow(r, i === 0 || rs[i - 1].vendor.toLowerCase() !== r.vendor.toLowerCase()))}
-                    <tr style={{ background: "#F4F5F8" }}>
-                      <td style={{ ...cell, height: 44 }} />
-                      <td style={{ ...cell, height: 44, fontWeight: 700 }} colSpan={3}>{cat} total</td>
-                      <td style={{ ...cell, height: 44 }} />
-                      <td style={{ ...cell, height: 44, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(t.t)}</td>
-                      <td style={{ ...cell, height: 44, fontWeight: 600, color: "#14532D" }}><div style={clip}>Paid {money(t.p)}</div></td>
-                      <td style={{ ...cell, height: 44, fontWeight: 600, color: t.o > 0.004 ? "#8E1F1A" : "#14532D" }} colSpan={2}><div style={clip}>Still owed {money(t.o)}</div></td>
-                    </tr>
-                  </Fragment>
+                  <>
+                    {nothing && <tr><td colSpan={8} className="px-4 py-8 text-slate-500">{loading ? "Loading…" : filter === "all" && !search && !catFilter && dueFilter === "all" ? `Nothing for ${mlabel(month)} yet. Use Add statement, or drop a PDF on this page.` : "Nothing matches."}</td></tr>}
+                    {vendorRows.length > 0 && (
+                      <>
+                        {mainBand("Vendors", "Vendors", countText(vendorRows))}
+                        {!collapsed["main:Vendors"] && vendorCats.map((cat) => <Fragment key={cat}>{blocks(vendorRows.filter((r) => r.cat === cat))}</Fragment>)}
+                      </>
+                    )}
+                    {bankAccts.length > 0 && (<>{mainBand("Banks", "Banks", `${bankAccts.length} account${bankAccts.length === 1 ? "" : "s"}`)}{!collapsed["main:Banks"] && bankAccts.map(acctRow)}</>)}
+                    {cardAccts.length > 0 && (<>{mainBand("Cards", "Credit Cards", `${cardAccts.length} account${cardAccts.length === 1 ? "" : "s"}`)}{!collapsed["main:Cards"] && cardAccts.map(acctRow)}</>)}
+                    {entries.length > 0 && (<>{mainBand("Loans", "Loans", `${loanCount} statement${loanCount === 1 ? "" : "s"}`)}{!collapsed["main:Loans"] && entries.map((e, i) => <Fragment key={`${e.name}:${i}`}>{e.nodes}</Fragment>)}</>)}
+                    {view.shown.length > 0 && (
+                      <tr className="grand" style={{ background: QINK, color: "#fff" }}>
+                        <td style={{ padding: 16, fontWeight: 700, fontSize: 16 }} colSpan={3}>{monthWord} total <span style={{ fontWeight: 400, fontSize: 13, opacity: 0.8 }}>· statements with an amount due</span></td><td />
+                        <td style={{ padding: "16px 12px", textAlign: "right", fontWeight: 700, fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{money(grand.t)}</td>
+                        <td style={{ padding: "16px 12px", fontWeight: 700 }}><div style={clip}>Paid {money(grand.p)}</div></td>
+                        <td style={{ padding: "16px 12px", fontWeight: 700 }} colSpan={2}><div style={clip}>Still owed {money(grand.o)}</div></td>
+                      </tr>
+                    )}
+                  </>
                 );
-              })}
-              {view.shown.length > 0 && (
-                <tr className="grand" style={{ background: QINK, color: "#fff" }}>
-                  <td /><td style={{ padding: 16, fontWeight: 700, fontSize: 16 }} colSpan={3}>{monthWord} total</td><td />
-                  <td style={{ padding: "16px 12px", textAlign: "right", fontWeight: 700, fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{money(grand.t)}</td>
-                  <td style={{ padding: "16px 12px", fontWeight: 700 }}><div style={clip}>Paid {money(grand.p)}</div></td>
-                  <td style={{ padding: "16px 12px", fontWeight: 700 }} colSpan={2}><div style={clip}>Still owed {money(grand.o)}</div></td>
-                </tr>
-              )}
-
-              {showAcct && (
-                <>
-                  <tr id="acct-section"><td colSpan={9} style={{ padding: 0, background: "#fff", borderTop: `2px solid ${QBORDER}` }}>
-                    <button type="button" onClick={() => setShowAccounts(!showAccounts)} aria-expanded={showAccounts} className="w-full flex items-center gap-2.5 text-left" style={{ padding: "20px 14px 14px" }}>
-                      <span className="inline-flex" style={{ color: "#55565b", transform: showAccounts ? "none" : "rotate(-90deg)" }}><Icon d={P.down} size={18} /></span>
-                      <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: "50%", background: "#6F7B8B", display: "inline-block" }} />
-                      <span style={{ fontWeight: 700, fontSize: 18 }}>Account statements</span>
-                      <span style={{ fontSize: 14, color: QMUTED }}>{acctRows.length} account{acctRows.length === 1 ? "" : "s"} · the balance goes to Cash Flow</span>
-                    </button>
-                  </td></tr>
-                  {showAccounts && (
-                    <>
-                      <tr>{["", "Account", "", "Type", "Statement", "Balance", "Status", "File", "Action"].map((h, i) => <td key={i} style={{ ...thS, borderTop: `1px solid ${QBORDER}`, textAlign: i === 5 ? "right" : "left" }}>{h}</td>)}</tr>
-                      {acctRows.map(acctRow)}
-                    </>
-                  )}
-                </>
-              )}
+              })()}
             </tbody>
           </table>
         </div>
@@ -1047,45 +988,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
         </p>
       )}
       {finance && <div className="flex items-center gap-2.5 text-sm no-print" style={{ color: QMUTED }}><Icon d={P.upload} />Drop statement PDFs anywhere on this page to file them.</div>}
-
-      {/* ---------------- Mark several paid ---------------- */}
-      {bulkOpen && modal(
-        <>
-          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Mark {selRows.length} paid</h2>{closeX(() => setBulkOpen(false))}</div>
-          <p className="text-sm" style={{ color: "#4a4a4a" }}>Each is paid for the amount still due, <strong style={{ color: INK }}>{money(selTotal)}</strong> in all.</p>
-          <div className="rounded-lg overflow-y-auto" style={{ maxHeight: 150, border: `1px solid ${LINE}` }}>
-            {selRows.map((r) => <div key={r.f.id} className="flex justify-between gap-3 px-3 py-1.5 text-sm" style={{ borderTop: `1px solid ${LINE}` }}><span className="truncate">{r.vendor}{r.f.invoice_number ? ` · #${r.f.invoice_number}` : ""}</span><span className="font-semibold">{money(owedOf(r.f))}</span></div>)}
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1"><label htmlFor="bk-date" className={lbl}>Date paid</label><input id="bk-date" type="date" value={bDate} onChange={(e) => setBDate(e.target.value)} className={inputCls} style={inputBorder} /></div>
-            <div className="flex-1">
-              <label htmlFor="bk-how" className={lbl}>How was it paid?</label>
-              <select id="bk-how" value={bMethod} onChange={(e) => { const m = e.target.value as typeof bMethod; setBMethod(m); if (m === "check" && bFrom.startsWith("bank:") && !bCheck) setBCheck(String((data.lastCheck[bFrom.slice(5)] ?? 0) + 1 || "")); }} className={inputCls} style={inputBorder}>
-                <option value="ach">ACH / bank transfer</option><option value="check">Check</option><option value="card">Credit card</option><option value="other">Cash / other</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label htmlFor="bk-from" className={lbl}>Paid from</label>
-            <select id="bk-from" value={bFrom} onChange={(e) => { const v = e.target.value; setBFrom(v); if (bMethod === "check" && v.startsWith("bank:")) setBCheck(String((data.lastCheck[v.slice(5)] ?? 0) + 1)); }} className={inputCls} style={inputBorder}>
-              <optgroup label="Bank accounts">{data.payAccounts.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
-              <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
-              <option value="other">Other (cash, owner, etc.)</option>
-            </select>
-          </div>
-          {bMethod === "check" && (
-            <div>
-              <label htmlFor="bk-chk" className={lbl}>First check number</label>
-              <input id="bk-chk" value={bCheck} onChange={(e) => setBCheck(e.target.value)} className={inputCls} style={inputBorder} />
-              <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>The checks are numbered in order from this one, by vendor name, and each goes into the check register.</p>
-            </div>
-          )}
-          {bErr && <p className="text-sm font-semibold text-red-600">{bErr}</p>}
-          <div className="flex items-center gap-3 pt-1">
-            <button type="button" onClick={doBulk} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Saving…" : `Mark ${selRows.length} paid`}</button>
-            <button type="button" onClick={() => setBulkOpen(false)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
-          </div>
-        </>)}
 
       {/* ---------------- Add statement ---------------- */}
       {addOpen && modal(
