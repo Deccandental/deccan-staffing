@@ -61,7 +61,17 @@ async function execute(spec: RequestSpec): Promise<{ data: any; error: { message
       // login prompt, rather than leaving the user staring at blank numbers
       // with no explanation.
       clearSessionToken();
-      if (typeof window !== "undefined") window.location.reload();
+      // Send them to the login page, but only once. Pages without their own login gate (Cash Flow) would
+      // otherwise reload, ask for data again, get another 401, and reload again in an endless flicker.
+      if (typeof window !== "undefined") {
+        let recent = false;
+        try {
+          const last = Number(sessionStorage.getItem("dd_401_redirect") ?? 0);
+          recent = Date.now() - last < 30000;
+          if (!recent) sessionStorage.setItem("dd_401_redirect", String(Date.now()));
+        } catch { /* storage unavailable: redirect anyway */ }
+        if (!recent && window.location.pathname !== "/") window.location.href = "/";
+      }
       return { data: null, error: { message: "Session expired — please log in again." } };
     }
     if (!res.ok) return { data: null, error: { message: json.error ?? "Request failed." } };

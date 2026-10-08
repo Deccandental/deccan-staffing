@@ -34,6 +34,20 @@ async function syncStatementBalance(kind: string, id: string, month: string, bal
   return true;
 }
 
+<<<<<<< HEAD
+=======
+
+// When a filed statement is moved to another month, the old month's Cash Flow figure is removed, but only if it is still
+// the number this filing put there (a balance someone typed in by hand is left alone).
+async function unsyncStatementBalance(kind: string, id: string, month: string, balance: number) {
+  const cfg = kind === "loan" ? { table: "debt_statement_entries", col: "debt_id" }
+            : kind === "bank" ? { table: "bank_statement_entries", col: "cash_account_id" }
+            : kind === "card" ? { table: "card_statement_entries", col: "credit_card_id" } : null;
+  if (!cfg) return;
+  await supabaseAdmin.from(cfg.table).delete().eq(cfg.col, id).eq("month", month).eq("balance", balance);
+}
+
+>>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
 // Remembered per-vendor settings (category, autopay account, expected every month).
 async function savePrefs(key: string, patch: Record<string, unknown>) {
   const { data: cur } = await supabaseAdmin.from("statement_prefs").select("key").eq("key", key).maybeSingle();
@@ -121,6 +135,7 @@ export async function POST(req: NextRequest) {
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
       // A vendor's category and autopay choice are remembered for next month.
       if (isInvoice && b.accountKind === "vendor" && b.accountId) {
+<<<<<<< HEAD
         // The account is kept even when it isn't autopay: Cash Flow uses it to know where a due statement will be paid from.
         const hasFrom = ["bank", "card"].includes(b.paidFromKind) && !!b.paidFromId;
         await savePrefs(`vendor:${String(b.accountId)}`, {
@@ -129,6 +144,14 @@ export async function POST(req: NextRequest) {
           ...(hasFrom ? {
             autopay_from_kind: b.paidFromKind, autopay_from_id: String(b.paidFromId), autopay_from_name: String(b.paidFromName ?? "").trim().slice(0, 80),
           } : b.autopay === true ? { autopay_from_kind: null, autopay_from_id: null, autopay_from_name: "" } : {}),
+=======
+        await savePrefs(`vendor:${String(b.accountId)}`, {
+          ...(b.category ? { category: String(b.category).trim().slice(0, 40) } : {}),
+          autopay: b.autopay === true,
+          autopay_from_kind: b.autopay === true && ["bank", "card"].includes(b.paidFromKind) ? b.paidFromKind : null,
+          autopay_from_id: b.autopay === true && b.paidFromId ? String(b.paidFromId) : null,
+          autopay_from_name: b.autopay === true ? String(b.paidFromName ?? "").trim().slice(0, 80) : "",
+>>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
         });
       }
       // A statement's amount becomes that month's statement balance in Cash Flow.
@@ -275,6 +298,7 @@ export async function POST(req: NextRequest) {
       const { error } = await supabaseAdmin.from("statement_files").update(patch).eq("id", id);
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
+<<<<<<< HEAD
       // Remember the account for next time, so Cash Flow knows where this vendor's statements are paid from.
       if (row.account_kind === "vendor" && row.account_id && ["bank", "card"].includes(from.paid_from_kind as string) && accountId) {
         const key = `vendor:${String(row.account_id)}`;
@@ -282,6 +306,8 @@ export async function POST(req: NextRequest) {
         if (!cur?.autopay) await savePrefs(key, { autopay_from_kind: from.paid_from_kind, autopay_from_id: accountId, autopay_from_name: from.paid_from_name });
       }
 
+=======
+>>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
       // ---- The check register: one entry per check, for the amount actually paid ----
       const checkFields = {
         check_number: checkNumber, account_kind: "bank", account_id: accountId, account_name: from.paid_from_name, check_date: paidDate,
@@ -377,6 +403,7 @@ export async function POST(req: NextRequest) {
       }).eq("id", id).eq("doc_type", "invoice").select(COLS).single();
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
+<<<<<<< HEAD
       // "Usually paid from" is remembered for the vendor (unless it is on autopay, which has its own account).
       if (["bank", "card"].includes(b.usualFromKind) && b.usualFromId) {
         const key = `vendor:${accountId}`;
@@ -384,12 +411,46 @@ export async function POST(req: NextRequest) {
         if (!cur?.autopay) await savePrefs(key, { autopay_from_kind: b.usualFromKind, autopay_from_id: String(b.usualFromId), autopay_from_name: String(b.usualFromName ?? "").trim().slice(0, 80) });
       }
 
+=======
+>>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
       // A check already logged for this invoice follows the correction. A check that has already cleared the bank keeps its amount.
       await supabaseAdmin.from("check_register").update({ payee: accountName, memo: `Invoice ${invoiceNumber}` }).eq("invoice_id", id).neq("status", "void");
       await supabaseAdmin.from("check_register").update({ amount }).eq("invoice_id", id).eq("status", "outstanding");
       return NextResponse.json({ data: updated });
     }
 
+<<<<<<< HEAD
+=======
+    if (b.action === "editStatement") {
+      const id = String(b.id ?? "");
+      const amount = toAmount(b.amount);
+      if (amount == null) return NextResponse.json({ error: "Enter the amount." }, { status: 400 });
+      const { data: cur } = await supabaseAdmin.from("statement_files").select("id, doc_type, account_kind, account_id, month, amount, no_statement").eq("id", id).maybeSingle();
+      if (!cur || cur.doc_type === "invoice" || cur.no_statement) return NextResponse.json({ error: "Not found." }, { status: 404 });
+      const isAcct = cur.account_kind === "bank" || cur.account_kind === "card" || cur.account_kind === "loan";
+      const date = String(b.date ?? "");
+      const month = isAcct ? String(b.month ?? "") : date.slice(0, 7);
+      if (!MONTH_RE.test(month) || (!isAcct && !/^\d{4}-\d{2}-\d{2}$/.test(date))) return NextResponse.json({ error: isAcct ? "Choose the statement month." : "Enter a valid statement date." }, { status: 400 });
+
+      // One statement per account per month.
+      if (month !== cur.month && isAcct && b.ignoreDup !== true) {
+        const { data: clash } = await supabaseAdmin.from("statement_files").select(COLS).eq("account_kind", cur.account_kind).eq("account_id", cur.account_id).eq("month", month).neq("id", id).neq("doc_type", "invoice").eq("no_statement", false);
+        if ((clash ?? []).length > 0) return NextResponse.json({ error: "duplicate", matches: clash }, { status: 409 });
+      }
+      const { data: updated, error } = await supabaseAdmin.from("statement_files").update({
+        amount, month, ...(isAcct ? {} : { invoice_date: date }),
+      }).eq("id", id).select(COLS).single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+      let synced = false;
+      if (isAcct) {
+        if (month !== cur.month && cur.amount != null) await unsyncStatementBalance(cur.account_kind, String(cur.account_id), cur.month, Number(cur.amount));
+        synced = await syncStatementBalance(cur.account_kind, String(cur.account_id), month, amount);
+      }
+      return NextResponse.json({ data: updated, synced });
+    }
+
+>>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     if (b.action === "remove") {
       const { data: row } = await supabaseAdmin.from("statement_files").select("id, file_path").eq("id", String(b.id)).maybeSingle();
       if (!row) return NextResponse.json({ error: "Not found." }, { status: 404 });
