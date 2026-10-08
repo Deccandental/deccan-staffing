@@ -637,6 +637,41 @@ export function buildOccurrences(bills: RecurringBill[], payments: BillPayment[]
   return occurrences.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 }
 
+// ---------------- Unpaid statements as upcoming outflows ----------------
+
+// Each unpaid statement with a due date counts as an outflow from the bank account it will be paid from:
+// its autopay account, the account of a part-payment already made, or the vendor's remembered "usually paid from".
+// Statements linked to a scheduled bill are left out (the bill already counts them), as are ones paid by
+// credit card (the money leaves the bank when the card is paid) and ones with no due date or no account.
+// An overdue statement is placed tomorrow, so it still shows in the next 14 days.
+export interface StatementOutflows {
+  occurrences: Occurrence[];
+  noAccount: { count: number; total: number };   // due-dated but no paying account known, so left out of the outlook
+  noDueDate: { count: number; total: number };   // no due date, so left out of the outlook
+}
+
+export function buildStatementOccurrences(unpaid: any[], today: string, endDate: string): StatementOutflows {
+  const occurrences: Occurrence[] = [];
+  const noAccount = { count: 0, total: 0 }, noDueDate = { count: 0, total: 0 };
+  for (const f of unpaid ?? []) {
+    const amount = Number(f.amount);
+    if (f.paid || f.matched_bill_id || !Number.isFinite(amount) || amount <= 0) continue;
+    if (!f.due_date) { noDueDate.count++; noDueDate.total += amount; continue; }
+    const partial = Number(f.paid_amount ?? 0) > 0;
+    const own = (f.autopay || partial) && f.paid_from_kind && f.paid_from_id ? { kind: f.paid_from_kind, id: f.paid_from_id } : null;
+    const pay = own ?? (f.usual_from_kind && f.usual_from_id ? { kind: f.usual_from_kind, id: f.usual_from_id } : null);
+    if (!pay) { noAccount.count++; noAccount.total += amount; continue; }
+    if (pay.kind !== "bank") continue;
+    const date = f.due_date <= today ? addDays(today, 1) : String(f.due_date);
+    if (date > endDate) continue;
+    occurrences.push({
+      billId: `stmt:${f.id}`, billName: `${f.account_name}${f.invoice_number ? ` #${f.invoice_number}` : ""}`, category: "bill", categoryLabel: "Statement due",
+      dueDate: date, amount, isPaid: false, cashAccountId: String(pay.id), direction: "outflow", essential: true,
+    });
+  }
+  return { occurrences: occurrences.sort((a, b) => a.dueDate.localeCompare(b.dueDate)), noAccount, noDueDate };
+}
+
 function signedAmount(o: Occurrence): number {
   return o.direction === "inflow" ? o.amount : -o.amount;
 }
@@ -716,7 +751,7 @@ export function computeAccountForecast(
   occurrences: Occurrence[], startDate: string, requiredCardFunding: number
 ): AccountForecast {
   const cutoff = addDays(startDate, 14);
-  const inWindow = occurrences.filter((o) => o.cashAccountId === account.id && o.dueDate > startDate && o.dueDate <= cutoff);
+  const inWindow = occurrences.filter((o) => String(o.cashAccountId) === String(account.id) && o.dueDate > startDate && o.dueDate <= cutoff);
   const expectedDeposits14d = inWindow.filter((o) => o.direction === "inflow").reduce((sum, o) => sum + o.amount, 0);
   const obligations14d = inWindow.filter((o) => o.direction === "outflow").reduce((sum, o) => sum + o.amount, 0);
   const excessOrShortfall = currentBalance + expectedDeposits14d - obligations14d - requiredCardFunding - account.cushionTarget;

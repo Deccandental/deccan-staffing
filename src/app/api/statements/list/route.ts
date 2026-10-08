@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { statementsAccess, MONTH_RE, KINDS } from "@/lib/statementsAuth";
+import { applyAutopay } from "@/lib/statementsAutopay";
 
 const nextMonthStart = (m: string) => new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5)), 1)).toISOString().slice(0, 10);
 const COLUMNS = "id, account_kind, account_id, account_name, month, file_name, size_bytes, no_statement, note, uploaded_by, uploaded_at, doc_type, invoice_date, invoice_number, amount, dup_ignored, paid, paid_date, matched_bill_id, matched_due_date, category, paid_from_name, paid_note, paid_method, paid_check_number, paid_from_kind, paid_from_id";
@@ -16,11 +17,12 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
 
   if (body.docType === "invoice") {
+    await applyAutopay(); // autopay statements whose due date has arrived are marked paid
     const month = MONTH_RE.test(String(body.month)) ? String(body.month) : new Date().toISOString().slice(0, 7);
     const [inv, sources] = await Promise.all([
       // "unpaid" lists every month's unpaid invoices; otherwise the month's invoices (dated or paid in it).
       body.unpaid
-        ? supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice").eq("paid", false).order("invoice_date", { ascending: true }).limit(1000)
+        ? supabaseAdmin.from("statement_files").select("*").eq("doc_type", "invoice").eq("paid", false).order("invoice_date", { ascending: true }).limit(1000)
         // Everything that belongs to the month: invoices dated in it, plus invoices paid in it (even if dated earlier).
         : supabaseAdmin.from("statement_files").select(COLUMNS).eq("doc_type", "invoice")
             .or(`month.eq.${month},and(paid.eq.true,paid_date.gte.${month}-01,paid_date.lt.${nextMonthStart(month)})`)
@@ -38,7 +40,21 @@ export async function POST(req: NextRequest) {
     const { data: typed } = await supabaseAdmin.from("statement_files").select("account_name").eq("doc_type", "invoice").eq("account_kind", "other").limit(3000);
     const known = new Set(vendorsAll.map((v: any) => String(v.name).trim().toLowerCase()));
     const usedNames = [...new Set((typed ?? []).map((r: any) => String(r.account_name).trim()))].filter((n) => n && !known.has(n.toLowerCase())).sort();
-    return NextResponse.json({ role: acc.role, month, files: inv.data ?? [], vendors, vendorsAll, usedNames, categories });
+    // A partly paid statement counts only for what is still owed, so Cash Flow doesn't count the paid part twice.
+    // Cash Flow also needs the account each vendor's statements are usually paid from (a remembered setting).
+    const usual: Record<string, { kind: string; id: string; name: string }> = {};
+    if (body.unpaid) {
+      const { data: prefRows } = await supabaseAdmin.from("statement_prefs").select("key, autopay_from_kind, autopay_from_id, autopay_from_name");
+      for (const p of (prefRows ?? []) as any[]) if (p.autopay_from_kind && p.autopay_from_id) usual[p.key] = { kind: p.autopay_from_kind, id: String(p.autopay_from_id), name: p.autopay_from_name ?? "" };
+    }
+    const filesOut = ((inv.data ?? []) as any[]).map((r) => {
+      const { file_path, ...rest } = r; void file_path;
+      const out = body.unpaid && Number(rest.paid_amount ?? 0) > 0 ? { ...rest, amount: Math.max(0, Number(rest.amount ?? 0) - Number(rest.paid_amount)) } : rest;
+      if (!body.unpaid) return out;
+      const u = usual[`vendor:${rest.account_id}`];
+      return { ...out, usual_from_kind: u?.kind ?? null, usual_from_id: u?.id ?? null, usual_from_name: u?.name ?? "" };
+    });
+    return NextResponse.json({ role: acc.role, month, files: filesOut, vendors, vendorsAll, usedNames, categories });
   }
 
   // One account's filed statements, newest month first.

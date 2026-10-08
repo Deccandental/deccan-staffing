@@ -30,7 +30,7 @@ import {
   loadProductionGoal, saveProductionGoal, computeGoalProgress, GoalProgress,
   loadDentalMonthlyHistory, backfillDentalMonth, deleteDentalMonthlyEntry, DentalMonthlyEntry,
   loadDentalMonthlySummaries, saveDentalMonthlySummary, deleteDentalMonthlySummary, DentalMonthlySummary,
-  buildOccurrences, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
+  buildOccurrences, buildStatementOccurrences, StatementOutflows, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
   computeAccountForecast, computeSuggestedTransfer, computeCardRecommendation, computeRequiredCollectionsMulti, computeSuggestedTransferMulti,
 } from "@/lib/cashflow";
 
@@ -107,8 +107,8 @@ function BalanceHistoryList({ accountName, refreshAll }: { accountName: string; 
   );
 }
 
-function AccountPanel({ account, allBills, allPayments, latestBalances, cards, refreshAll }: {
-  account: CashAccount; allBills: RecurringBill[]; allPayments: BillPayment[];
+function AccountPanel({ account, allBills, allPayments, stmtOcc, latestBalances, cards, refreshAll }: {
+  account: CashAccount; allBills: RecurringBill[]; allPayments: BillPayment[]; stmtOcc: Occurrence[];
   latestBalances: Record<string, BalanceCheck>; cards: CreditCard[]; refreshAll: () => void;
 }) {
   const [balanceInput, setBalanceInput] = useState("");
@@ -125,7 +125,9 @@ function AccountPanel({ account, allBills, allPayments, latestBalances, cards, r
   const today = todayStr();
   const monthStart = today.slice(0, 8) + "01";
   const bills = allBills.filter((b) => b.cashAccountId === account.id);
-  const occurrences = buildOccurrences(bills, allPayments, monthStart, addDays(today, WINDOW_DAYS));
+  // Unpaid statements due from this account count as upcoming outflows alongside the scheduled bills.
+  const occurrences = [...buildOccurrences(bills, allPayments, monthStart, addDays(today, WINDOW_DAYS)), ...stmtOcc.filter((o) => String(o.cashAccountId) === String(account.id))]
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const currentBalance = latestBalances[account.name]?.balance ?? 0;
   const safeToSpend14 = computeSafeToSpend(currentBalance, today, occurrences, 14);
   const safeToSpend30 = computeSafeToSpend(currentBalance, today, occurrences, 30);
@@ -367,9 +369,11 @@ function AccountPanel({ account, allBills, allPayments, latestBalances, cards, r
                         )}
                       </td>
                       <td className="px-2 py-2" style={{ color: occ.direction === "inflow" ? "#059669" : "#475569" }}>{occ.direction === "inflow" ? "+" : ""}${formatMoney(occ.amount)}</td>
-                      <td className="px-2 py-2">{occ.isPaid ? <span className="text-emerald-600 text-xs font-semibold">✓ Actual</span> : <span className="text-slate-400 text-xs">Estimated</span>}</td>
+                      <td className="px-2 py-2">{occ.isPaid ? <span className="text-emerald-600 text-xs font-semibold">✓ Actual</span> : occ.billId.startsWith("stmt:") ? <span className="text-xs font-semibold" style={{ color: "#b45309" }}>Statement due</span> : <span className="text-slate-400 text-xs">Estimated</span>}</td>
                       <td className="px-5 py-2 text-right">
-                        {markPayingFor?.billId === occ.billId && markPayingFor?.dueDate === occ.dueDate ? (
+                        {occ.billId.startsWith("stmt:") ? (
+                          <span className="text-xs text-slate-400">Mark paid on Statements</span>
+                        ) : markPayingFor?.billId === occ.billId && markPayingFor?.dueDate === occ.dueDate ? (
                           <div className="flex items-center gap-1 justify-end">
                             <input type="number" onFocus={(e) => e.target.select()} value={markAmount} onChange={(e) => setMarkAmount(e.target.value)} className="w-20 rounded border border-slate-200 px-1.5 py-0.5 text-xs focus:outline-none" />
                             <button onClick={handleConfirmMarkPaid} className="text-xs text-white px-2 py-0.5 rounded" style={{ backgroundColor: "#e8622a" }}>Save</button>
@@ -408,7 +412,8 @@ async function statementsPost(path: string, body: Record<string, unknown>): Prom
   } catch { return { ok: false, json: {} }; }
 }
 
-function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, allPayments, latestBalances, onViewArDetails, refreshAll }: {
+function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, allPayments, latestBalances, onViewArDetails, refreshAll, unpaidInvoices, stmtOut }: {
+  unpaidInvoices: any[]; stmtOut: StatementOutflows;
   refreshAll: () => void; staleItems: StaleItem[]; cashAccounts: CashAccount[]; cards: CreditCard[]; charges: CardCharge[]; allBills: RecurringBill[]; allPayments: BillPayment[];
   latestBalances: Record<string, BalanceCheck>; onViewArDetails: () => void;
 }) {
@@ -428,16 +433,23 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   // the last one of each week or month). Statements: monthly. Open Dental:
   // monthly production plus the last income entry of each month. A/R: weekly.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Transfer suggestion: where its "Mark done" panel is open ("lead" or a card key), the amount, and a short confirmation.
+  const [transferOpenAt, setTransferOpenAt] = useState<string | null>(null);
+  const [transferAmt, setTransferAmt] = useState("");
+  const [transferMsg, setTransferMsg] = useState("");
+  const [transferBusy, setTransferBusy] = useState(false);
+  // Practice cards (Open Dental, A/R): inline Update panels.
+  const [practiceOpen, setPracticeOpen] = useState<"od" | "ar" | null>(null);
+  const [odForm, setOdForm] = useState({ prod: "", income: "", patient: "" });
+  const [arForm, setArForm] = useState({ a0: "", a31: "", a61: "", a90: "", wo: "", ins: "" });
+  const [practiceMsg, setPracticeMsg] = useState<Record<string, string>>({});
+  const [practiceBusy, setPracticeBusy] = useState(false);
   // Quick entry on each card: balance, statement, and logging a payment, without the guided flow.
   type Quick = { open: boolean; hist: boolean; stm: boolean; bal: string; month: string; stmt: string; payAmt: string; payDate: string; msg: string };
   const blankQuick = (month: string): Quick => ({ open: false, hist: false, stm: false, bal: "", month, stmt: "", payAmt: "", payDate: todayStr(), msg: "" });
   const [quick, setQuick] = useState<Record<string, Quick>>({});
   // Filed statements per card (loaded when its Statements view is opened) and unpaid vendor invoices.
   const [tileStatements, setTileStatements] = useState<Record<string, any[] | null>>({});
-  const [unpaidInvoices, setUnpaidInvoices] = useState<any[]>([]);
-  useEffect(() => {
-    statementsPost("/api/statements/list", { docType: "invoice", unpaid: true }).then((r) => { if (r.ok) setUnpaidInvoices(r.json.files ?? []); });
-  }, [cashAccounts, cards]);
   const [balanceHist, setBalanceHist] = useState<Record<string, BalanceCheck[]>>({});
   const [statementPts, setStatementPts] = useState<Record<string, BarPoint[]>>({});
   const [loans, setLoans] = useState<Debt[]>([]);
@@ -503,7 +515,8 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
 
   const today = todayStr();
   const monthStart = today.slice(0, 8) + "01";
-  const occurrences = buildOccurrences(allBills, allPayments, monthStart, addDays(today, 14));
+  // Unpaid statements count as outflows on their due dates, from the account they'll be paid from.
+  const occurrences = [...buildOccurrences(allBills, allPayments, monthStart, addDays(today, 14)), ...stmtOut.occurrences.filter((o) => o.dueDate <= addDays(today, 14))];
   // Works for however many bank accounts are open (it used to assume exactly Fifth Third and Chase).
   const forecasts = cashAccounts.map((a) => computeAccountForecast(a, latestBalances[a.name]?.balance ?? 0, occurrences, today, 0));
   const transfer = computeSuggestedTransferMulti(forecasts);
@@ -545,7 +558,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     ...(bonusObligations?.items ?? []),
     ...(invoiceTotal > 0 ? [{
       label: "Unpaid vendor invoices",
-      detail: `${openInvoices.length} invoice${openInvoices.length === 1 ? "" : "s"}: ${invoiceByVendor.map(([v, a]) => `${v} $${formatMoney(a)}`).join(", ")}${coveredCount > 0 ? ` (${coveredCount} more covered by scheduled bills)` : ""}. Mark them paid, or link them to a scheduled bill, on the Statements page.`,
+      detail: `${openInvoices.length} invoice${openInvoices.length === 1 ? "" : "s"}: ${invoiceByVendor.map(([v, a]) => `${v} $${formatMoney(a)}`).join(", ")}${coveredCount > 0 ? ` (${coveredCount} more covered by scheduled bills)` : ""}. Mark them paid, or link them to a scheduled bill, on the Statements page.${stmtOut.noAccount.count > 0 ? ` ${stmtOut.noAccount.count} ($${formatMoney(stmtOut.noAccount.total)}) have no “paid from” account yet, so they are not in the 14-day outlook.` : ""}${stmtOut.noDueDate.count > 0 ? ` ${stmtOut.noDueDate.count} ($${formatMoney(stmtOut.noDueDate.total)}) have no due date, so they are not in the 14-day outlook.` : ""}`,
       amount: invoiceTotal,
     }] : []),
     ...(cardMinTotal > 0 ? [{ label: "Card minimums not scheduled as bills", detail: unscheduledCardMins.map((c) => `${c.name} $${formatMoney(c.amount)}`).join(", "), amount: cardMinTotal }] : []),
@@ -560,7 +573,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     let accountForecast = null;
     if (linkedAccount) {
       const accountBills = allBills.filter((b) => b.cashAccountId === linkedAccount.id);
-      const accountOccurrences = buildOccurrences(accountBills, allPayments, monthStart, addDays(today, WINDOW_DAYS));
+      const accountOccurrences = [...buildOccurrences(accountBills, allPayments, monthStart, addDays(today, WINDOW_DAYS)), ...stmtOut.occurrences.filter((o) => String(o.cashAccountId) === String(linkedAccount.id))];
       accountForecast = computeAccountForecast(linkedAccount, latestBalances[linkedAccount.name]?.balance ?? 0, accountOccurrences, today, 0);
       // If this account's excess is already earmarked for a transfer to the
       // other account, don't also offer it up for card paydown — that would
@@ -614,7 +627,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
 
   // ---------------- Warnings: built once, shown in the lead list AND in each card ----------------
   type WarnKind = "act" | "soon" | "suggest" | "update";
-  interface Warn { kind: WarnKind; text: string; lead?: boolean }
+  interface Warn { kind: WarnKind; text: string; lead?: boolean; action?: "transfer" }
   const WARN_STYLE: Record<WarnKind, { tag: string; fg: string; bg: string; rank: number }> = {
     act: { tag: "Act now", fg: "#991b1b", bg: "#fee2e2", rank: 0 },
     soon: { tag: "Soon", fg: "#92400e", bg: "#fef3c7", rank: 1 },
@@ -638,8 +651,8 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     const fc = computeAccountForecast(a, bal?.balance ?? 0, occurrences, today, 0);
     const warns: Warn[] = [];
     if (fc.excessOrShortfall < 0) warns.push({ kind: "act", text: `short of its $${formatMoney(fc.cushion)} cushion by $${formatMoney(-fc.excessOrShortfall)} over the next 14 days.` });
-    if (transfer && transfer.amount > 0 && transfer.fromAccountName === a.name) warns.push({ kind: "suggest", text: `transfer $${formatMoney(transfer.amount)} to ${transfer.toAccountName}. ${transfer.reason}` });
-    if (transfer && transfer.amount > 0 && transfer.toAccountName === a.name) warns.push({ kind: "suggest", text: `a $${formatMoney(transfer.amount)} transfer from ${transfer.fromAccountName} is suggested to cover this.`, lead: false });
+    if (transfer && transfer.amount > 0 && transfer.fromAccountName === a.name) warns.push({ kind: "suggest", text: `transfer $${formatMoney(transfer.amount)} to ${transfer.toAccountName}. ${transfer.reason}`, action: "transfer" });
+    if (transfer && transfer.amount > 0 && transfer.toAccountName === a.name) warns.push({ kind: "suggest", text: `a $${formatMoney(transfer.amount)} transfer from ${transfer.fromAccountName} is suggested to cover this.`, lead: false, action: "transfer" });
     const stmtTop = latestOf(statementPts[a.id]);
     const stmt = stmtTop ? { month: stmtTop.date, balance: stmtTop.value } : undefined;
     const stats: { k: string; v: string; color?: string }[] = [
@@ -820,6 +833,84 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     refreshAll();
   }
 
+  // ---------------- Transfer suggestion: mark it done ----------------
+  // Recording the transfer moves the amount between the two balances, so the
+  // suggestion clears because the numbers now cover the shortfall.
+  function openTransfer(where: string) {
+    setTransferAmt(transfer && transfer.amount > 0 ? String(transfer.amount) : "");
+    setTransferOpenAt(where);
+  }
+  async function recordTransfer() {
+    if (!transfer || !transfer.fromAccountName || !transfer.toAccountName) return;
+    const amt = Number(transferAmt);
+    if (!transferAmt || isNaN(amt) || amt <= 0) return;
+    const from = transfer.fromAccountName, to = transfer.toAccountName;
+    setTransferBusy(true);
+    const r1 = await addBalanceCheck(from, (latestBalances[from]?.balance ?? 0) - amt);
+    if (!r1.ok) { setTransferBusy(false); setTransferMsg(`Not saved: ${r1.error ?? "error"}`); return; }
+    const r2 = await addBalanceCheck(to, (latestBalances[to]?.balance ?? 0) + amt);
+    setTransferBusy(false);
+    setTransferOpenAt(null);
+    setTransferMsg(r2.ok
+      ? `Recorded $${formatMoney(amt)} moved from ${from} to ${to}.`
+      : `${from} was reduced, but ${to} did not save (${r2.error ?? "error"}). Use Update on ${to} to enter its balance.`);
+    setTimeout(() => setTransferMsg(""), 12000);
+    refreshAll();
+  }
+  const tBox = "rounded border border-sky-300 bg-sky-50 px-1.5 py-1 text-xs font-semibold text-slate-900 focus:border-orange-400 focus:bg-white focus:outline-none";
+  const transferForm = transfer && transfer.amount > 0 && transfer.fromAccountName && transfer.toAccountName ? (
+    <div className="rounded-xl bg-slate-50 px-4 py-3 flex flex-wrap items-end gap-3 mt-1.5">
+      <div>
+        <label className="block text-[11px] font-semibold text-slate-500 mb-0.5">Amount moved ({transfer.fromAccountName} → {transfer.toAccountName})</label>
+        <NumInput onFocus={(e) => e.target.select()} value={transferAmt} onChange={(e) => setTransferAmt(e.target.value)} wrap="w-28" className={`${tBox} w-full`} />
+      </div>
+      <button onClick={recordTransfer} disabled={transferBusy} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#0f766e" }}>{transferBusy ? "Saving…" : "Record transfer"}</button>
+      <button onClick={() => setTransferOpenAt(null)} className="text-xs text-slate-500 hover:underline pb-1">Cancel</button>
+      <p className="basis-full text-[11px] text-slate-400">Takes the amount off {transfer.fromAccountName}&apos;s balance and adds it to {transfer.toAccountName}&apos;s. You can still tap Update on either account to enter the exact bank balance.</p>
+    </div>
+  ) : null;
+
+  // ---------------- Practice cards: inline update ----------------
+  const numOrNull = (s: string) => (s.trim() === "" ? null : Number(s));
+  function togglePractice(id: "od" | "ar") {
+    if (practiceOpen === id) { setPracticeOpen(null); return; }
+    const str = (v: number | null | undefined) => (v == null ? "" : String(v));
+    if (id === "od") setOdForm({ prod: str(latestReview?.projectedTotalProduction), income: str(latestReview?.currentIncome), patient: str(latestReview?.currentPatientIncome) });
+    else setArForm({ a0: str(latestArAging?.ar0to30), a31: str(latestArAging?.ar31to60), a61: str(latestArAging?.ar61to90), a90: str(latestArAging?.ar90plus), wo: str(latestArAging?.woEstimate), ins: str(latestArAging?.insuranceEstimate) });
+    setPracticeMsg((m) => ({ ...m, [id]: "" }));
+    setPracticeOpen(id);
+  }
+  async function reloadPractice() {
+    const [rv, ar] = await Promise.all([loadLatestWeeklyReview(), loadLatestArAging()]);
+    setLatestReview(rv);
+    setLatestArAging(ar);
+    refreshAll();
+  }
+  async function savePracticeOd() {
+    const vals = [numOrNull(odForm.prod), numOrNull(odForm.income), numOrNull(odForm.patient)];
+    if (vals.some((v) => v != null && isNaN(v))) { setPracticeMsg((m) => ({ ...m, od: "Check the numbers." })); return; }
+    setPracticeBusy(true);
+    // Notes are carried over so a quick update never wipes them.
+    const r = await saveWeeklyReview({ reviewDate: today, projectedTotalProduction: vals[0], currentIncome: vals[1], currentPatientIncome: vals[2], notes: latestReview?.notes ?? "" });
+    setPracticeBusy(false);
+    if (!r.ok) { setPracticeMsg((m) => ({ ...m, od: `Not saved: ${r.error ?? "error"}` })); return; }
+    setPracticeOpen(null);
+    setPracticeMsg((m) => ({ ...m, od: "Open Dental numbers saved." }));
+    await reloadPractice();
+  }
+  async function savePracticeAr() {
+    const n = (s: string) => (s.trim() === "" ? 0 : Number(s));
+    const vals = [n(arForm.a0), n(arForm.a31), n(arForm.a61), n(arForm.a90), n(arForm.wo), n(arForm.ins)];
+    if (vals.some((v) => isNaN(v))) { setPracticeMsg((m) => ({ ...m, ar: "Check the numbers." })); return; }
+    setPracticeBusy(true);
+    const r = await saveArAgingEntry({ entryDate: today, ar0to30: vals[0], ar31to60: vals[1], ar61to90: vals[2], ar90plus: vals[3], woEstimate: vals[4], insuranceEstimate: vals[5] });
+    setPracticeBusy(false);
+    if (!r.ok) { setPracticeMsg((m) => ({ ...m, ar: `Not saved: ${r.error ?? "error"}` })); return; }
+    setPracticeOpen(null);
+    setPracticeMsg((m) => ({ ...m, ar: "A/R numbers saved." }));
+    await reloadPractice();
+  }
+
   const renderTile = (t: (typeof tiles)[number]) => (
         <div key={t.key} className="rounded-2xl bg-white shadow px-5 py-4 space-y-3">
           <div className="flex flex-wrap gap-x-6 gap-y-3">
@@ -847,10 +938,13 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
           {t.warns.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {t.warns.map((w, i) => (
-                <span key={i} className="text-xs font-medium rounded-lg px-2.5 py-1" style={{ color: WARN_STYLE[w.kind].fg, background: WARN_STYLE[w.kind].bg }}>⚠️ {w.text.charAt(0).toUpperCase() + w.text.slice(1)}</span>
+                <span key={i} className="text-xs font-medium rounded-lg px-2.5 py-1" style={{ color: WARN_STYLE[w.kind].fg, background: WARN_STYLE[w.kind].bg }}>⚠️ {w.text.charAt(0).toUpperCase() + w.text.slice(1)}
+                  {w.action === "transfer" && <button onClick={() => openTransfer(t.key)} className="ml-2 underline font-semibold">Mark done</button>}
+                </span>
               ))}
             </div>
           )}
+          {transferOpenAt === t.key && transferForm}
           {getQ(t).open && (() => {
             const q = getQ(t);
             const box = "rounded border border-sky-300 bg-sky-50 px-1.5 py-1 text-xs font-semibold text-slate-900 focus:border-orange-400 focus:bg-white focus:outline-none";
@@ -987,12 +1081,17 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
           <h2 className="font-bold text-sm text-slate-700">Needs attention</h2>
           <span className="text-xs text-slate-400">Most urgent first · each also appears in its own card below</span>
         </div>
+        {transferMsg && <p className="text-xs font-semibold text-emerald-700 pb-1">✓ {transferMsg}</p>}
         {leadWarns.length === 0 ? (
           <p className="text-sm text-emerald-700 py-1">✓ Nothing needs attention right now.</p>
         ) : leadWarns.map((w, i) => (
-          <div key={i} className="flex items-center gap-2.5 py-1.5 border-t border-slate-100 text-sm">
-            <span className="shrink-0 text-center text-[11px] font-semibold rounded-full py-0.5" style={{ width: 78, color: WARN_STYLE[w.warn.kind].fg, background: WARN_STYLE[w.warn.kind].bg }}>{WARN_STYLE[w.warn.kind].tag}</span>
-            <span className="min-w-0"><strong className="text-slate-800">{w.account}</strong> — {w.warn.text}</span>
+          <div key={i} className="border-t border-slate-100">
+            <div className="flex items-center gap-2.5 py-1.5 text-sm">
+              <span className="shrink-0 text-center text-[11px] font-semibold rounded-full py-0.5" style={{ width: 78, color: WARN_STYLE[w.warn.kind].fg, background: WARN_STYLE[w.warn.kind].bg }}>{WARN_STYLE[w.warn.kind].tag}</span>
+              <span className="min-w-0"><strong className="text-slate-800">{w.account}</strong> — {w.warn.text}</span>
+              {w.warn.action === "transfer" && <button onClick={() => (transferOpenAt === "lead" ? setTransferOpenAt(null) : openTransfer("lead"))} className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#0f766e" }}>Mark done</button>}
+            </div>
+            {w.warn.action === "transfer" && transferOpenAt === "lead" && transferForm}
           </div>
         ))}
       </div>
@@ -1072,7 +1171,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       <div className="flex flex-wrap gap-3">
         {([
           {
-            title: "Open Dental", warns: [] as Warn[], when: latestReview?.reviewDate,
+            id: "od" as const, title: "Open Dental", warns: [] as Warn[], when: latestReview?.reviewDate,
             series: [
               { label: "Net production", mode: "month", points: odSeries.production, caption: "Monthly · current month is the projection" },
               { label: "Income", mode: "month", points: odSeries.income, caption: "Last income entry of each month (current month is month-to-date)" },
@@ -1081,15 +1180,51 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
             ] as BarSeries[],
           },
           {
-            title: "Accounts receivable", warns: [] as Warn[], when: latestArAging?.entryDate,
+            id: "ar" as const, title: "Accounts receivable", warns: [] as Warn[], when: latestArAging?.entryDate,
             series: [{ label: "Total A/R", mode: "week", points: arPoints, caption: "Total A/R · last entry each week" }] as BarSeries[],
           },
-        ]).map((c) => (
+        ]).map((c) => {
+          const box = "rounded border border-sky-300 bg-sky-50 px-1.5 py-1 text-xs font-semibold text-slate-900 focus:border-orange-400 focus:bg-white focus:outline-none";
+          const lab = "block text-[11px] font-semibold text-slate-500 mb-0.5";
+          const field = (label: string, value: string, onChange: (v: string) => void) => (
+            <div key={label}>
+              <label className={lab}>{label}</label>
+              <NumInput onFocus={(e) => e.target.select()} value={value} onChange={(e) => onChange(e.target.value)} wrap="w-28" className={`${box} w-full`} />
+            </div>
+          );
+          return (
           <div key={c.title} className="rounded-2xl bg-white shadow px-5 py-4 space-y-2" style={{ flex: "1 1 520px", minWidth: 0 }}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <h3 className="font-bold text-sm text-slate-800">{c.title}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm text-slate-800">{c.title}</h3>
+                <button onClick={() => togglePractice(c.id)} className="text-xs font-semibold text-orange-500 hover:underline">{practiceOpen === c.id ? "Close" : "Update"}</button>
+              </div>
               <UpdatedStamp when={c.when} warnings={c.warns.map((w) => w.text)} />
             </div>
+            {practiceOpen === c.id && (
+              <div className="rounded-xl bg-slate-50 px-4 py-3 flex flex-wrap items-end gap-x-5 gap-y-3">
+                {c.id === "od" ? (
+                  <>
+                    {field("Projected production", odForm.prod, (v) => setOdForm((f) => ({ ...f, prod: v })))}
+                    {field("Current income", odForm.income, (v) => setOdForm((f) => ({ ...f, income: v })))}
+                    {field("Patient income", odForm.patient, (v) => setOdForm((f) => ({ ...f, patient: v })))}
+                    <p className="text-[11px] text-slate-400 pb-1.5">Insurance income is calculated.</p>
+                  </>
+                ) : (
+                  <>
+                    {field("0–30 days", arForm.a0, (v) => setArForm((f) => ({ ...f, a0: v })))}
+                    {field("31–60 days", arForm.a31, (v) => setArForm((f) => ({ ...f, a31: v })))}
+                    {field("61–90 days", arForm.a61, (v) => setArForm((f) => ({ ...f, a61: v })))}
+                    {field("90+ days", arForm.a90, (v) => setArForm((f) => ({ ...f, a90: v })))}
+                    {field("Write-off estimate", arForm.wo, (v) => setArForm((f) => ({ ...f, wo: v })))}
+                    {field("Insurance estimate", arForm.ins, (v) => setArForm((f) => ({ ...f, ins: v })))}
+                  </>
+                )}
+                <button onClick={c.id === "od" ? savePracticeOd : savePracticeAr} disabled={practiceBusy} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>{practiceBusy ? "Saving…" : "Save"}</button>
+                {practiceMsg[c.id] && <p className="text-xs font-semibold text-slate-600 basis-full">{practiceMsg[c.id]}</p>}
+              </div>
+            )}
+            {practiceOpen !== c.id && practiceMsg[c.id] && <p className="text-xs font-semibold text-emerald-700">✓ {practiceMsg[c.id]}</p>}
             <BarChart series={c.series} />
             {c.warns.length > 0 && (
               <div className="flex flex-wrap gap-2">
@@ -1099,7 +1234,8 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
       )}
     </div>
@@ -1119,6 +1255,8 @@ export default function CashFlowPage() {
   // Extra data the overdue rules need: loans, every statement log, latest A/R date.
   const [staleData, setStaleData] = useState<{ loans: Debt[]; statements: Record<string, { month: string; balance: number }[]>; arDate: string | null; ar: ArAgingEntry | null }>({ loans: [], statements: {}, arDate: null, ar: null });
   const [flowOpen, setFlowOpen] = useState(false);
+  // Unpaid vendor statements: they count as outflows on their due dates in the cash outlook.
+  const [unpaidInvoices, setUnpaidInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("");
   // Debt service is only meaningful against what the practice actually
@@ -1142,6 +1280,7 @@ export default function CashFlowPage() {
     const [accounts, cards, charges, b, p, bal, review] = await Promise.all([
       loadCashAccounts(), loadCreditCards(), loadCardCharges(), loadRecurringBills(), loadBillPayments(monthStart, rangeEnd), loadLatestBalances(), loadLatestWeeklyReview(),
     ]);
+    statementsPost("/api/statements/list", { docType: "invoice", unpaid: true }).then((r) => { if (r.ok) setUnpaidInvoices(r.json.files ?? []); });
     setCashAccounts(accounts);
     setCreditCards(cards);
     setCardCharges(charges);
@@ -1169,6 +1308,7 @@ export default function CashFlowPage() {
 
   // One set of overdue rules (src/lib/staleness.ts) drives this tab flag, the
   // Overview banner, the lines on the Weekly Update tab and the digest email.
+  const stmtOut = buildStatementOccurrences(unpaidInvoices, todayStr(), addDays(todayStr(), WINDOW_DAYS));
   const staleItems: StaleItem[] = buildStaleItems({
     accounts: cashAccounts.map((a) => ({ id: a.id, name: a.name })),
     cards: creditCards.map((c) => ({ id: c.id, name: c.name, approxClosingDay: c.approxClosingDay })),
@@ -1225,10 +1365,10 @@ export default function CashFlowPage() {
               statements={staleData.statements} review={latestReviewForTabs} ar={staleData.ar} dueNames={staleItems.map((i) => i.name)} />
 
             {cashAccounts.map((a) => activeTab === a.id && (
-              <AccountPanel key={a.id} account={a} allBills={bills} allPayments={payments} latestBalances={latestBalances} cards={creditCards} refreshAll={refresh} />
+              <AccountPanel key={a.id} account={a} allBills={bills} allPayments={payments} stmtOcc={stmtOut.occurrences} latestBalances={latestBalances} cards={creditCards} refreshAll={refresh} />
             ))}
             {activeTab === "overview" && (
-              <OverviewPanel refreshAll={() => refresh(true)} staleItems={staleItems} cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setActiveTab("entry")} />
+              <OverviewPanel unpaidInvoices={unpaidInvoices} stmtOut={stmtOut} refreshAll={() => refresh(true)} staleItems={staleItems} cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setActiveTab("entry")} />
             )}
             {activeTab === "entry" && (
               <WeeklyUpdatePanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={() => refresh(true)}

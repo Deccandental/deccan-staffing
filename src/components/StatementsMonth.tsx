@@ -145,6 +145,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const [eNumber, setENumber] = useState("");
   const [eAmount, setEAmount] = useState("");
   const [eCat, setECat] = useState("");
+  const [eFrom, setEFrom] = useState("");   // "usually paid from" for this vendor, e.g. bank:12
   const [eErr, setEErr] = useState("");
 
   // Merge two vendors that are really one
@@ -349,7 +350,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     const p = view.prefMap[`vendor:${s.id}`];
     setACat(view.catFor(s.id));
     setAAuto(!!p?.autopay);
-    setAAutoFrom(p?.autopay && p.autopayFromId ? `${p.autopayFromKind}:${p.autopayFromId}` : "");
+    setAAutoFrom(p?.autopayFromId ? `${p.autopayFromKind}:${p.autopayFromId}` : "");
   }
   function openAdd(opts?: { vendor?: string; file?: File }) {
     setAFile(opts?.file ?? null); setAVendor(""); setACat(""); setAInv(""); setADate(defaultDate()); setADue(""); setAAmount("");
@@ -395,7 +396,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       action: "confirm", docType: "invoice", path: slot.json.path, accountKind: "vendor", accountId: vendor.id, accountName: vendor.name,
       invoiceDate: aDate, invoiceNumber: aInv, amount: num(aAmount), fileName: aFile.name, size: aFile.size, dupIgnored: ignoreDup,
       matchedBillId: aMatch?.billId, matchedDueDate: aMatch?.dueDate, category: aCat, dueDate: aDue || undefined,
-      autopay: aAuto, paidFromKind: autoAcct?.kind, paidFromId: autoAcct?.id, paidFromName: autoAcct?.name,
+      autopay: aAuto, paidFromKind: autoAcct?.kind, paidFromId: autoAcct?.id, paidFromName: autoAcct?.name,   // also remembered as the account this vendor is usually paid from
     });
     setBusy(false);
     if (!rec.ok) { setAErr(rec.json.error ?? "Couldn't record the statement."); return; }
@@ -491,6 +492,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   function openEdit(f: FileRow) {
     setEErr(""); setEVendor(f.account_id); setEDate(f.invoice_date ?? `${f.month}-01`); setEDue(f.due_date ?? ""); setENumber(f.invoice_number ?? "");
     setEAmount(f.amount != null ? String(f.amount) : ""); setECat(view?.catFor(f.account_id, f.category) ?? ""); setEditInv(f);
+    const pf = view?.prefMap[`vendor:${f.account_id}`]; setEFrom(pf?.autopayFromId ? `${pf.autopayFromKind}:${pf.autopayFromId}` : "");
   }
   async function saveEdit(ignoreDup = false) {
     if (!editInv) return;
@@ -498,7 +500,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (!eNumber.trim()) { setEErr("Enter the invoice number."); return; }
     if (!isNum(eAmount)) { setEErr("Enter the amount."); return; }
     setBusy(true); setEErr("");
-    const r = await api("/api/statements/manage", { action: "editInvoice", id: editInv.id, accountId: eVendor, invoiceDate: eDate, dueDate: eDue, invoiceNumber: eNumber, amount: num(eAmount), category: eCat, ignoreDup });
+    const eFromAcct = eFrom && data && !editInv.paid && !editInv.autopay ? data.payAccounts.find((a) => `${a.kind}:${a.id}` === eFrom) : undefined;
+    const r = await api("/api/statements/manage", { action: "editInvoice", id: editInv.id, accountId: eVendor, invoiceDate: eDate, dueDate: eDue, invoiceNumber: eNumber, amount: num(eAmount), category: eCat, ignoreDup,
+      ...(eFromAcct ? { usualFromKind: eFromAcct.kind, usualFromId: eFromAcct.id, usualFromName: eFromAcct.name } : {}) });
     setBusy(false);
     if (r.status === 409 && r.json.error === "duplicate") {
       const m = (r.json.matches ?? [])[0];
@@ -1046,14 +1050,15 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
             <input id="add-auto" type="checkbox" checked={aAuto} onChange={(e) => { setAAuto(e.target.checked); if (e.target.checked) setAPaidNow(false); }} style={{ width: 20, height: 20, marginTop: 2, accentColor: DEEP }} />
             <label htmlFor="add-auto" className="text-sm leading-snug">On autopay<br /><span className="text-xs" style={{ color: "#5f5f5f" }}>Marked paid on the due date from the account you choose. Remembered for this vendor, so next month’s statement is already set up.</span></label>
           </div>
-          {aAuto && (
+          {!aPaidNow && (
             <div>
-              <label htmlFor="add-autofrom" className={lbl}>Autopay is paid from</label>
+              <label htmlFor="add-autofrom" className={lbl}>{aAuto ? "Autopay is paid from" : "Usually paid from"}</label>
               <select id="add-autofrom" value={aAutoFrom} onChange={(e) => setAAutoFrom(e.target.value)} className={inputCls} style={inputBorder}>
-                <option value="">Choose an account…</option>
+                <option value="">{aAuto ? "Choose an account…" : "Not sure yet"}</option>
                 <optgroup label="Bank accounts">{data.payAccounts.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
                 <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
               </select>
+              {!aAuto && <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Cash Flow counts this statement as money going out of this account on its due date. Remembered for this vendor.</p>}
             </div>
           )}
           {aErr && <p className="text-sm font-semibold text-red-600">{aErr}</p>}
@@ -1153,6 +1158,17 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
               {[...new Set([...allCats, ...(eCat ? [eCat] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
+          {!editInv.paid && !editInv.autopay && (
+            <div>
+              <label htmlFor="ed-from" className={lbl}>Usually paid from</label>
+              <select id="ed-from" value={eFrom} onChange={(e) => setEFrom(e.target.value)} className={inputCls} style={inputBorder}>
+                <option value="">Not sure yet</option>
+                <optgroup label="Bank accounts">{data.payAccounts.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
+                <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
+              </select>
+              <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Cash Flow counts this statement as money going out of this account on its due date. Remembered for this vendor.</p>
+            </div>
+          )}
           {eErr && <p className="text-sm font-semibold text-red-600">{eErr}</p>}
           <div className="flex items-center gap-3 pt-1">
             <button type="button" onClick={() => saveEdit()} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Saving…" : "Save changes"}</button>
