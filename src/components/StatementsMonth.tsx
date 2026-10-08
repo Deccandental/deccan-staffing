@@ -151,6 +151,13 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const [mergeDlg, setMergeDlg] = useState<{ fromId: string; intoId: string } | null>(null);
   const [mErr, setMErr] = useState("");
 
+  // Edit a filed statement (date / month and amount)
+  const [editStmt, setEditStmt] = useState<FileRow | null>(null);
+  const [stDate, setStDate] = useState("");
+  const [stAmount, setStAmount] = useState("");
+  const [stErr, setStErr] = useState("");
+  const [boxOver, setBoxOver] = useState(false);
+
   // Account statement (bank / card / loan)
   const [acctDlg, setAcctDlg] = useState<Acct | null>(null);
   const [sAmount, setSAmount] = useState("");
@@ -185,7 +192,10 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       const f: File | undefined = e.dataTransfer?.files?.[0];
       if (!f) return;
       if (!/\.pdf$/i.test(f.name)) { setMsg("Only PDF files can be dropped here."); return; }
-      if (!addOpen) openAdd({ file: f }); else setAFile(f);
+      // The file goes into whichever window is open; with none open it starts a new statement.
+      if (acctDlg) setSFile(f);
+      else if (addOpen) setAFile(f);
+      else if (!payFor && !editInv && !editStmt && !mergeDlg) openAdd({ file: f });
     };
     window.addEventListener("dragover", over); window.addEventListener("drop", drop);
     return () => { window.removeEventListener("dragover", over); window.removeEventListener("drop", drop); };
@@ -511,6 +521,29 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (nm !== month) setMonth(nm); else changed();
   }
 
+  // ---------------- Edit a filed statement ----------------
+  const isAcctKind = (f: FileRow) => f.account_kind === "bank" || f.account_kind === "card" || f.account_kind === "loan";
+  function openEditStmt(f: FileRow) {
+    setStErr(""); setStDate(isAcctKind(f) ? f.month : f.invoice_date ?? `${f.month}-01`); setStAmount(f.amount != null ? String(f.amount) : ""); setEditStmt(f);
+  }
+  async function saveEditStmt(ignoreDup = false) {
+    if (!editStmt) return;
+    const acct = isAcctKind(editStmt);
+    if (!stDate) { setStErr(acct ? "Choose the statement month." : "Enter the statement date."); return; }
+    if (!isNum(stAmount)) { setStErr("Enter the amount."); return; }
+    setBusy(true); setStErr("");
+    const r = await api("/api/statements/manage", { action: "editStatement", id: editStmt.id, amount: num(stAmount), ...(acct ? { month: stDate } : { date: stDate }), ignoreDup });
+    setBusy(false);
+    if (r.status === 409 && r.json.error === "duplicate") {
+      if (window.confirm("A statement is already filed for that month. Save this one there anyway?")) saveEditStmt(true);
+      return;
+    }
+    if (!r.ok) { setStErr(r.json.error ?? "Couldn't save the changes."); return; }
+    const nm = stDate.slice(0, 7);
+    setEditStmt(null); setMsg(`Statement updated.${r.json.synced ? " Cash Flow's statement balance was updated too." : ""}`);
+    if (nm !== month) setMonth(nm); else changed();
+  }
+
   // ---------------- Account statements (bank / card / loan) ----------------
   function openAcct(a: Acct) { setAcctDlg(a); setSFile(null); setSErr(""); setSAmount(data?.cfBalances[`${a.kind}:${a.id}`] != null ? String(data.cfBalances[`${a.kind}:${a.id}`]) : ""); }
   async function fileAcct(ignoreDup = false) {
@@ -575,8 +608,8 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
 
   // ---- the table look: flat grid, pale blue-grey header, thin lines between columns and rows ----
   const QINK = "#393A3D", QMUTED = "#6B6C72", QBORDER = "#D4D7DC", QROW = "#E3E5E8", QHEAD = "#E6ECF3", QLINK = "#0A5EB0";
-  const cell: React.CSSProperties = { height: 52, padding: "6px 12px", verticalAlign: "middle", borderTop: `1px solid ${QROW}`, borderRight: `1px solid ${QBORDER}` };
-  const thS: React.CSSProperties = { padding: "14px 12px", fontSize: 15, fontWeight: 700, color: QINK, background: QHEAD, borderRight: "1px solid #fff", textAlign: "left" };
+  const cell: React.CSSProperties = { height: 48, padding: "6px 8px", verticalAlign: "middle", borderTop: `1px solid ${QROW}`, borderRight: `1px solid ${QBORDER}` };
+  const thS: React.CSSProperties = { padding: "12px 8px", fontSize: 14, fontWeight: 700, color: QINK, background: QHEAD, borderRight: "1px solid #fff", textAlign: "left" };
   const dash = <span style={{ color: "#8a8b90" }}>—</span>;
   const tabBtn = (fl: Filter, label: string) => (
     <button key={fl} type="button" onClick={() => setFilter(fl)} aria-pressed={filter === fl}
@@ -624,9 +657,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (Number(f.paid_amount ?? 0) > 0) return <div style={{ ...clip, color: "#9A5B00", fontWeight: 600 }}>Partial · {money(owedOf(f)).replace(/\.00$/, "")} left</div>;
     if (f.due_date) {
       const n = daysBetween(f.due_date, today);
-      if (n < 0) return <Pill text={`Overdue ${-n} days`} bg="#FADBD8" fg="#8E1F1A" />;
+      if (n < 0) return <Pill text={`${-n}d overdue`} bg="#FADBD8" fg="#8E1F1A" />;
       if (n === 0) return <Pill text="Due today" bg="#FDEBC8" fg="#7A4208" />;
-      if (n <= 7) return <Pill text={`Due in ${n} days`} bg="#FDEBC8" fg="#7A4208" />;
+      if (n <= 7) return <Pill text={`Due in ${n}d`} bg="#FDEBC8" fg="#7A4208" />;
     }
     return <span style={{ color: QMUTED }}>Unpaid</span>;
   };
@@ -713,7 +746,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
           <td style={cell}><div style={clip}>{dlabel(f.invoice_date ?? `${f.month}-01`)}</div></td>
           <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(f.amount)}</td>
           <td style={cell}>{dash}</td><td style={cell}>{dash}</td>
-          <td style={cell}>{f.file_name ? actionCell(`d:${f.id}`, "View PDF", () => download(f), finance ? [{ label: "Delete", onClick: () => removeFile(f), danger: true }] : []) : null}</td>
+          <td style={cell}>{f.file_name ? actionCell(`d:${f.id}`, "View PDF", () => download(f), finance ? [{ label: "Edit date / amount", onClick: () => openEditStmt(f) }, { label: "Delete", onClick: () => removeFile(f), danger: true }] : []) : finance ? actionCell(`d:${f.id}`, "Edit", () => openEditStmt(f), [{ label: "Delete", onClick: () => removeFile(f), danger: true }]) : null}</td>
         </tr>
       );
     }
@@ -755,7 +788,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     const late = month < data.currentMonth;
     const status = filed ? <Pill text="Filed" bg="#E3F3E9" fg="#14532D" /> : none ? <Pill text="No statement" bg="#E8EAED" fg="#4a4b50" /> : late ? <Pill text="Waiting" bg="#FDEBC8" fg="#7A4208" /> : <Pill text="Not out yet" bg="#E8EAED" fg="#4a4b50" />;
     let action: React.ReactNode = null;
-    if (filed) action = actionCell(`a:${a.kind}:${a.id}`, "View PDF", () => download(filed), finance ? [{ label: "Remove", onClick: () => removeFile(filed), danger: true }] : []);
+    if (filed) action = actionCell(`a:${a.kind}:${a.id}`, "View PDF", () => download(filed), finance ? [{ label: "Edit amount / month", onClick: () => openEditStmt(filed) }, { label: "Remove", onClick: () => removeFile(filed), danger: true }] : []);
     else if (none) action = finance ? actionCell(`a:${a.kind}:${a.id}`, "Undo", () => undoSkip(none)) : null;
     else if (finance) action = actionCell(`a:${a.kind}:${a.id}`, "File statement", () => openAcct(a), [{ label: "No statement this month", onClick: () => skipAcct(a) }]);
     return (
@@ -796,7 +829,11 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   );
   const closeX = (onClick: () => void) => <button type="button" aria-label="Close" onClick={onClick} className="inline-flex items-center justify-center rounded-lg" style={{ width: 44, height: 44, color: "#4a4a4a" }}><Icon d={P.x} size={20} /></button>;
   const fileBox = (file: File | null, setFile: (f: File | null) => void, id: string) => (
-    <div className="rounded-xl flex items-center gap-3" style={{ border: `2px dashed #E2B48C`, background: "#FFF8F0", padding: "14px 16px" }}>
+    <div className="rounded-xl flex items-center gap-3"
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setBoxOver(true); }}
+      onDragLeave={() => setBoxOver(false)}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setBoxOver(false); const f = e.dataTransfer.files?.[0]; if (!f) return; if (!/\.pdf$/i.test(f.name)) { setMsg("Only PDF files can be dropped here."); return; } setFile(f); }}
+      style={{ border: `2px dashed ${boxOver ? "#e8622a" : "#E2B48C"}`, background: boxOver ? "#FFEBD9" : "#FFF8F0", padding: "14px 16px" }}>
       <span className="inline-flex items-center justify-center rounded-lg" style={{ width: 44, height: 44, background: "#FDEBD8", color: DEEP }}><Icon d={file ? P.doc : P.upload} size={22} /></span>
       <div className="flex-1 min-w-0">
         {file ? <><div className="font-bold text-sm truncate">{file.name}</div><div className="text-xs" style={{ color: "#5f5f5f" }}>{(file.size / 1024 / 1024).toFixed(1)} MB · attached</div></>
@@ -927,12 +964,12 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
         </div>
 
         <div className="overflow-x-auto">
-          <table className="stm w-full" style={{ minWidth: 960, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
+          <table className="stm w-full" style={{ minWidth: 780, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
             <caption className="sr-only">Statements for {mlabel(month)}, sorted by category and then by vendor</caption>
-            <colgroup><col /><col style={{ width: 96 }} /><col style={{ width: 124 }} /><col style={{ width: 142 }} /><col style={{ width: 100 }} /><col style={{ width: 124 }} /><col style={{ width: 160 }} /><col style={{ width: 118 }} /></colgroup>
+            <colgroup><col /><col style={{ width: 78 }} /><col style={{ width: 104 }} /><col style={{ width: 124 }} /><col style={{ width: 90 }} /><col style={{ width: 108 }} /><col style={{ width: 138 }} /><col style={{ width: 104 }} /></colgroup>
             <thead>
               <tr>
-                <th scope="col" style={thS}>Vendor</th><th scope="col" style={thS}>Invoice #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Statement / Due</th>
+                <th scope="col" style={thS}>Vendor</th><th scope="col" style={thS}>Inv #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Stmt / Due</th>
                 <th scope="col" style={{ ...thS, textAlign: "right" }}>Amount</th><th scope="col" style={thS}>Status</th><th scope="col" style={thS}>Paid from</th><th scope="col" style={thS}>Action</th>
               </tr>
             </thead>
@@ -1184,6 +1221,28 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
             </div>
           </>);
       })()}
+
+      {/* ---------------- Edit statement ---------------- */}
+      {editStmt && modal(
+        <>
+          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Edit statement</h2>{closeX(() => setEditStmt(null))}</div>
+          <p className="text-sm" style={{ color: "#4a4a4a" }}><strong style={{ color: INK }}>{editStmt.account_name}</strong>. The PDF stays as filed.{isAcctKind(editStmt) ? " Changing the balance or month updates Cash Flow too." : ""}</p>
+          <div className="flex gap-3">
+            <div className="flex-1 min-w-0">
+              <label htmlFor="st-date" className={lbl}>{isAcctKind(editStmt) ? "Statement month" : "Statement date"}</label>
+              <input id="st-date" type={isAcctKind(editStmt) ? "month" : "date"} value={stDate} onChange={(e) => setStDate(e.target.value)} className={inputCls} style={inputBorder} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <label htmlFor="st-amt" className={lbl}>{isAcctKind(editStmt) ? "Statement balance" : "Amount due"}</label>
+              <input id="st-amt" inputMode="decimal" value={stAmount} onChange={(e) => setStAmount(e.target.value)} className={inputCls} style={{ ...inputBorder, textAlign: "right", fontWeight: 700 }} />
+            </div>
+          </div>
+          {stErr && <p className="text-sm font-semibold text-red-600">{stErr}</p>}
+          <div className="flex items-center gap-3 pt-1">
+            <button type="button" onClick={() => saveEditStmt()} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Saving…" : "Save changes"}</button>
+            <button type="button" onClick={() => setEditStmt(null)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
+          </div>
+        </>)}
 
       {/* ---------------- Account statement ---------------- */}
       {acctDlg && modal(
