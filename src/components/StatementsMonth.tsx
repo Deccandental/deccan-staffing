@@ -964,9 +964,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
         </div>
 
         <div className="overflow-x-auto">
-          <table className="stm w-full" style={{ minWidth: 780, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
+          <table className="stm w-full" style={{ minWidth: 860, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
             <caption className="sr-only">Statements for {mlabel(month)}, sorted by category and then by vendor</caption>
-            <colgroup><col /><col style={{ width: 78 }} /><col style={{ width: 104 }} /><col style={{ width: 124 }} /><col style={{ width: 90 }} /><col style={{ width: 108 }} /><col style={{ width: 138 }} /><col style={{ width: 104 }} /></colgroup>
+            <colgroup><col style={{ width: "18%" }} /><col style={{ width: "9%" }} /><col style={{ width: "11%" }} /><col style={{ width: "14%" }} /><col style={{ width: "10%" }} /><col style={{ width: "12%" }} /><col style={{ width: "14%" }} /><col style={{ width: "12%" }} /></colgroup>
             <thead>
               <tr>
                 <th scope="col" style={thS}>Vendor</th><th scope="col" style={thS}>Inv #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Stmt / Due</th>
