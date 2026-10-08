@@ -34,6 +34,17 @@ async function syncStatementBalance(kind: string, id: string, month: string, bal
   return true;
 }
 
+
+// When a filed statement is moved to another month, the old month's Cash Flow figure is removed, but only if it is still
+// the number this filing put there (a balance someone typed in by hand is left alone).
+async function unsyncStatementBalance(kind: string, id: string, month: string, balance: number) {
+  const cfg = kind === "loan" ? { table: "debt_statement_entries", col: "debt_id" }
+            : kind === "bank" ? { table: "bank_statement_entries", col: "cash_account_id" }
+            : kind === "card" ? { table: "card_statement_entries", col: "credit_card_id" } : null;
+  if (!cfg) return;
+  await supabaseAdmin.from(cfg.table).delete().eq(cfg.col, id).eq("month", month).eq("balance", balance);
+}
+
 // Remembered per-vendor settings (category, autopay account, expected every month).
 async function savePrefs(key: string, patch: Record<string, unknown>) {
   const { data: cur } = await supabaseAdmin.from("statement_prefs").select("key").eq("key", key).maybeSingle();
@@ -372,6 +383,35 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin.from("check_register").update({ payee: accountName, memo: `Invoice ${invoiceNumber}` }).eq("invoice_id", id).neq("status", "void");
       await supabaseAdmin.from("check_register").update({ amount }).eq("invoice_id", id).eq("status", "outstanding");
       return NextResponse.json({ data: updated });
+    }
+
+    if (b.action === "editStatement") {
+      const id = String(b.id ?? "");
+      const amount = toAmount(b.amount);
+      if (amount == null) return NextResponse.json({ error: "Enter the amount." }, { status: 400 });
+      const { data: cur } = await supabaseAdmin.from("statement_files").select("id, doc_type, account_kind, account_id, month, amount, no_statement").eq("id", id).maybeSingle();
+      if (!cur || cur.doc_type === "invoice" || cur.no_statement) return NextResponse.json({ error: "Not found." }, { status: 404 });
+      const isAcct = cur.account_kind === "bank" || cur.account_kind === "card" || cur.account_kind === "loan";
+      const date = String(b.date ?? "");
+      const month = isAcct ? String(b.month ?? "") : date.slice(0, 7);
+      if (!MONTH_RE.test(month) || (!isAcct && !/^\d{4}-\d{2}-\d{2}$/.test(date))) return NextResponse.json({ error: isAcct ? "Choose the statement month." : "Enter a valid statement date." }, { status: 400 });
+
+      // One statement per account per month.
+      if (month !== cur.month && isAcct && b.ignoreDup !== true) {
+        const { data: clash } = await supabaseAdmin.from("statement_files").select(COLS).eq("account_kind", cur.account_kind).eq("account_id", cur.account_id).eq("month", month).neq("id", id).neq("doc_type", "invoice").eq("no_statement", false);
+        if ((clash ?? []).length > 0) return NextResponse.json({ error: "duplicate", matches: clash }, { status: 409 });
+      }
+      const { data: updated, error } = await supabaseAdmin.from("statement_files").update({
+        amount, month, ...(isAcct ? {} : { invoice_date: date }),
+      }).eq("id", id).select(COLS).single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+      let synced = false;
+      if (isAcct) {
+        if (month !== cur.month && cur.amount != null) await unsyncStatementBalance(cur.account_kind, String(cur.account_id), cur.month, Number(cur.amount));
+        synced = await syncStatementBalance(cur.account_kind, String(cur.account_id), month, amount);
+      }
+      return NextResponse.json({ data: updated, synced });
     }
 
     if (b.action === "remove") {
