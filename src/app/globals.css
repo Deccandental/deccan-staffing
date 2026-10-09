@@ -43,7 +43,10 @@ input[type="number"] {
 }
 
 /* Page titles: on desktop every page's content sits in `main > div.lg:ml-64` with no top padding, so the
-   title rides higher than the sidebar logo. One shared top gap lines them up on every page. */
+   title rides higher than the sidebar logo. One shared 2rem top gap lines the title up with the middle of the logo on every page. */
 @media (min-width: 1024px) {
-  main > div.lg\:ml-64 { padding-top: 3rem; }
+  main > div.lg\:ml-64 { padding-top: 2rem; }
 }
+
+/* Sidebar menu items use the same font as the page headings (Poppins). */
+aside a { font-family: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif; font-weight: 500; }
