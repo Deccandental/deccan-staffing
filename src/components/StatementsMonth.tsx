@@ -145,18 +145,13 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const [eNumber, setENumber] = useState("");
   const [eAmount, setEAmount] = useState("");
   const [eCat, setECat] = useState("");
-<<<<<<< HEAD
   const [eFrom, setEFrom] = useState("");   // "usually paid from" for this vendor, e.g. bank:12
-=======
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   const [eErr, setEErr] = useState("");
 
   // Merge two vendors that are really one
   const [mergeDlg, setMergeDlg] = useState<{ fromId: string; intoId: string } | null>(null);
   const [mErr, setMErr] = useState("");
 
-<<<<<<< HEAD
-=======
   // Edit a filed statement (date / month and amount)
   const [editStmt, setEditStmt] = useState<FileRow | null>(null);
   const [stDate, setStDate] = useState("");
@@ -164,7 +159,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const [stErr, setStErr] = useState("");
   const [boxOver, setBoxOver] = useState(false);
 
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   // Account statement (bank / card / loan)
   const [acctDlg, setAcctDlg] = useState<Acct | null>(null);
   const [sAmount, setSAmount] = useState("");
@@ -199,14 +193,10 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       const f: File | undefined = e.dataTransfer?.files?.[0];
       if (!f) return;
       if (!/\.pdf$/i.test(f.name)) { setMsg("Only PDF files can be dropped here."); return; }
-<<<<<<< HEAD
-      if (!addOpen) openAdd({ file: f }); else setAFile(f);
-=======
       // The file goes into whichever window is open; with none open it starts a new statement.
       if (acctDlg) setSFile(f);
       else if (addOpen) setAFile(f);
       else if (!payFor && !editInv && !editStmt && !mergeDlg) openAdd({ file: f });
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     };
     window.addEventListener("dragover", over); window.addEventListener("drop", drop);
     return () => { window.removeEventListener("dragover", over); window.removeEventListener("drop", drop); };
@@ -370,11 +360,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     const p = view.prefMap[`vendor:${s.id}`];
     setACat(view.catFor(s.id));
     setAAuto(!!p?.autopay);
-<<<<<<< HEAD
     setAAutoFrom(p?.autopayFromId ? `${p.autopayFromKind}:${p.autopayFromId}` : "");
-=======
-    setAAutoFrom(p?.autopay && p.autopayFromId ? `${p.autopayFromKind}:${p.autopayFromId}` : "");
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   }
   function openAdd(opts?: { vendor?: string; file?: File }) {
     setAFile(opts?.file ?? null); setAVendor(""); setACat(""); setAInv(""); setADate(defaultDate()); setADue(""); setAAmount("");
@@ -420,11 +406,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       action: "confirm", docType: "invoice", path: slot.json.path, accountKind: "vendor", accountId: vendor.id, accountName: vendor.name,
       invoiceDate: aDate, invoiceNumber: aInv, amount: num(aAmount), fileName: aFile.name, size: aFile.size, dupIgnored: ignoreDup,
       matchedBillId: aMatch?.billId, matchedDueDate: aMatch?.dueDate, category: aCat, dueDate: aDue || undefined,
-<<<<<<< HEAD
-      autopay: aAuto, paidFromKind: autoAcct?.kind, paidFromId: autoAcct?.id, paidFromName: autoAcct?.name,   // also remembered as the account this vendor is usually paid from
-=======
       autopay: aAuto, paidFromKind: autoAcct?.kind, paidFromId: autoAcct?.id, paidFromName: autoAcct?.name,
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     });
     setBusy(false);
     if (!rec.ok) { setAErr(rec.json.error ?? "Couldn't record the statement."); return; }
@@ -520,10 +502,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   function openEdit(f: FileRow) {
     setEErr(""); setEVendor(f.account_id); setEDate(f.invoice_date ?? `${f.month}-01`); setEDue(f.due_date ?? ""); setENumber(f.invoice_number ?? "");
     setEAmount(f.amount != null ? String(f.amount) : ""); setECat(view?.catFor(f.account_id, f.category) ?? ""); setEditInv(f);
-<<<<<<< HEAD
     const pf = view?.prefMap[`vendor:${f.account_id}`]; setEFrom(pf?.autopayFromId ? `${pf.autopayFromKind}:${pf.autopayFromId}` : "");
-=======
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   }
   async function saveEdit(ignoreDup = false) {
     if (!editInv) return;
@@ -531,13 +510,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (!eNumber.trim()) { setEErr("Enter the invoice number."); return; }
     if (!isNum(eAmount)) { setEErr("Enter the amount."); return; }
     setBusy(true); setEErr("");
-<<<<<<< HEAD
     const eFromAcct = eFrom && data && !editInv.paid && !editInv.autopay ? data.payAccounts.find((a) => `${a.kind}:${a.id}` === eFrom) : undefined;
     const r = await api("/api/statements/manage", { action: "editInvoice", id: editInv.id, accountId: eVendor, invoiceDate: eDate, dueDate: eDue, invoiceNumber: eNumber, amount: num(eAmount), category: eCat, ignoreDup,
       ...(eFromAcct ? { usualFromKind: eFromAcct.kind, usualFromId: eFromAcct.id, usualFromName: eFromAcct.name } : {}) });
-=======
-    const r = await api("/api/statements/manage", { action: "editInvoice", id: editInv.id, accountId: eVendor, invoiceDate: eDate, dueDate: eDue, invoiceNumber: eNumber, amount: num(eAmount), category: eCat, ignoreDup });
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     setBusy(false);
     if (r.status === 409 && r.json.error === "duplicate") {
       const m = (r.json.matches ?? [])[0];
@@ -550,8 +525,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (nm !== month) setMonth(nm); else changed();
   }
 
-<<<<<<< HEAD
-=======
   // ---------------- Edit a filed statement ----------------
   const isAcctKind = (f: FileRow) => f.account_kind === "bank" || f.account_kind === "card" || f.account_kind === "loan";
   function openEditStmt(f: FileRow) {
@@ -575,7 +548,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (nm !== month) setMonth(nm); else changed();
   }
 
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   // ---------------- Account statements (bank / card / loan) ----------------
   function openAcct(a: Acct) { setAcctDlg(a); setSFile(null); setSErr(""); setSAmount(data?.cfBalances[`${a.kind}:${a.id}`] != null ? String(data.cfBalances[`${a.kind}:${a.id}`]) : ""); }
   async function fileAcct(ignoreDup = false) {
@@ -640,13 +612,8 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
 
   // ---- the table look: flat grid, pale blue-grey header, thin lines between columns and rows ----
   const QINK = "#393A3D", QMUTED = "#6B6C72", QBORDER = "#D4D7DC", QROW = "#E3E5E8", QHEAD = "#E6ECF3", QLINK = "#0A5EB0";
-<<<<<<< HEAD
-  const cell: React.CSSProperties = { height: 52, padding: "6px 12px", verticalAlign: "middle", borderTop: `1px solid ${QROW}`, borderRight: `1px solid ${QBORDER}` };
-  const thS: React.CSSProperties = { padding: "14px 12px", fontSize: 15, fontWeight: 700, color: QINK, background: QHEAD, borderRight: "1px solid #fff", textAlign: "left" };
-=======
   const cell: React.CSSProperties = { height: 48, padding: "6px 8px", verticalAlign: "middle", borderTop: `1px solid ${QROW}`, borderRight: `1px solid ${QBORDER}` };
   const thS: React.CSSProperties = { padding: "12px 8px", fontSize: 14, fontWeight: 700, color: QINK, background: QHEAD, borderRight: "1px solid #fff", textAlign: "left" };
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   const dash = <span style={{ color: "#8a8b90" }}>—</span>;
   const tabBtn = (fl: Filter, label: string) => (
     <button key={fl} type="button" onClick={() => setFilter(fl)} aria-pressed={filter === fl}
@@ -694,15 +661,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (Number(f.paid_amount ?? 0) > 0) return <div style={{ ...clip, color: "#9A5B00", fontWeight: 600 }}>Partial · {money(owedOf(f)).replace(/\.00$/, "")} left</div>;
     if (f.due_date) {
       const n = daysBetween(f.due_date, today);
-<<<<<<< HEAD
-      if (n < 0) return <Pill text={`Overdue ${-n} days`} bg="#FADBD8" fg="#8E1F1A" />;
-      if (n === 0) return <Pill text="Due today" bg="#FDEBC8" fg="#7A4208" />;
-      if (n <= 7) return <Pill text={`Due in ${n} days`} bg="#FDEBC8" fg="#7A4208" />;
-=======
       if (n < 0) return <Pill text={`${-n}d overdue`} bg="#FADBD8" fg="#8E1F1A" />;
       if (n === 0) return <Pill text="Due today" bg="#FDEBC8" fg="#7A4208" />;
       if (n <= 7) return <Pill text={`Due in ${n}d`} bg="#FDEBC8" fg="#7A4208" />;
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     }
     return <span style={{ color: QMUTED }}>Unpaid</span>;
   };
@@ -760,17 +721,10 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       return (
         <tr key={`w:${r.vendorId}`}>
           {vendorCell(r, showName)}<td style={cell}>{dash}</td>{categoryCell(r)}
-<<<<<<< HEAD
-          <td style={{ ...cell, color: QMUTED, fontStyle: "italic" }} colSpan={2}><div style={clip}>{MON[Number(month.slice(5)) - 1]} stmt hasn’t come in yet</div></td>
-          <td style={cell}><Pill text="Waiting" bg="#E8EAED" fg="#3d3e42" /></td>
-          <td style={cell}>{dash}</td>
-          <td style={cell}>{finance && actionCell(`w:${r.vendorId}`, "Add stmt", () => openAdd({ vendor: r.vendor }), [
-=======
           <td style={{ ...cell, color: QMUTED, fontStyle: "italic" }} colSpan={2}><div style={clip}>{monthWord} statement hasn’t come in yet</div></td>
           <td style={cell}><Pill text="Waiting" bg="#E8EAED" fg="#3d3e42" /></td>
           <td style={cell}>{dash}</td>
           <td style={cell}>{finance && actionCell(`w:${r.vendorId}`, "Add statement", () => openAdd({ vendor: r.vendor }), [
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
             { label: "Skip this month", onClick: () => skipVendor(r.vendorId, r.vendor) },
             { label: "Only expect when they bill", onClick: () => setExpect(r.vendorId, "never") },
             ...vendorItems(r.vendorId, r.vendor),
@@ -796,11 +750,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
           <td style={cell}><div style={clip}>{dlabel(f.invoice_date ?? `${f.month}-01`)}</div></td>
           <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(f.amount)}</td>
           <td style={cell}>{dash}</td><td style={cell}>{dash}</td>
-<<<<<<< HEAD
-          <td style={cell}>{f.file_name ? actionCell(`d:${f.id}`, "View PDF", () => download(f), finance ? [{ label: "Delete", onClick: () => removeFile(f), danger: true }] : []) : null}</td>
-=======
           <td style={cell}>{f.file_name ? actionCell(`d:${f.id}`, "View PDF", () => download(f), finance ? [{ label: "Edit date / amount", onClick: () => openEditStmt(f) }, { label: "Delete", onClick: () => removeFile(f), danger: true }] : []) : finance ? actionCell(`d:${f.id}`, "Edit", () => openEditStmt(f), [{ label: "Delete", onClick: () => removeFile(f), danger: true }]) : null}</td>
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
         </tr>
       );
     }
@@ -842,15 +792,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     const late = month < data.currentMonth;
     const status = filed ? <Pill text="Filed" bg="#E3F3E9" fg="#14532D" /> : none ? <Pill text="No statement" bg="#E8EAED" fg="#4a4b50" /> : late ? <Pill text="Waiting" bg="#FDEBC8" fg="#7A4208" /> : <Pill text="Not out yet" bg="#E8EAED" fg="#4a4b50" />;
     let action: React.ReactNode = null;
-<<<<<<< HEAD
-    if (filed) action = actionCell(`a:${a.kind}:${a.id}`, "View PDF", () => download(filed), finance ? [{ label: "Remove", onClick: () => removeFile(filed), danger: true }] : []);
-    else if (none) action = finance ? actionCell(`a:${a.kind}:${a.id}`, "Undo", () => undoSkip(none)) : null;
-    else if (finance) action = actionCell(`a:${a.kind}:${a.id}`, "File stmt", () => openAcct(a), [{ label: "No statement this month", onClick: () => skipAcct(a) }]);
-=======
     if (filed) action = actionCell(`a:${a.kind}:${a.id}`, "View PDF", () => download(filed), finance ? [{ label: "Edit amount / month", onClick: () => openEditStmt(filed) }, { label: "Remove", onClick: () => removeFile(filed), danger: true }] : []);
     else if (none) action = finance ? actionCell(`a:${a.kind}:${a.id}`, "Undo", () => undoSkip(none)) : null;
     else if (finance) action = actionCell(`a:${a.kind}:${a.id}`, "File statement", () => openAcct(a), [{ label: "No statement this month", onClick: () => skipAcct(a) }]);
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     return (
       <tr key={`${a.kind}:${a.id}`}>
         <td style={cell}><div style={{ ...clip, fontWeight: 700, fontSize: 15 }} title={a.name}>{a.name}</div></td>
@@ -889,15 +833,11 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   );
   const closeX = (onClick: () => void) => <button type="button" aria-label="Close" onClick={onClick} className="inline-flex items-center justify-center rounded-lg" style={{ width: 44, height: 44, color: "#4a4a4a" }}><Icon d={P.x} size={20} /></button>;
   const fileBox = (file: File | null, setFile: (f: File | null) => void, id: string) => (
-<<<<<<< HEAD
-    <div className="rounded-xl flex items-center gap-3" style={{ border: `2px dashed #E2B48C`, background: "#FFF8F0", padding: "14px 16px" }}>
-=======
     <div className="rounded-xl flex items-center gap-3"
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setBoxOver(true); }}
       onDragLeave={() => setBoxOver(false)}
       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setBoxOver(false); const f = e.dataTransfer.files?.[0]; if (!f) return; if (!/\.pdf$/i.test(f.name)) { setMsg("Only PDF files can be dropped here."); return; } setFile(f); }}
       style={{ border: `2px dashed ${boxOver ? "#e8622a" : "#E2B48C"}`, background: boxOver ? "#FFEBD9" : "#FFF8F0", padding: "14px 16px" }}>
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
       <span className="inline-flex items-center justify-center rounded-lg" style={{ width: 44, height: 44, background: "#FDEBD8", color: DEEP }}><Icon d={file ? P.doc : P.upload} size={22} /></span>
       <div className="flex-1 min-w-0">
         {file ? <><div className="font-bold text-sm truncate">{file.name}</div><div className="text-xs" style={{ color: "#5f5f5f" }}>{(file.size / 1024 / 1024).toFixed(1)} MB · attached</div></>
@@ -1028,21 +968,12 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
         </div>
 
         <div className="overflow-x-auto">
-<<<<<<< HEAD
-          <table className="stm w-full" style={{ minWidth: 1090, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
-            <caption className="sr-only">Statements for {mlabel(month)}, sorted by category and then by vendor</caption>
-            <colgroup><col /><col style={{ width: 110 }} /><col style={{ width: 120 }} /><col style={{ width: 130 }} /><col style={{ width: 100 }} /><col style={{ width: 130 }} /><col style={{ width: 220 }} /><col style={{ width: 130 }} /></colgroup>
-            <thead>
-              <tr>
-                <th scope="col" style={thS}>Vendor</th><th scope="col" style={thS}>Invoice #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Stmt / Due</th>
-=======
           <table className="stm w-full" style={{ minWidth: 860, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
             <caption className="sr-only">Statements for {mlabel(month)}, sorted by category and then by vendor</caption>
             <colgroup><col style={{ width: "18%" }} /><col style={{ width: "9%" }} /><col style={{ width: "11%" }} /><col style={{ width: "14%" }} /><col style={{ width: "10%" }} /><col style={{ width: "12%" }} /><col style={{ width: "14%" }} /><col style={{ width: "12%" }} /></colgroup>
             <thead>
               <tr>
                 <th scope="col" style={thS}>Vendor</th><th scope="col" style={thS}>Inv #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Stmt / Due</th>
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
                 <th scope="col" style={{ ...thS, textAlign: "right" }}>Amount</th><th scope="col" style={thS}>Status</th><th scope="col" style={thS}>Paid from</th><th scope="col" style={thS}>Action</th>
               </tr>
             </thead>
@@ -1156,7 +1087,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
             <input id="add-auto" type="checkbox" checked={aAuto} onChange={(e) => { setAAuto(e.target.checked); if (e.target.checked) setAPaidNow(false); }} style={{ width: 20, height: 20, marginTop: 2, accentColor: DEEP }} />
             <label htmlFor="add-auto" className="text-sm leading-snug">On autopay<br /><span className="text-xs" style={{ color: "#5f5f5f" }}>Marked paid on the due date from the account you choose. Remembered for this vendor, so next month’s statement is already set up.</span></label>
           </div>
-<<<<<<< HEAD
           {!aPaidNow && (
             <div>
               <label htmlFor="add-autofrom" className={lbl}>{aAuto ? "Autopay is paid from" : "Usually paid from"}</label>
@@ -1166,16 +1096,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
                 <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
               </select>
               {!aAuto && <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Cash Flow counts this statement as money going out of this account on its due date. Remembered for this vendor.</p>}
-=======
-          {aAuto && (
-            <div>
-              <label htmlFor="add-autofrom" className={lbl}>Autopay is paid from</label>
-              <select id="add-autofrom" value={aAutoFrom} onChange={(e) => setAAutoFrom(e.target.value)} className={inputCls} style={inputBorder}>
-                <option value="">Choose an account…</option>
-                <optgroup label="Bank accounts">{data.payAccounts.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
-                <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
-              </select>
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
             </div>
           )}
           {aErr && <p className="text-sm font-semibold text-red-600">{aErr}</p>}
@@ -1275,7 +1195,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
               {[...new Set([...allCats, ...(eCat ? [eCat] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-<<<<<<< HEAD
           {!editInv.paid && !editInv.autopay && (
             <div>
               <label htmlFor="ed-from" className={lbl}>Usually paid from</label>
@@ -1287,8 +1206,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
               <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Cash Flow counts this statement as money going out of this account on its due date. Remembered for this vendor.</p>
             </div>
           )}
-=======
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
           {eErr && <p className="text-sm font-semibold text-red-600">{eErr}</p>}
           <div className="flex items-center gap-3 pt-1">
             <button type="button" onClick={() => saveEdit()} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Saving…" : "Save changes"}</button>
@@ -1321,8 +1238,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
           </>);
       })()}
 
-<<<<<<< HEAD
-=======
       {/* ---------------- Edit statement ---------------- */}
       {editStmt && modal(
         <>
@@ -1345,7 +1260,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
           </div>
         </>)}
 
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
       {/* ---------------- Account statement ---------------- */}
       {acctDlg && modal(
         <>

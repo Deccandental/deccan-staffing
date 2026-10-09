@@ -40,6 +40,7 @@ const navItems: { label: string; href: string; icon: string; permission: Permiss
   { label: "Certifications", href: "/certifications", icon: "📄", permission: "any" },
   { label: "Wishlist", href: "/wishlist", icon: "⭐", permission: "any" },
   { label: "Handbook", href: "/handbook", icon: "📘", permission: "any" },
+  { label: "Set-ups", href: "/setups", icon: "📸", permission: "any" },
   { label: "To Review", href: "/review", icon: "✅", permission: "any" },
   { label: "Check-Ins", href: "/checkins", icon: "🤝", permission: "any" },
   { label: "Events Calendar", href: "/events-calendar", icon: "🗓️", permission: "any" },
