@@ -457,6 +457,10 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   const [loans, setLoans] = useState<Debt[]>([]);
   // Which account's Edit window is open (bank, card or loan).
   const [editTile, setEditTile] = useState<{ kind: "bank" | "card" | "loan"; key: string; name: string } | null>(null);
+  // Which cards are expanded, and which category's "+ Add" window is open.
+  const [openTiles, setOpenTiles] = useState<Record<string, boolean>>({});
+  const [addKind, setAddKind] = useState<null | "bank" | "card" | "loan">(null);
+  const toggleTile = (key: string) => setOpenTiles((o) => ({ ...o, [key]: !o[key] }));
   const [odSeries, setOdSeries] = useState<{ production: BarPoint[]; income: BarPoint[]; patient: BarPoint[]; insurance: BarPoint[] }>({ production: [], income: [], patient: [], insurance: [] });
   const [arPoints, setArPoints] = useState<BarPoint[]>([]);
   useEffect(() => {
@@ -773,6 +777,20 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     </div>
   );
 
+  // A category band: collapses its rows, shows its total, and carries its own "+ Add" button.
+  const categoryHeader = (key: string, title: string, count: string, total: string, color: string, tint: string, addLabel: string, onAdd: () => void) => (
+    <div key={`c-${key}`} className="flex flex-wrap items-center gap-3 rounded-xl px-4 py-2.5 mt-2" style={{ background: tint }}>
+      <button onClick={() => setCollapsed((c) => ({ ...c, [key]: !c[key] }))} aria-expanded={!collapsed[key]} className="flex items-center gap-2 text-left" style={{ color }}>
+        <span className="text-xs w-3">{collapsed[key] ? "▸" : "▾"}</span>
+        <h2 className="font-bold text-base uppercase tracking-wide">{title}</h2>
+      </button>
+      <span className="text-xs font-semibold text-slate-500">{count}</span>
+      <span className="flex-1" />
+      <span className="text-lg font-bold" style={{ color }}>{total}</span>
+      <button onClick={onAdd} className="rounded-lg border bg-white px-3 py-1 text-xs font-semibold hover:bg-slate-50" style={{ color, borderColor: color }}>{addLabel}</button>
+    </div>
+  );
+
   const getQ = (t: { key: string; defaultMonth: string }): Quick => quick[t.key] ?? blankQuick(t.defaultMonth);
   const setQ = (t: { key: string; defaultMonth: string }, patch: Partial<Quick>) =>
     setQuick((st) => ({ ...st, [t.key]: { ...(st[t.key] ?? blankQuick(t.defaultMonth)), ...patch } }));
@@ -915,21 +933,49 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     await reloadPractice();
   }
 
-  const renderTile = (t: (typeof tiles)[number]) => (
-        <div key={t.key} className="rounded-2xl bg-white shadow px-5 py-4 space-y-3">
+  const renderTile = (t: (typeof tiles)[number]) => {
+    const isOpen = !!openTiles[t.key];
+    const editing = editTile?.key === t.key;
+    const statOf = (k: string) => t.stats.find((x) => x.k === k);
+    const chipKeys = t.kind === "bank" ? ["Excess / (shortfall)", "Next 14 days"] : t.kind === "card" ? ["Payment due", "Limit · available"] : ["Loan payment", "Paid from"];
+    const chips = chipKeys.map(statOf).filter((x): x is { k: string; v: string; color?: string } => !!x);
+    const lead = t.warns.find((w) => w.kind !== "update");
+    const leadLabel = lead ? (lead.kind === "act" ? "Needs action" : lead.kind === "soon" ? "Due soon" : "Suggestion") : "";
+    return (
+        <div key={t.key} className="rounded-2xl bg-white shadow overflow-hidden">
+          <div role="button" tabIndex={0} aria-expanded={isOpen} onClick={() => toggleTile(t.key)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleTile(t.key); } }}
+            className="flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3 cursor-pointer hover:bg-slate-50">
+            <div className="flex items-center gap-2 min-w-0" style={{ flex: "1 1 200px" }}>
+              <span className="text-slate-400 text-xs w-3">{isOpen ? "▾" : "▸"}</span>
+              <div className="min-w-0">
+                <h3 className="font-bold text-base text-slate-800 truncate">{t.name}</h3>
+                <span className="text-[11px] font-semibold text-slate-500">{t.tag}</span>
+              </div>
+            </div>
+            <div style={{ flex: "0 0 150px" }}>
+              <p className="text-2xl font-bold leading-tight" style={{ color: "#4A4238" }}>{t.balance != null ? formatUSD(t.balance) : "—"}</p>
+              <p className="text-xs text-slate-500">current balance</p>
+            </div>
+            {chips.map((c) => (
+              <div key={c.k} style={{ flex: "0 0 150px" }}>
+                <p className="text-sm font-semibold" style={{ color: c.color ?? "#1e293b" }}>{c.v}</p>
+                <p className="text-xs text-slate-500">{c.k}</p>
+              </div>
+            ))}
+            <div className="flex flex-col gap-1 items-start" style={{ flex: "0 0 150px" }}>
+              {lead && <span className="text-[11px] font-semibold rounded-full px-2 py-0.5" style={{ color: WARN_STYLE[lead.kind].fg, background: WARN_STYLE[lead.kind].bg }}>⚠️ {leadLabel}</span>}
+              <UpdatedStamp when={t.checkedAt} warnings={t.warns.filter((w) => w.kind === "update").map((w) => w.text)} />
+            </div>
+          </div>
+          {isOpen && (
+        <div className="px-5 py-4 space-y-3 border-t border-slate-100" style={{ background: "#faf8f4" }}>
           <div className="flex flex-wrap gap-x-6 gap-y-3">
             <div className="flex flex-col gap-1.5 min-w-0" style={{ flex: "0 0 270px" }}>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-bold text-base text-slate-800">{t.name}</h3>
-                <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 rounded-full px-2 py-0.5">{t.tag}</span>
-                <button onClick={() => setQ(t, { open: !getQ(t).open })} className="text-xs font-semibold text-orange-500 hover:underline">{getQ(t).open ? "Close" : "Update"}</button>
-                <button onClick={() => setEditTile({ kind: t.kind, key: t.key, name: t.name })} className="text-xs font-semibold text-slate-500 hover:text-slate-800 hover:underline">Edit</button>
+              <div className="flex items-center gap-3 flex-wrap">
+                <button onClick={() => setQ(t, { open: !getQ(t).open })} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>{getQ(t).open ? "Close update" : "Update"}</button>
+                <button onClick={() => setEditTile(editing ? null : { kind: t.kind, key: t.key, name: t.name })} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">{editing ? "Close edit" : "Edit details"}</button>
               </div>
-              <div>
-                <p className="text-3xl font-bold leading-tight" style={{ color: "#4A4238" }}>{t.balance != null ? formatUSD(t.balance) : "—"}</p>
-                <p className="text-xs text-slate-500">current balance</p>
-              </div>
-              <UpdatedStamp when={t.checkedAt} warnings={t.warns.filter((w) => w.kind === "update").map((w) => w.text)} />
               <div className="flex flex-col gap-0.5 text-xs text-slate-600 mt-0.5">
                 {t.stats.map((st) => (
                   <div key={st.k} className="flex justify-between gap-3"><span>{st.k}</span><span className="font-semibold" style={{ color: st.color ?? "#1e293b" }}>{st.v}</span></div>
@@ -1016,27 +1062,42 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
               </div>
             );
           })()}
+          {editing && (
+            <div className="rounded-xl border border-slate-200 bg-white p-3">
+              {t.kind === "loan" ? (
+                <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={null}
+                  cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments}
+                  focusDebtId={t.key} onFocusDone={() => setEditTile(null)} />
+              ) : (
+                <AccountsPanel allBills={allBills} latestBalances={latestBalances} refreshAll={refreshAll}
+                  focus={{ kind: t.kind, id: t.key }} onDone={() => setEditTile(null)} />
+              )}
+            </div>
+          )}
         </div>
-  );
+          )}
+        </div>
+    );
+  };
 
   return (
     <div className="space-y-3">
-      {/* Edit window for one account: its name, rates, payments and where it is paid from. Opened by the Edit link on its card. */}
-      {editTile && (
+      {/* "+ Add" window for a category: a blank form for a new bank account, card or loan. */}
+      {addKind && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-8" style={{ background: "rgba(15,23,42,0.35)" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setEditTile(null); }}>
+          onClick={(e) => { if (e.target === e.currentTarget) setAddKind(null); }}>
           <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="font-bold text-lg text-slate-800">Edit {editTile.name}</h2>
-              <button onClick={() => setEditTile(null)} aria-label="Close" className="text-slate-400 hover:text-slate-700 text-xl leading-none px-2">×</button>
+              <h2 className="font-bold text-lg text-slate-800">{addKind === "bank" ? "Add a bank account" : addKind === "card" ? "Add a credit card" : "Add a loan"}</h2>
+              <button onClick={() => setAddKind(null)} aria-label="Close" className="text-slate-400 hover:text-slate-700 text-xl leading-none px-2">×</button>
             </div>
-            {editTile.kind === "loan" ? (
+            {addKind === "loan" ? (
               <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={null}
                 cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments}
-                focusDebtId={editTile.key} onFocusDone={() => setEditTile(null)} />
+                addNew onFocusDone={() => setAddKind(null)} />
             ) : (
               <AccountsPanel allBills={allBills} latestBalances={latestBalances} refreshAll={refreshAll}
-                focus={{ kind: editTile.kind, id: editTile.key }} onDone={() => setEditTile(null)} />
+                addKind={addKind} onDone={() => setAddKind(null)} />
             )}
           </div>
         </div>
@@ -1172,24 +1233,42 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
         </div>
       )}
 
-      {/* 4. One horizontal card per bank account and credit card */}
-      {/* 4. Cards grouped: Accounts, then Debt (credit cards, then loans by kind), then Practice */}
-      {sectionHeader("accounts", "Accounts", `${bankTiles.length} · $${formatMoney(sumNamed(cashAccounts.map((a) => a.name)))} combined`)}
+      {/* Totals, then one band per category: bank accounts, credit cards, loans. Each row opens in place. */}
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
+        <div className="rounded-2xl bg-white shadow px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cash on hand</p>
+          <p className="text-2xl font-bold" style={{ color: "#0f766e" }}>${formatMoney(sumNamed(cashAccounts.map((a) => a.name)))}</p>
+          <p className="text-xs text-slate-500">{bankTiles.length} bank account{bankTiles.length === 1 ? "" : "s"}</p>
+        </div>
+        <div className="rounded-2xl bg-white shadow px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Owed</p>
+          <p className="text-2xl font-bold" style={{ color: "#b45309" }}>${formatMoney(cardsOwed + loansOwed)}</p>
+          <p className="text-xs text-slate-500">cards ${formatMoney(cardsOwed)} · loans ${formatMoney(loansOwed)}</p>
+        </div>
+        <div className="rounded-2xl bg-white shadow px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Needs updating</p>
+          <p className="text-2xl font-bold" style={{ color: staleItems.length > 0 ? "#b45309" : "#15803d" }}>{cashAccounts.length > 0 ? staleItems.length : 0}</p>
+          <p className="text-xs text-slate-500 truncate">{staleItems.length > 0 ? staleItems.map((i) => i.name).join(", ") : "All up to date"}</p>
+        </div>
+      </div>
+      <div className="flex justify-end gap-2">
+        <button onClick={() => setOpenTiles(Object.fromEntries(tiles.map((t) => [t.key, true])))} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">Expand all</button>
+        <button onClick={() => { setOpenTiles({}); setEditTile(null); }} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">Collapse all</button>
+      </div>
+
+      {categoryHeader("accounts", "Bank accounts", `${bankTiles.length} account${bankTiles.length === 1 ? "" : "s"}`, `$${formatMoney(sumNamed(cashAccounts.map((a) => a.name)))}`, "#0f766e", "#e4f2f0", "+ Add bank account", () => setAddKind("bank"))}
       {!collapsed.accounts && bankTiles.map(renderTile)}
 
-      {sectionHeader("debt", "Debt", `${cardTiles.length + loanTiles.length} · $${formatMoney(cardsOwed + loansOwed)} owed`)}
-      {!collapsed.debt && (
-        <>
-          {cardTiles.length > 0 && subHeader("Credit cards", `$${formatMoney(cardsOwed)} current balance`)}
-          {cardTiles.map(renderTile)}
-          {loanGroups.map((g) => (
-            <Fragment key={g.cat}>
-              {subHeader(CATEGORY_LABEL[g.cat], `$${formatMoney(g.owed)} owed · $${formatMoney(g.payment)}/mo`)}
-              {g.tiles.map(renderTile)}
-            </Fragment>
-          ))}
-        </>
-      )}
+      {categoryHeader("cards", "Credit cards", `${cardTiles.length} card${cardTiles.length === 1 ? "" : "s"}`, `$${formatMoney(cardsOwed)} owed`, "#1d5f94", "#e4eef7", "+ Add credit card", () => setAddKind("card"))}
+      {!collapsed.cards && cardTiles.map(renderTile)}
+
+      {categoryHeader("loans", "Loans", `${loanTiles.length} loan${loanTiles.length === 1 ? "" : "s"}`, `$${formatMoney(loansOwed)} owed`, "#92400e", "#f8ece0", "+ Add loan", () => setAddKind("loan"))}
+      {!collapsed.loans && loanGroups.map((g) => (
+        <Fragment key={g.cat}>
+          {subHeader(CATEGORY_LABEL[g.cat], `$${formatMoney(g.owed)} owed · $${formatMoney(g.payment)}/mo`)}
+          {g.tiles.map(renderTile)}
+        </Fragment>
+      ))}
 
       {sectionHeader("practice", "Practice", "Open Dental and accounts receivable")}
 
@@ -1394,7 +1473,7 @@ export default function CashFlowPage() {
             {activeTab === "overview" && (
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-white shadow px-4 py-2.5">
                 <span className="text-xs font-bold text-slate-500 mr-1">Set up &amp; history</span>
-                {([["accounts", "+ Account or card"], ["debt", "Loans & debt"], ["charges", "Card charges"], ["goal", "Annual goal"], ["backfill", "Past months"], ["record", "Open Dental & A/R record"]] as const).map(([k, label]) => (
+                {([["charges", "Card charges"], ["goal", "Annual goal"], ["backfill", "Past months"], ["record", "Open Dental & A/R record"]] as const).map(([k, label]) => (
                   <button key={k} onClick={() => setManage(k)} className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">{label}</button>
                 ))}
               </div>
