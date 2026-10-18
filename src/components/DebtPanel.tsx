@@ -230,7 +230,7 @@ export default function DebtPanel({
           if (prior) await updateRecurringBill(prior.id, { linkedDebtId: null });
         } else if (payLink.mode === "existing" && payLink.billId) {
           if (prior && prior.id !== payLink.billId) await updateRecurringBill(prior.id, { linkedDebtId: null });
-          await updateRecurringBill(payLink.billId, { linkedDebtId: debtId, estimatedAmount: payload.monthlyPayment + (payload.extraMonthly || 0) });
+          await updateRecurringBill(payLink.billId, { linkedDebtId: debtId, estimatedAmount: payload.monthlyPayment + (payload.extraMonthly || 0), ...(payLink.accountId ? { cashAccountId: payLink.accountId } : {}) });
         } else if (payLink.mode === "create" && payLink.accountId) {
           const day = Math.min(28, Math.max(1, Number(payLink.day) || 1));
           const now = new Date();
@@ -404,7 +404,7 @@ export default function DebtPanel({
               </div>
               {form.kind !== "revolving" && (
                 <div className="sm:col-span-3 rounded-lg bg-slate-50 px-3 py-2.5">
-                  <label className={lbl}>Scheduled payment <span className="font-normal text-slate-400">— so it's entered once, not twice</span></label>
+                  <label className={lbl}>Paid from &amp; scheduled payment <span className="font-normal text-slate-400">— entered once, here</span></label>
                   <select
                     value={payLink.mode === "existing" ? payLink.billId : payLink.mode === "create" ? "__create" : ""}
                     onChange={(e) => {
@@ -424,12 +424,19 @@ export default function DebtPanel({
                         <option key={b.id} value={b.id}>{b.name} — ${formatMoney(b.estimatedAmount)} — {cashAccounts.find((a) => a.id === b.cashAccountId)?.name ?? "no account"}</option>
                       ))}
                     </optgroup>
-                    <option value="__create">Create the scheduled payment for me…</option>
+                    <option value="__create">Choose the account it is paid from…</option>
                   </select>
-                  {payLink.mode === "existing" && (() => {
-                    const b = allBills.find((x) => x.id === payLink.billId);
-                    return b ? <p className="text-xs text-slate-500 mt-1">Paid from <strong>{cashAccounts.find((a) => a.id === b.cashAccountId)?.name ?? "no account"}</strong>. This bill and the loan's monthly payment are kept equal, and it's counted once in Need to collect.</p> : null;
-                  })()}
+                  {payLink.mode === "existing" && (
+                    <div className="flex flex-wrap items-end gap-3 mt-2">
+                      <div>
+                        <label className={lbl}>Paid from</label>
+                        <select value={payLink.accountId} onChange={(e) => setPayLink((p) => ({ ...p, accountId: e.target.value }))} className={`${formInput} bg-white`} style={{ width: 220 }}>
+                          {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                      </div>
+                      <p className="text-xs text-slate-500 pb-2" style={{ maxWidth: 380 }}>Changing this moves the scheduled payment to that account. It and the loan's monthly payment are kept equal, and it's counted once in Need to collect.</p>
+                    </div>
+                  )}
                   {payLink.mode === "create" && (
                     <div className="flex flex-wrap items-end gap-3 mt-2">
                       <div>
