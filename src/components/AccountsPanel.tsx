@@ -23,8 +23,10 @@ const lbl = "block text-xs font-semibold text-slate-500 mb-1";
 
 type Mode = null | { kind: "bank"; id?: string } | { kind: "card"; id?: string };
 
-export default function AccountsPanel({ allBills, latestBalances, refreshAll }: {
+export default function AccountsPanel({ allBills, latestBalances, refreshAll, focus, onDone }: {
   allBills: RecurringBill[]; latestBalances: Record<string, BalanceCheck>; refreshAll: () => void;
+  /** Edit just this one account (opened from its card on the Overview): no list, no add buttons. */
+  focus?: { kind: "bank" | "card"; id: string }; onDone?: () => void;
 }) {
   const [banks, setBanks] = useState<CashAccount[]>([]);
   const [cards, setCards] = useState<CreditCard[]>([]);
@@ -72,6 +74,13 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll }: 
     setMode({ kind, id });
   }
 
+  const [focusStarted, setFocusStarted] = useState(false);
+  useEffect(() => {
+    if (!focus || focusStarted) return;
+    const exists = focus.kind === "bank" ? banks.some((x) => x.id === focus.id) : cards.some((x) => x.id === focus.id);
+    if (exists) { setFocusStarted(true); startEdit(focus.kind, focus.id); }
+  }, [focus, focusStarted, banks, cards]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function save() {
     if (!mode) return;
     const nm = name.trim();
@@ -104,6 +113,7 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll }: 
     }
     setBusy(false); setMode(null); setMsg(`${nm} saved.`);
     await load(); refreshAll();
+    onDone?.();
   }
 
   async function confirmClose() {
@@ -123,6 +133,7 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll }: 
     }
     setBusy(false); setClosing(null); setMsg("Closed. Its history and filed statements are kept, and you can reopen it any time.");
     await load(); refreshAll();
+    onDone?.();
   }
 
   async function reopen(kind: "bank" | "card", id: string) {
@@ -137,14 +148,14 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll }: 
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-slate-500">
+      {!focus && <p className="text-xs text-slate-500">
         Add a new bank account or card, change its details, or close one that's no longer used. Closing keeps all its history and filed statements.
-      </p>
+      </p>}
 
-      <div className="flex flex-wrap gap-2">
+      {!focus && <div className="flex flex-wrap gap-2">
         <button onClick={() => startAdd("bank")} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add bank account</button>
         <button onClick={() => startAdd("card")} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add credit card</button>
-      </div>
+      </div>}
 
       {mode && (
         <div className="rounded-xl border border-slate-200 p-4 space-y-3">
@@ -175,7 +186,10 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll }: 
           {mode.id && <p className="text-xs text-slate-400">Renaming moves this account's balance history with it.</p>}
           <div className="flex items-center gap-3">
             <button onClick={save} disabled={busy} className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>{busy ? "Saving…" : "Save"}</button>
-            <button onClick={() => { setMode(null); setMsg(""); }} className="text-sm text-slate-400 hover:underline">Cancel</button>
+            <button onClick={() => { setMode(null); setMsg(""); onDone?.(); }} className="text-sm text-slate-400 hover:underline">Cancel</button>
+            {focus && mode.id && (
+              <button onClick={() => { setMode(null); setMsg(""); setClosing({ kind: mode.kind, id: mode.id as string, moveTo: "" }); }} className="ml-auto text-sm text-slate-400 hover:text-red-500 hover:underline">Close this account…</button>
+            )}
           </div>
         </div>
       )}
@@ -205,13 +219,13 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll }: 
           {closingCard && <p>Its scheduled payments ({allBills.filter((b) => b.active && b.linkedCreditCardId === closingCard.id).length}) will be paused. History and statements are kept.</p>}
           <div className="flex items-center gap-3">
             <button onClick={confirmClose} disabled={busy} className="rounded-lg px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: "#b45309" }}>{busy ? "Working…" : "Close it"}</button>
-            <button onClick={() => { setClosing(null); setMsg(""); }} className="text-xs underline">Cancel</button>
+            <button onClick={() => { setClosing(null); setMsg(""); if (focus) onDone?.(); }} className="text-xs underline">Cancel</button>
           </div>
         </div>
       )}
       {msg && <p className="text-xs font-semibold text-slate-600">{msg}</p>}
 
-      <div>
+      {!focus && <div>
         <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Bank accounts</p>
         {banks.length === 0 && <p className="text-xs text-slate-400">None yet.</p>}
         {banks.map((a) => (
@@ -225,9 +239,9 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll }: 
             </span>
           </div>
         ))}
-      </div>
+      </div>}
 
-      <div>
+      {!focus && <div>
         <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Credit cards</p>
         {cards.length === 0 && <p className="text-xs text-slate-400">None yet.</p>}
         {cards.map((c) => (
@@ -241,7 +255,7 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll }: 
             </span>
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }
