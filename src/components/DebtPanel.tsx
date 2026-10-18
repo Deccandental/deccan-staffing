@@ -30,11 +30,13 @@ type CardEdit = { cur?: string; stmt?: string; rate?: string; pay?: string };
 const cell = "w-full rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
 
 export default function DebtPanel({
-  creditCards, latestBalances, refreshAll, monthlyCollections, cashAccounts = [], charges = [], allBills = [], allPayments = [], focusDebtId, onFocusDone,
+  creditCards, latestBalances, refreshAll, monthlyCollections, cashAccounts = [], charges = [], allBills = [], allPayments = [], focusDebtId, onFocusDone, addNew,
 }: {
   /** Edit just this one loan (opened from its card on the Overview): shows only its form. */
   focusDebtId?: string;
   onFocusDone?: () => void;
+  /** Open a blank loan form straight away (opened from the Loans + Add button). */
+  addNew?: boolean;
   cashAccounts?: CashAccount[];
   charges?: CardCharge[];
   allBills?: RecurringBill[];
@@ -279,6 +281,11 @@ export default function DebtPanel({
 
   // Opened from a loan's Edit button on the Overview: open that loan's form once the debts have loaded.
   const [focusStarted, setFocusStarted] = useState(false);
+  const [addStarted, setAddStarted] = useState(false);
+  useEffect(() => {
+    if (!addNew || addStarted || loading) return;
+    setAddStarted(true); openForm({ ...EMPTY });
+  }, [addNew, addStarted, loading]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!focusDebtId || focusStarted) return;
     const d = debts.find((x) => x.id === focusDebtId);
@@ -449,7 +456,7 @@ export default function DebtPanel({
           </div>
   ) : null;
 
-  if (focusDebtId) return <div className="rounded-2xl bg-white shadow p-3">{formBlock}</div>;
+  if (focusDebtId || addNew) return <div className="rounded-2xl bg-white shadow p-3">{formBlock}</div>;
 
   return (
     <div className="rounded-2xl bg-white shadow p-3">
