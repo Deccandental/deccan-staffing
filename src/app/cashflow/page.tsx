@@ -1281,6 +1281,8 @@ export default function CashFlowPage() {
   // Extra data the overdue rules need: loans, every statement log, latest A/R date.
   const [staleData, setStaleData] = useState<{ loans: Debt[]; statements: Record<string, { month: string; balance: number }[]>; arDate: string | null; ar: ArAgingEntry | null }>({ loans: [], statements: {}, arDate: null, ar: null });
   const [flowOpen, setFlowOpen] = useState(false);
+  // Setup and history windows opened from the Overview (these used to live on the Numbers tab).
+  const [manage, setManage] = useState<null | "accounts" | "debt" | "charges" | "goal" | "backfill" | "record">(null);
   // Unpaid vendor statements: they count as outflows on their due dates in the cash outlook.
   const [unpaidInvoices, setUnpaidInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1373,10 +1375,6 @@ export default function CashFlowPage() {
             <div className="mb-4 flex flex-wrap gap-2">
               <button onClick={() => setActiveTab("overview")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                 style={activeTab === "overview" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>Overview &amp; Trends</button>
-              <button onClick={() => setActiveTab("entry")} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
-                style={activeTab === "entry" ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>
-                Numbers
-              </button>
               {cashAccounts.map((a) => (
                 <button key={a.id} onClick={() => setActiveTab(a.id)} className="px-4 py-2 text-sm font-semibold transition rounded-lg border-2"
                   style={activeTab === a.id ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "#d1fae5", color: "#065f46", borderColor: "#065f46" }}>{a.name}</button>
@@ -1394,7 +1392,31 @@ export default function CashFlowPage() {
               <AccountPanel key={a.id} account={a} allBills={bills} allPayments={payments} stmtOcc={stmtOut.occurrences} latestBalances={latestBalances} cards={creditCards} refreshAll={refresh} />
             ))}
             {activeTab === "overview" && (
-              <OverviewPanel unpaidInvoices={unpaidInvoices} stmtOut={stmtOut} refreshAll={() => refresh(true)} staleItems={staleItems} cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setActiveTab("entry")} />
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-white shadow px-4 py-2.5">
+                <span className="text-xs font-bold text-slate-500 mr-1">Set up &amp; history</span>
+                {([["accounts", "+ Account or card"], ["debt", "Loans & debt"], ["charges", "Card charges"], ["goal", "Annual goal"], ["backfill", "Past months"], ["record", "Open Dental & A/R record"]] as const).map(([k, label]) => (
+                  <button key={k} onClick={() => setManage(k)} className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">{label}</button>
+                ))}
+              </div>
+            )}
+            {manage && (
+              <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-8" style={{ background: "rgba(15,23,42,0.35)" }}
+                onClick={(e) => { if (e.target === e.currentTarget) setManage(null); }}>
+                <div className="w-full max-w-4xl rounded-2xl bg-white p-5 shadow-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-bold text-lg text-slate-800">
+                      {manage === "accounts" ? "Bank accounts and credit cards" : manage === "debt" ? "Loans & debt" : manage === "charges" ? "Card charges" : manage === "goal" ? "Annual production goal" : manage === "backfill" ? "Backfill past months" : "Open Dental & A/R record"}
+                    </h2>
+                    <button onClick={() => setManage(null)} aria-label="Close" className="text-slate-400 hover:text-slate-700 text-xl leading-none px-2">×</button>
+                  </div>
+                  <WeeklyUpdatePanel section={manage} cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={() => refresh(true)}
+                    charges={cardCharges} allBills={bills} allPayments={payments} loans={staleData.loans}
+                    debtMonthlyCollections={debtMonthlyCollections} />
+                </div>
+              </div>
+            )}
+            {activeTab === "overview" && (
+              <OverviewPanel unpaidInvoices={unpaidInvoices} stmtOut={stmtOut} refreshAll={() => refresh(true)} staleItems={staleItems} cashAccounts={cashAccounts} cards={creditCards} charges={cardCharges} allBills={bills} allPayments={payments} latestBalances={latestBalances} onViewArDetails={() => setManage("record")} />
             )}
             {activeTab === "entry" && (
               <WeeklyUpdatePanel cashAccounts={cashAccounts} cards={creditCards} latestBalances={latestBalances} refreshAll={() => refresh(true)}
