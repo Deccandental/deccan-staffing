@@ -277,11 +277,6 @@ export default function DebtPanel({
   }
   const overdueCount = loading ? 0 : summary.lines.filter((l) => lineStatus(l).warnings.length > 0).length;
 
-  if (loading) return <p className="text-sm text-slate-400">Loading…</p>;
-
-  const lbl = "block text-xs font-semibold text-slate-500 mb-1";
-  const formInput = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none";
-
   // Opened from a loan's Edit button on the Overview: open that loan's form once the debts have loaded.
   const [focusStarted, setFocusStarted] = useState(false);
   useEffect(() => {
@@ -289,6 +284,11 @@ export default function DebtPanel({
     const d = debts.find((x) => x.id === focusDebtId);
     if (d) { setFocusStarted(true); openForm({ ...d }); }
   }, [focusDebtId, focusStarted, debts]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <p className="text-sm text-slate-400">Loading…</p>;
+
+  const lbl = "block text-xs font-semibold text-slate-500 mb-1";
+  const formInput = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none";
 
   const formBlock = showForm ? (
           <div className="rounded-xl border border-slate-200 p-4 mb-3">
