@@ -30,8 +30,11 @@ type CardEdit = { cur?: string; stmt?: string; rate?: string; pay?: string };
 const cell = "w-full rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none";
 
 export default function DebtPanel({
-  creditCards, latestBalances, refreshAll, monthlyCollections, cashAccounts = [], charges = [], allBills = [], allPayments = [],
+  creditCards, latestBalances, refreshAll, monthlyCollections, cashAccounts = [], charges = [], allBills = [], allPayments = [], focusDebtId, onFocusDone,
 }: {
+  /** Edit just this one loan (opened from its card on the Overview): shows only its form. */
+  focusDebtId?: string;
+  onFocusDone?: () => void;
   cashAccounts?: CashAccount[];
   charges?: CardCharge[];
   allBills?: RecurringBill[];
@@ -243,6 +246,7 @@ export default function DebtPanel({
     setError(""); setShowForm(false); setForm({ ...EMPTY });
     refresh();
     refreshAll?.();
+    onFocusDone?.();
   }
 
   const fmtMonths = (m: number | null) => {
@@ -278,87 +282,15 @@ export default function DebtPanel({
   const lbl = "block text-xs font-semibold text-slate-500 mb-1";
   const formInput = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none";
 
-  return (
-    <div className="rounded-2xl bg-white shadow p-3">
-      <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-        <h2 className="font-bold text-slate-700 text-sm">
-          Debt <span className="font-normal text-xs text-slate-400">· set up and edit rates, payments and where each is paid from here; update balances and statements on the Overview cards</span>
-        </h2>
-        <div className="flex items-center gap-2">
-          {dirty && <span className="text-xs text-red-600 font-semibold">⚠️ unsaved</span>}
-          {saved && <span className="text-xs text-emerald-600 font-semibold">✓ Saved</span>}
-          <button onClick={handleSaveRows} disabled={saving || !dirty}
-            className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-40"
-            style={{ backgroundColor: dirty ? "#dc2626" : "#e8622a" }}>
-            {saving ? "Saving…" : "Save Debts"}
-          </button>
-          {!showForm && (
-            <button onClick={() => openForm({ ...EMPTY })} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add Loan</button>
-          )}
-        </div>
-      </div>
-      {saveError && <p className="text-xs text-red-600 font-semibold mb-1">{saveError}</p>}
+  // Opened from a loan's Edit button on the Overview: open that loan's form once the debts have loaded.
+  const [focusStarted, setFocusStarted] = useState(false);
+  useEffect(() => {
+    if (!focusDebtId || focusStarted) return;
+    const d = debts.find((x) => x.id === focusDebtId);
+    if (d) { setFocusStarted(true); openForm({ ...d }); }
+  }, [focusDebtId, focusStarted, debts]); // eslint-disable-line react-hooks/exhaustive-deps
 
-      {/* Summary leads the card */}
-      <div className="rounded-lg bg-slate-50 px-3 py-1.5 mb-1.5 text-sm space-y-1">
-        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
-          <span><span className="text-xs text-slate-400">Total owed </span><span className="font-bold" style={{ color: "#4A4238" }}>${formatMoney(summary.totalBalance)}</span></span>
-          <span>
-            <span className="text-xs text-slate-400">Monthly payments </span><span className="font-bold" style={{ color: "#4A4238" }}>${formatMoney(summary.totalMonthlyPayment)}</span>
-            {summary.debtServiceRate != null && <span className="text-xs text-slate-400"> ({summary.debtServiceRate.toFixed(1)}% of collections)</span>}
-          </span>
-          <span style={{ color: summary.totalMonthlyInterest > 0 ? "#A32D2D" : undefined }}>
-            <span className="text-xs opacity-70">Interest/mo </span><span className="font-bold">${formatMoney(summary.totalMonthlyInterest)}</span>
-            <span className="text-xs opacity-70"> (${formatMoney(summary.totalMonthlyInterest * 12)}/yr)</span>
-          </span>
-          {summary.fixedServiceMonthly > 0 && (
-            <span title="Acquisition, real estate and equipment payments — the fixed obligations a lender measures against collections. Cards and the line of credit are left out because they swing month to month.">
-              <span className="text-xs text-slate-400">Fixed loan service </span><span className="font-bold" style={{ color: "#4A4238" }}>${formatMoney(summary.fixedServiceMonthly)}/mo</span>
-              {summary.fixedServiceRate != null && <span className="text-xs text-slate-400"> ({summary.fixedServiceRate.toFixed(1)}% of collections)</span>}
-            </span>
-          )}
-          {summary.extraMonthlyTotal > 0 && (
-            <span title="Insurance and fees paid alongside loans. They're a real monthly cost and are in Need to collect, but they aren't debt service.">
-              <span className="text-xs text-slate-400">Insurance &amp; fees on loans </span><span className="font-bold" style={{ color: "#4A4238" }}>${formatMoney(summary.extraMonthlyTotal)}/mo</span>
-            </span>
-          )}
-        </div>
-        {summary.categories.length > 0 && (
-          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500">
-            {summary.categories.map((c) => (
-              <span key={c.category} title={`${c.count} ${c.count === 1 ? "debt" : "debts"} · interest $${formatMoney(c.interest)}/mo`}>
-                <span className="font-semibold text-slate-600">{CATEGORY_SHORT[c.category]}</span> ${formatMoney(c.balance)} · ${formatMoney(c.payment)}/mo
-              </span>
-            ))}
-            {summary.paidMonthlyBalance > 0 && (
-              <span title="Cards cleared in full every month — not counted as debt or interest.">
-                <span className="font-semibold text-slate-600">Cards paid monthly</span> ${formatMoney(summary.paidMonthlyBalance)} (not counted)
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {summary.worstFirst.length > 1 && (
-        <div className="rounded-lg px-3 py-1.5 text-xs truncate mb-1.5" style={{ background: "#FAEEDA", color: "#854F0B" }}
-          title="Carried cards and the line of credit first, then by rate. Loans with a prepayment penalty are left out because paying early costs more than the rate shows.">
-          <span className="font-semibold">Extra dollar goes furthest on: </span>
-          {summary.worstFirst.slice(0, 3).map((l, i) => (
-            <span key={l.debt.id}>{i > 0 ? " → " : ""}{l.debt.name} {l.debt.interestRate ?? 0}% (${formatMoney(l.monthlyInterest)}/mo)</span>
-          ))}
-          {summary.skippedForPenalty > 0 && <span className="opacity-70"> · {summary.skippedForPenalty} with a prepayment penalty left out</span>}
-        </div>
-      )}
-
-      {unratedCards.length > 0 && (
-        <div className="rounded-lg px-3 py-1.5 text-xs font-semibold truncate mb-1.5" style={{ background: "#E6F1FB", color: "#185FA5" }}
-          title="The rate is on each statement, usually shown as the purchase APR. Enter it in the Rate column.">
-          {unratedCards.length === 1 ? "1 card carries a balance but has" : `${unratedCards.length} cards carry a balance but have`} no rate set — interest is understated until it's entered (Rate column).
-        </div>
-      )}
-
-      <div>
-        {showForm && (
+  const formBlock = showForm ? (
           <div className="rounded-xl border border-slate-200 p-4 mb-3">
             <div className="grid gap-3 sm:grid-cols-3">
               <div>
@@ -512,10 +444,94 @@ export default function DebtPanel({
             {error && <p className="text-sm text-red-600 font-semibold mt-2">⚠️ {error}</p>}
             <div className="flex items-center gap-2 mt-3">
               <button onClick={handleSaveForm} className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Save</button>
-              <button onClick={() => { setShowForm(false); setError(""); }} className="text-sm text-slate-400 hover:underline">Cancel</button>
+              <button onClick={() => { setShowForm(false); setError(""); onFocusDone?.(); }} className="text-sm text-slate-400 hover:underline">Cancel</button>
             </div>
           </div>
+  ) : null;
+
+  if (focusDebtId) return <div className="rounded-2xl bg-white shadow p-3">{formBlock}</div>;
+
+  return (
+    <div className="rounded-2xl bg-white shadow p-3">
+      <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+        <h2 className="font-bold text-slate-700 text-sm">
+          Debt <span className="font-normal text-xs text-slate-400">· set up and edit rates, payments and where each is paid from here; update balances and statements on the Overview cards</span>
+        </h2>
+        <div className="flex items-center gap-2">
+          {dirty && <span className="text-xs text-red-600 font-semibold">⚠️ unsaved</span>}
+          {saved && <span className="text-xs text-emerald-600 font-semibold">✓ Saved</span>}
+          <button onClick={handleSaveRows} disabled={saving || !dirty}
+            className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-40"
+            style={{ backgroundColor: dirty ? "#dc2626" : "#e8622a" }}>
+            {saving ? "Saving…" : "Save Debts"}
+          </button>
+          {!showForm && (
+            <button onClick={() => openForm({ ...EMPTY })} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add Loan</button>
+          )}
+        </div>
+      </div>
+      {saveError && <p className="text-xs text-red-600 font-semibold mb-1">{saveError}</p>}
+
+      {/* Summary leads the card */}
+      <div className="rounded-lg bg-slate-50 px-3 py-1.5 mb-1.5 text-sm space-y-1">
+        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+          <span><span className="text-xs text-slate-400">Total owed </span><span className="font-bold" style={{ color: "#4A4238" }}>${formatMoney(summary.totalBalance)}</span></span>
+          <span>
+            <span className="text-xs text-slate-400">Monthly payments </span><span className="font-bold" style={{ color: "#4A4238" }}>${formatMoney(summary.totalMonthlyPayment)}</span>
+            {summary.debtServiceRate != null && <span className="text-xs text-slate-400"> ({summary.debtServiceRate.toFixed(1)}% of collections)</span>}
+          </span>
+          <span style={{ color: summary.totalMonthlyInterest > 0 ? "#A32D2D" : undefined }}>
+            <span className="text-xs opacity-70">Interest/mo </span><span className="font-bold">${formatMoney(summary.totalMonthlyInterest)}</span>
+            <span className="text-xs opacity-70"> (${formatMoney(summary.totalMonthlyInterest * 12)}/yr)</span>
+          </span>
+          {summary.fixedServiceMonthly > 0 && (
+            <span title="Acquisition, real estate and equipment payments — the fixed obligations a lender measures against collections. Cards and the line of credit are left out because they swing month to month.">
+              <span className="text-xs text-slate-400">Fixed loan service </span><span className="font-bold" style={{ color: "#4A4238" }}>${formatMoney(summary.fixedServiceMonthly)}/mo</span>
+              {summary.fixedServiceRate != null && <span className="text-xs text-slate-400"> ({summary.fixedServiceRate.toFixed(1)}% of collections)</span>}
+            </span>
+          )}
+          {summary.extraMonthlyTotal > 0 && (
+            <span title="Insurance and fees paid alongside loans. They're a real monthly cost and are in Need to collect, but they aren't debt service.">
+              <span className="text-xs text-slate-400">Insurance &amp; fees on loans </span><span className="font-bold" style={{ color: "#4A4238" }}>${formatMoney(summary.extraMonthlyTotal)}/mo</span>
+            </span>
+          )}
+        </div>
+        {summary.categories.length > 0 && (
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500">
+            {summary.categories.map((c) => (
+              <span key={c.category} title={`${c.count} ${c.count === 1 ? "debt" : "debts"} · interest $${formatMoney(c.interest)}/mo`}>
+                <span className="font-semibold text-slate-600">{CATEGORY_SHORT[c.category]}</span> ${formatMoney(c.balance)} · ${formatMoney(c.payment)}/mo
+              </span>
+            ))}
+            {summary.paidMonthlyBalance > 0 && (
+              <span title="Cards cleared in full every month — not counted as debt or interest.">
+                <span className="font-semibold text-slate-600">Cards paid monthly</span> ${formatMoney(summary.paidMonthlyBalance)} (not counted)
+              </span>
+            )}
+          </div>
         )}
+      </div>
+
+      {summary.worstFirst.length > 1 && (
+        <div className="rounded-lg px-3 py-1.5 text-xs truncate mb-1.5" style={{ background: "#FAEEDA", color: "#854F0B" }}
+          title="Carried cards and the line of credit first, then by rate. Loans with a prepayment penalty are left out because paying early costs more than the rate shows.">
+          <span className="font-semibold">Extra dollar goes furthest on: </span>
+          {summary.worstFirst.slice(0, 3).map((l, i) => (
+            <span key={l.debt.id}>{i > 0 ? " → " : ""}{l.debt.name} {l.debt.interestRate ?? 0}% (${formatMoney(l.monthlyInterest)}/mo)</span>
+          ))}
+          {summary.skippedForPenalty > 0 && <span className="opacity-70"> · {summary.skippedForPenalty} with a prepayment penalty left out</span>}
+        </div>
+      )}
+
+      {unratedCards.length > 0 && (
+        <div className="rounded-lg px-3 py-1.5 text-xs font-semibold truncate mb-1.5" style={{ background: "#E6F1FB", color: "#185FA5" }}
+          title="The rate is on each statement, usually shown as the purchase APR. Enter it in the Rate column.">
+          {unratedCards.length === 1 ? "1 card carries a balance but has" : `${unratedCards.length} cards carry a balance but have`} no rate set — interest is understated until it's entered (Rate column).
+        </div>
+      )}
+
+      <div>
+        {formBlock}
 
         {summary.lines.length === 0 ? (
           <p className="text-sm text-slate-400">No cards or loans yet. Credit cards appear here automatically once added on the Credit Cards tab.</p>
