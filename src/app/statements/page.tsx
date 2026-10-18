@@ -1,37 +1,72 @@
 "use client";
 
-import { Fragment, useState, useEffect, useCallback } from "react";
-import type { DragEvent } from "react";
-import { Sidebar } from "@/components/Sidebar";
-import StatementsMonth from "@/components/StatementsMonth";
+import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { loadStaff } from "@/lib/staffStore";
-import { getSessionToken, storeSessionToken, clearSessionToken, hasSessionToken } from "@/lib/secureData";
+import { getSessionToken } from "@/lib/secureData";
 import { loadRecurringBills, loadBillPayments, buildOccurrences, addDays, RecurringBill, BillPayment } from "@/lib/cashflow";
 
 /**
- * Monthly statements: a checklist of every account, card and loan against every month, with the PDF
- * filed right where it's ticked off. Finance users upload and mark; the CPA (own passcode) can only
- * view and download. Files live in a private bucket and are only ever reached through short-lived links.
+ * Statements: ONE list for the month. Bills, invoices and statements are all "statements".
+ * Grouped by category, alphabetical within each, with totals per category and for the month.
+ * Vendors you've filed before show up every month as "Waiting" until their statement is filed (or skipped).
+ * Unpaid statements from earlier months carry forward; a paid one sits in the month it was paid.
+ * Bank, card and loan account statements (which carry balances that feed Cash Flow) sit in their own section.
+ * Finance users file and mark things; the CPA can only view and download.
  */
 
-type Role = "finance" | "cpa";
-interface Account { kind: "bank" | "card" | "loan" | "vendor"; id: string; name: string; category?: string; startMonth?: string; active?: boolean }
-interface CheckRow { category?: string; id: string; check_number: string; account_id: string | null; account_name: string; check_date: string; payee: string; amount: number | null; memo: string; invoice_id: string | null; status: "outstanding" | "cleared" | "void"; cleared_date: string | null; created_by: string }
-interface CheckDoc { id: string; check_id: string; file_name: string; size_bytes: number | null; doc_kind: string; note: string; uploaded_by: string; uploaded_at: string }
-interface CheckInvoice { id: string; account_name: string; invoice_number: string; amount: number | null; paid_check_number: string; paid_from_id: string | null }
-interface FileRow { paid_from_kind?: string | null; paid_from_id?: string | null; paid_method?: string | null; paid_check_number?: string; paid_from_name?: string; paid_note?: string; category?: string; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null; dup_ignored?: boolean; doc_type?: string; invoice_date?: string | null; invoice_number?: string; amount?: number | null; id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null; no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string }
+// ---------------- Types ----------------
+interface FileRow {
+  id: string; account_kind: string; account_id: string; account_name: string; month: string; file_name: string | null; size_bytes: number | null;
+  no_statement: boolean; note: string; uploaded_by: string; uploaded_at: string; doc_type?: string; invoice_date?: string | null; invoice_number?: string;
+  amount?: number | null; dup_ignored?: boolean; paid?: boolean; paid_date?: string | null; matched_bill_id?: string | null; matched_due_date?: string | null;
+  category?: string; paid_from_name?: string; paid_note?: string; paid_method?: string | null; paid_check_number?: string; paid_from_kind?: string | null;
+  paid_from_id?: string | null; due_date?: string | null; paid_amount?: number | null; overpaid_credit?: number | null; autopay?: boolean; paid_auto?: boolean; credit_applied?: number;
+}
+interface Source { id: string; name: string; category: string; active: boolean; startMonth: string; expects: boolean }
+interface Pref { key: string; category: string; autopay: boolean; autopayFromKind: string; autopayFromId: string; autopayFromName: string; expect: string }
+interface Acct { kind: "bank" | "card" | "loan"; id: string; name: string }
+interface PayAcct { kind: "bank" | "card"; id: string; name: string }
+interface MonthData {
+  today: string; month: string; currentMonth: string; prevMonth: string; prevMissing: string[]; files: FileRow[]; datedIds: string[]; skippedIds: string[];
+  sources: Source[]; prefs: Pref[]; history: Record<string, { firstMonth: string; lastMonth: string; lastCategory: string }>; credits: Record<string, number>;
+  accounts: Acct[]; payAccounts: PayAcct[]; cfBalances: Record<string, number>; lastCheck: Record<string, number>;
+}
+type Row =
+  | { kind: "bill"; cat: string; vendor: string; vendorId: string; f: FileRow }
+  | { kind: "doc"; cat: string; vendor: string; vendorId: string; f: FileRow }
+  | { kind: "waiting"; cat: string; vendor: string; vendorId: string }
+  | { kind: "skipped"; cat: string; vendor: string; vendorId: string; f: FileRow };
+type Filter = "all" | "unpaid" | "autopay" | "waiting" | "paid" | "skipped";
 
-const ROLE_KEY = "dd_statements_role";
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const KIND_LABEL: Record<string, string> = { bank: "Bank accounts", card: "Credit cards", loan: "Loans" };
-const DEFAULT_CATEGORIES = ["CAM", "Rent", "Supplies", "Lab", "Utilities", "Insurance", "Equipment & repairs", "Marketing", "Professional fees", "Other"];
-// A vendor's type suggests a starting category for its invoices.
-const VENDOR_TYPE_CATEGORY: Record<string, string> = { Lab: "Lab", Supplier: "Supplies", Insurance: "Insurance" };
-const CHECK_TYPES = ["Vendor invoice", "Patient refund", "Payroll", "Rent / lease", "Tax / government", "Insurance", "Other"];
-const VENDOR_LABEL: Record<string, string> = { Lab: "Labs", Supplier: "Suppliers", Insurance: "Insurance", Other: "Other vendors" };
-const acctKey = (kind: string, id: string) => `${kind}:${id}`;
-const mkey = (year: number, m: number) => `${year}-${String(m).padStart(2, "0")}`;
+// ---------------- Helpers ----------------
+const INK = "#232634", LINE = "#E9E1CF", BAND = "#F6F0E1", ORANGE = "#EF843F", DEEP = "#B84E0B";
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const FULL = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const DEFAULT_CATS = ["Loan", "Rent", "Labs", "Supplies", "Maintenance", "Payroll", "Utilities", "Insurance", "Marketing", "Professional fees", "Other"];
+const CAT_DOT: Record<string, string> = { Loan: "#5B6C9D", Rent: "#8A6BB1", Labs: "#2F8F83", Supplies: "#C98216", Maintenance: "#6F8A2E", Payroll: "#B25D7A", Utilities: "#3F7CAC", Insurance: "#7A6A3A", Other: "#7a7a7a" };
+const SOURCE_TO_CAT: Record<string, string> = { Lab: "Labs", Supplier: "Supplies", Insurance: "Insurance" };
+const CAT_TO_SOURCE: Record<string, string> = { Labs: "Lab", Supplies: "Supplier", Insurance: "Insurance" };
+
+function normCat(s?: string | null): string {
+  const t = (s ?? "").trim(); if (!t) return "";
+  const k = t.toLowerCase();
+  if (["lab", "labs"].includes(k)) return "Labs";
+  if (["supplier", "suppliers", "supplies", "supply"].includes(k)) return "Supplies";
+  if (["rent", "cam", "rent & cam", "rent and cam"].includes(k)) return "Rent";
+  if (["loan", "loans", "note", "notes", "loans & notes", "loans/notes", "loan/notes"].includes(k)) return "Loan";
+  if (["equipment & repairs", "equipment and repairs", "maintenance", "repairs"].includes(k)) return "Maintenance";
+  if (["utilities", "utility"].includes(k)) return "Utilities";
+  if (k === "insurance") return "Insurance";
+  if (k === "payroll") return "Payroll";
+  return t;
+}
+const money = (n: number | null | undefined) => (n == null ? "—" : `${n < 0 ? "-" : ""}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+const dlabel = (iso?: string | null) => (iso ? `${MON[Number(iso.slice(5, 7)) - 1]} ${Number(iso.slice(8, 10))}` : "—");
+const mlabel = (m: string) => `${FULL[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`;
+const shiftMonth = (m: string, d: number) => { const dt = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5)) - 1 + d, 1)); return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`; };
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000);
+const num = (s: string) => Number(String(s).replace(/[$,\s]/g, ""));
+const isNum = (s: string) => s.trim() !== "" && !isNaN(num(s));
 
 async function api(path: string, body: Record<string, unknown>): Promise<{ ok: boolean; status: number; json: any }> {
   try {
@@ -43,1097 +78,1211 @@ async function api(path: string, body: Record<string, unknown>): Promise<{ ok: b
   }
 }
 
-export default function StatementsPage() {
-  const thisYear = new Date().getFullYear();
-  const [checked, setChecked] = useState(false);
-  const [role, setRole] = useState<Role | null>(null);
-  const [code, setCode] = useState("");
-  const [loginError, setLoginError] = useState("");
-  const [year, setYear] = useState(thisYear);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [files, setFiles] = useState<FileRow[]>([]);
+function Pill({ text, bg, fg }: { text: string; bg: string; fg: string }) {
+  return <span className="inline-block rounded-full whitespace-nowrap" style={{ padding: "3px 9px", fontSize: 12, fontWeight: 700, lineHeight: "16px", background: bg, color: fg }}>{text}</span>;
+}
+const Icon = ({ d, size = 18, sw = 1.8 }: { d: string; size?: number; sw?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: "none" }}><path d={d} /></svg>
+);
+const P = { cal: "M3.5 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM8 3v4M16 3v4M3.5 10h17", down: "M6 9l6 6 6-6", print: "M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2M7 14h10v6H7z", exp: "M12 15V4M8 8l4-4 4 4M5 13v6h14v-6", sliders: "M4 7h9M17 7h3M4 17h3M11 17h9M15 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM9 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4z", left: "M15 6l-6 6 6 6", right: "M9 6l6 6-6 6", doc: "M7 3.5h7l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1zM14 3.5V8h4", more: "M5 12h.01M12 12h.01M19 12h.01", plus: "M12 5v14M5 12h14", check: "M5 12.5l4.5 4.5L19 7.5", search: "M16 16l4.5 4.5M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13z", upload: "M12 16V5M7.5 9.5L12 5l4.5 4.5M5 19h14", clock: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM12 7.5V12l3 2", refresh: "M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5", x: "M6 6l12 12M18 6L6 18" };
+
+const btnBase = "inline-flex items-center justify-center gap-1.5 rounded-lg font-semibold whitespace-nowrap disabled:opacity-50";
+const inputCls = "w-full rounded-lg border px-3 py-2 text-sm focus:outline-none bg-white";
+const inputBorder = { borderColor: "#CFC6AF", minHeight: 44 };
+const lbl = "block text-xs font-bold text-slate-600 mb-1";
+
+// ---------------- Component ----------------
+export default function StatementsMonth({ finance, onAuthLost, onChanged, section }: {
+  finance: boolean; onAuthLost?: () => void; onChanged?: () => void;
+  /** "statements": only the bank, card and loan account statements. "bills": only vendor bills and invoices. Left out: both (the CPA page). */
+  section?: "statements" | "bills";
+}) {
+  const showAccts = section !== "bills";
+  const showVendorRows = section !== "statements";
+  const [month, setMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
+  const [data, setData] = useState<MonthData | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [sel, setSel] = useState<{ key: string; month: string } | null>(null);
-  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [sAmount, setSAmount] = useState("");
-  const [cfBalances, setCfBalances] = useState<Record<string, number>>({});
-  // Invoice matching: scheduled bills to compare against, the match chosen, and the unpaid-only filter
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [showAccounts, setShowAccounts] = useState(true);
+  const [catFilter, setCatFilter] = useState("");
+  const [dueFilter, setDueFilter] = useState<"all" | "overdue" | "week">("all");
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  // Add statement
+  const [addOpen, setAddOpen] = useState(false);
+  const [aFile, setAFile] = useState<File | null>(null);
+  const [aVendor, setAVendor] = useState("");
+  const [aCat, setACat] = useState("");
+  const [aInv, setAInv] = useState("");
+  const [aDate, setADate] = useState("");
+  const [aDue, setADue] = useState("");
+  const [aAmount, setAAmount] = useState("");
+  const [aPaidNow, setAPaidNow] = useState(false);
+  const [aAuto, setAAuto] = useState(false);
+  const [aAutoFrom, setAAutoFrom] = useState("");
+  const [aMatch, setAMatch] = useState<{ billId: string; dueDate: string; billName: string } | null>(null);
+  const [aErr, setAErr] = useState("");
   const [bills, setBills] = useState<RecurringBill[]>([]);
   const [billPayments, setBillPayments] = useState<BillPayment[]>([]);
-  const [iMatch, setIMatch] = useState<{ billId: string; dueDate: string; billName: string; amount: number } | null>(null);
-  const [unpaidOnly, setUnpaidOnly] = useState(false);
-  const [iCategory, setICategory] = useState("");
-  // Drag-and-drop: the file waiting in each form, and which area is being dragged over
-  const [iFile, setIFile] = useState<File | null>(null);
-  const [sFile, setSFile] = useState<File | null>(null);
-  const [dragOver, setDragOver] = useState<string | null>(null);
-  // "Mark paid" dialog: the invoice, the date, the account it was paid from, and a note
+
+  // Mark paid
   const [payFor, setPayFor] = useState<FileRow | null>(null);
-  const [payDate, setPayDate] = useState("");
-  const [payFrom, setPayFrom] = useState("");
-  const [payNote, setPayNote] = useState("");
-  // Month-end package for the CPA
-  const [pkgMonth, setPkgMonth] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
-  const [pkgPreview, setPkgPreview] = useState<any>(null);
-  const [pkgList, setPkgList] = useState<any[]>([]);
-  const [cpaEmail, setCpaEmail] = useState("");
-  const [pkgBusy, setPkgBusy] = useState("");
-  const [pkgMsg, setPkgMsg] = useState("");
-  const [payMethod, setPayMethod] = useState<"check" | "ach" | "card" | "other">("check");
-  const [payCheckNo, setPayCheckNo] = useState("");
-  const [payEditing, setPayEditing] = useState(false);
-  // Edit an invoice itself (vendor, date, number, amount)
+  const [pEditing, setPEditing] = useState(false);
+  const [pDate, setPDate] = useState("");
+  const [pMethod, setPMethod] = useState<"check" | "ach" | "card" | "other">("check");
+  const [pFrom, setPFrom] = useState("");
+  const [pCheck, setPCheck] = useState("");
+  const [pAmount, setPAmount] = useState("");
+  const [pDiff, setPDiff] = useState("");
+  const [pNote, setPNote] = useState("");
+  const [pUseCredit, setPUseCredit] = useState(true);
+  const [pErr, setPErr] = useState("");
+
+  // Edit invoice
   const [editInv, setEditInv] = useState<FileRow | null>(null);
   const [eVendor, setEVendor] = useState("");
   const [eDate, setEDate] = useState("");
+  const [eDue, setEDue] = useState("");
   const [eNumber, setENumber] = useState("");
   const [eAmount, setEAmount] = useState("");
-  const [eError, setEError] = useState("");
-  // Check register
-  const [checks, setChecks] = useState<CheckRow[]>([]);
-  const [chkAccount, setChkAccount] = useState("");
-  const [chkStatus, setChkStatus] = useState("");
-  const [chkSearch, setChkSearch] = useState("");
-  const [chkAdding, setChkAdding] = useState(false);
-  const [cNumber, setCNumber] = useState("");
-  const [cDate, setCDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [cAccount, setCAccount] = useState("");
-  const [cPayee, setCPayee] = useState("");
-  const [cAmount, setCAmount] = useState("");
-  const [cMemo, setCMemo] = useState("");
-  const [cType, setCType] = useState("Patient refund");
-  const [cEditId, setCEditId] = useState<string | null>(null);   // a hand-entered check being edited
-  const [chkType, setChkType] = useState("");
-  const [checkDocs, setCheckDocs] = useState<CheckDoc[]>([]);
-  const [checkInvoices, setCheckInvoices] = useState<CheckInvoice[]>([]);
-  const [openCheck, setOpenCheck] = useState<string | null>(null);   // the check whose files panel is open
-  const [attKind, setAttKind] = useState("invoice");
-  const [attNote, setAttNote] = useState("");
-  const [linkInvId, setLinkInvId] = useState("");
-  const [staffNames, setStaffNames] = useState<string[]>([]);
-  const [cPayeeOther, setCPayeeOther] = useState(false);
-  const [pending, setPending] = useState<FileRow[]>([]);   // every unpaid invoice, across all months
-  // Vendor directory
-  const [vendorsAll, setVendorsAll] = useState<{ id: string; name: string; category: string; active: boolean; expectsStatement: boolean }[]>([]);
-  const [usedNames, setUsedNames] = useState<string[]>([]);
-  const [showVendors, setShowVendors] = useState(false);
-  const [nvName, setNvName] = useState("");        // a new vendor being added from the invoice form
-  const [nvType, setNvType] = useState("Other");
-  const [vExpects, setVExpects] = useState(true); // new vendor on the Monthly statements tab: sends a statement?
-  const [usedCategories, setUsedCategories] = useState<string[]>([]);
-  const [catFilter, setCatFilter] = useState("");
-  // A possible duplicate found before filing: the person can file it anyway or cancel.
-  const [dup, setDup] = useState<{ matches: (FileRow & { reason?: string })[]; note?: string; proceed: () => void } | null>(null);
-  // Invoices (a separate list from the monthly statements)
-  const [tab, setTab] = useState<"statements" | "invoices" | "checks" | "package">("statements");
-  const [invMonth, setInvMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [invFiles, setInvFiles] = useState<FileRow[]>([]);
-  const [invVendors, setInvVendors] = useState<{ id: string; name: string; category: string }[]>([]);
-  const [invSearch, setInvSearch] = useState("");
-  const [invAdding, setInvAdding] = useState(true);
-  const [iVendor, setIVendor] = useState("");
-  const [iOther, setIOther] = useState("");
-  const [iDate, setIDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [iNumber, setINumber] = useState("");
-  const [iAmount, setIAmount] = useState("");
-  const [vName, setVName] = useState("");
-  const [vCategory, setVCategory] = useState("Lab");
-  const [vStart, setVStart] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
+  const [eCat, setECat] = useState("");
+  const [eFrom, setEFrom] = useState("");   // "usually paid from" for this vendor, e.g. bank:12
+  const [eErr, setEErr] = useState("");
 
-  useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem(ROLE_KEY);
-      if ((stored === "finance" || stored === "cpa") && hasSessionToken()) setRole(stored);
-      else if (stored) sessionStorage.removeItem(ROLE_KEY);
-      else if (hasSessionToken()) {
-        // Already signed in elsewhere in the app (the Payroll or Cash Flow login, or the app-wide login)? Then
-        // don't ask again. This only picks which screen to show: the server still checks the same login on every
-        // request, and anyone without access is sent back to the login box.
-        const payrollUnlock = sessionStorage.getItem("dd_payroll_unlocked");
-        let identityOk = false;
-        try { const id = JSON.parse(sessionStorage.getItem("dd_identity") ?? "null"); identityOk = !!id && (id.mode === "super" || id.canManagePayroll === true); } catch {}
-        if (payrollUnlock === "super" || payrollUnlock === "staff" || identityOk) { sessionStorage.setItem(ROLE_KEY, "finance"); setRole("finance"); }
-      }
-    } catch {}
-    setChecked(true);
-  }, []);
+  // Merge two vendors that are really one
+  const [mergeDlg, setMergeDlg] = useState<{ fromId: string; intoId: string } | null>(null);
+  const [mErr, setMErr] = useState("");
 
-  function droppedPdf(e: DragEvent<HTMLElement>): File | null {
-    e.preventDefault(); setDragOver(null);
-    const f = e.dataTransfer.files?.[0];
-    if (!f) return null;
-    if (!/\.pdf$/i.test(f.name)) { setMsg("Only PDF files can be dropped here."); return null; }
-    return f;
-  }
-  const dropProps = (zone: string, onFile: (f: File) => void) => ({
-    onDragOver: (e: DragEvent<HTMLElement>) => { e.preventDefault(); setDragOver(zone); },
-    onDragLeave: (e: DragEvent<HTMLElement>) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(null); },
-    onDrop: (e: DragEvent<HTMLElement>) => { const f = droppedPdf(e); if (f) onFile(f); },
-  });
-  useEffect(() => {
-    const stop = (e: Event) => e.preventDefault();
-    window.addEventListener("dragover", stop); window.addEventListener("drop", stop);
-    return () => { window.removeEventListener("dragover", stop); window.removeEventListener("drop", stop); };
-  }, []);
+  // Edit a filed statement (date / month and amount)
+  const [editStmt, setEditStmt] = useState<FileRow | null>(null);
+  const [stDate, setStDate] = useState("");
+  const [stAmount, setStAmount] = useState("");
+  const [stErr, setStErr] = useState("");
+  const [boxOver, setBoxOver] = useState(false);
 
-  function logout() {
-    setRole(null); clearSessionToken();
-    try { sessionStorage.removeItem(ROLE_KEY); } catch {}
-  }
+  // Account statement (bank / card / loan)
+  const [acctDlg, setAcctDlg] = useState<Acct | null>(null);
+  const [sAmount, setSAmount] = useState("");
+  const [sFile, setSFile] = useState<File | null>(null);
+  const [sErr, setSErr] = useState("");
 
-  async function handleLogin() {
-    setLoginError("");
-    let res: Response;
-    try { res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) }); }
-    catch { setLoginError("Couldn't reach the server."); return; }
-    const r = await res.json().catch(() => ({}));
-    const next: Role | null = r.cpa ? "cpa" : (r.isSuper || r.employee?.canManagePayroll) ? "finance" : null;
-    if (!r.token || !next) { setLoginError(r.ok && !next ? "That login doesn't have access to statements." : "Not recognized."); setCode(""); return; }
-    storeSessionToken(r.token);
-    try { sessionStorage.setItem(ROLE_KEY, next); } catch {}
-    setRole(next); setCode("");
-  }
-
+  // ---------------- Loading ----------------
   const load = useCallback(async () => {
-    if (!role) return;
     setLoading(true); setLoadError("");
-    const r = await api("/api/statements/list", { year });
+    const r = await api("/api/statements/month", { month });
     setLoading(false);
-    if (r.status === 401) { logout(); return; }
+    if (r.status === 401) { onAuthLost?.(); return; }
     if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load statements."); return; }
-    setAccounts(r.json.accounts ?? []); setFiles(r.json.files ?? []); setCfBalances(r.json.cfBalances ?? {});
-  }, [role, year]); // eslint-disable-line react-hooks/exhaustive-deps
+    setData(r.json as MonthData);
+  }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
-  // Picking a month fills in the statement balance Cash Flow already holds for it, if there is one.
-  useEffect(() => {
-    setDup(null);
-    const a = sel ? accounts.find((x) => acctKey(x.kind, x.id) === sel.key) : null;
-    const v = a && sel ? cfBalances[`${a.kind}:${a.id}:${sel.month}`] : undefined;
-    setSAmount(v != null ? String(v) : ""); setSFile(null);
-  }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Choosing a vendor suggests a category from its type (a lab -> Lab); it can still be changed.
-  useEffect(() => {
-    const v = invVendors.find((x) => x.id === iVendor);
-    if (v && VENDOR_TYPE_CATEGORY[v.category]) setICategory(VENDOR_TYPE_CATEGORY[v.category]);
-  }, [iVendor, invVendors]);
-  // Scheduled bills, for matching invoices to what is already expected (finance only).
-  useEffect(() => {
-    if (role !== "finance" || !invAdding || tab !== "invoices") return;
-    const t = new Date(); const from = addDays(t.toISOString().slice(0, 10), -75); const to = addDays(t.toISOString().slice(0, 10), 150);
-    loadRecurringBills().then(setBills); loadBillPayments(from, to).then(setBillPayments);
-  }, [role, invAdding, tab]);
+  const changed = () => { load(); onChanged?.(); };
 
-  // The last month whose statement should be out: last month this year, all of a past year, none of a future one.
-  const now = new Date();
-  const lastDue = year < thisYear ? 12 : year > thisYear ? 0 : now.getMonth(); // getMonth() is 0-based, so it equals last month's number
-  const filesFor = (kind: string, id: string, month: string) => files.filter((f) => f.account_kind === kind && f.account_id === id && f.month === month);
-  const status = (a: Account, m: number): "have" | "none" | "missing" | "future" => {
-    const fs = filesFor(a.kind, a.id, mkey(year, m));
-    if (fs.some((f) => !f.no_statement)) return "have";
-    if (fs.some((f) => f.no_statement)) return "none";
-    // A vendor is only expected from its first month on, and not at all once it is retired.
-    if (a.kind === "vendor" && ((a.startMonth && mkey(year, m) < a.startMonth) || a.active === false)) return "future";
-    return m <= lastDue ? "missing" : "future";
+  useEffect(() => {
+    if (menuFor === null) return;
+    const close = () => setMenuFor(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [menuFor]);
+
+  // Drop a PDF anywhere on the page to start filing it.
+  useEffect(() => {
+    if (!finance) return;
+    const over = (e: Event) => e.preventDefault();
+    const drop = (e: any) => {
+      e.preventDefault();
+      const f: File | undefined = e.dataTransfer?.files?.[0];
+      if (!f) return;
+      if (!/\.pdf$/i.test(f.name)) { setMsg("Only PDF files can be dropped here."); return; }
+      // The file goes into whichever window is open; with none open it starts a new statement.
+      if (acctDlg) setSFile(f);
+      else if (addOpen) setAFile(f);
+      else if (!payFor && !editInv && !editStmt && !mergeDlg && showVendorRows) openAdd({ file: f });
+    };
+    window.addEventListener("dragover", over); window.addEventListener("drop", drop);
+    return () => { window.removeEventListener("dragover", over); window.removeEventListener("drop", drop); };
+  }); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Scheduled bills, so a new statement can be matched to one already expected (finance only).
+  useEffect(() => {
+    if (!finance || !addOpen) return;
+    const t = new Date().toISOString().slice(0, 10);
+    loadRecurringBills().then(setBills).catch(() => {});
+    loadBillPayments(addDays(t, -75), addDays(t, 150)).then(setBillPayments).catch(() => {});
+  }, [finance, addOpen]);
+
+  // ---------------- The month's rows ----------------
+  const view = useMemo(() => {
+    if (!data) return null;
+    const prefMap: Record<string, Pref> = {}; for (const p of data.prefs) prefMap[p.key] = p;
+    const srcMap: Record<string, Source> = {}; for (const s of data.sources) srcMap[s.id] = s;
+    const catFor = (id: string, fileCat?: string | null) =>
+      normCat(prefMap[`vendor:${id}`]?.category) || normCat(fileCat) || normCat(data.history[id]?.lastCategory) || (srcMap[id] ? SOURCE_TO_CAT[srcMap[id].category] ?? "" : "") || "Other";
+    const isVendorKind = (k: string) => k === "vendor" || k === "other";
+
+    const nameOf = (f: FileRow) => (isVendorKind(f.account_kind) ? srcMap[f.account_id]?.name : undefined) ?? f.account_name;
+    const rows: Row[] = [];
+    for (const f of data.files) {
+      if (f.no_statement) {
+        if (isVendorKind(f.account_kind)) rows.push({ kind: "skipped", cat: catFor(f.account_id, f.category), vendor: nameOf(f), vendorId: f.account_id, f });
+      } else if (f.doc_type === "invoice") {
+        rows.push({ kind: "bill", cat: catFor(f.account_id, f.category), vendor: nameOf(f), vendorId: f.account_id, f });
+      } else if (isVendorKind(f.account_kind)) {
+        rows.push({ kind: "doc", cat: catFor(f.account_id, f.category), vendor: nameOf(f), vendorId: f.account_id, f });
+      }
+    }
+    // Vendors you've filed before (or are set to expect) wait here until this month's statement arrives or is skipped.
+    const dated = new Set(data.datedIds), skipped = new Set(data.skippedIds);
+    if (data.month <= data.currentMonth) {
+      for (const s of data.sources) {
+        const key = `vendor:${s.id}`;
+        if (!s.active || prefMap[key]?.expect === "never") continue;
+        const first = data.history[s.id]?.firstMonth;
+        const last = data.history[s.id]?.lastMonth;
+        const eligible = (s.expects && (!s.startMonth || data.month >= s.startMonth)) || (!!first && first < data.month && !!last && last >= shiftMonth(data.month, -12));
+        if (!eligible || dated.has(key) || skipped.has(key)) continue;
+        rows.push({ kind: "waiting", cat: catFor(s.id), vendor: s.name, vendorId: s.id });
+      }
+    }
+    const sortKey = (r: Row) => `${r.vendor.toLowerCase()}|${r.kind === "waiting" ? "0" : "1"}|${"f" in r ? r.f.invoice_date ?? r.f.month : ""}|${"f" in r ? r.f.invoice_number ?? "" : ""}`;
+    rows.sort((a, z) => sortKey(a).localeCompare(sortKey(z)));
+
+    const matches = (r: Row, fl: Filter) => {
+      if (fl === "all") return true;
+      if (fl === "unpaid") return r.kind === "bill" && !r.f.paid;
+      if (fl === "autopay") return r.kind === "bill" && !!r.f.autopay;
+      if (fl === "waiting") return r.kind === "waiting";
+      if (fl === "paid") return r.kind === "bill" && !!r.f.paid;
+      return r.kind === "skipped";
+    };
+    const q = search.trim().toLowerCase();
+    const dueOk = (r: Row) => dueFilter === "all" || (r.kind === "bill" && !r.f.paid && !!r.f.due_date && (dueFilter === "overdue" ? !r.f.autopay && r.f.due_date < data.today : r.f.due_date >= data.today && daysBetween(r.f.due_date, data.today) <= 7));
+    const shown = rows.filter((r) => matches(r, filter) && (!catFilter || r.cat === catFilter) && dueOk(r) && (!q || r.vendor.toLowerCase().includes(q) || ("f" in r && (r.f.invoice_number ?? "").toLowerCase().includes(q))));
+    const counts: Record<Filter, number> = { all: rows.length, unpaid: 0, autopay: 0, waiting: 0, paid: 0, skipped: 0 };
+    for (const r of rows) for (const fl of ["unpaid", "autopay", "waiting", "paid", "skipped"] as Filter[]) if (matches(r, fl)) counts[fl]++;
+
+    const cats = [...new Set(shown.map((r) => r.cat))];
+    cats.sort((a, z) => {
+      const ia = a === "Other" ? 998 : DEFAULT_CATS.indexOf(a), iz = z === "Other" ? 998 : DEFAULT_CATS.indexOf(z);
+      const ra = ia === -1 ? 500 : ia, rz = iz === -1 ? 500 : iz;
+      return ra - rz || a.localeCompare(z);
+    });
+    const waiting = rows.filter((r) => r.kind === "waiting");
+    // Two vendors whose names are nearly the same (one just the other plus a short word) may be one vendor entered twice.
+    const norm = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const seenV = new Map<string, string>();
+    for (const r of rows) if (srcMap[r.vendorId]) seenV.set(r.vendorId, r.vendor);
+    const vlist = [...seenV.entries()].map(([id, name]) => ({ id, name, n: norm(name) }));
+    const dupPairs: { from: { id: string; name: string }; into: { id: string; name: string } }[] = [];
+    for (let i = 0; i < vlist.length; i++) for (let j = i + 1; j < vlist.length; j++) {
+      const [sh, lo] = vlist[i].n.length <= vlist[j].n.length ? [vlist[i], vlist[j]] : [vlist[j], vlist[i]];
+      if (sh.n.length >= 4 && sh.n !== lo.n && lo.n.startsWith(sh.n) && lo.n.length - sh.n.length <= 10) dupPairs.push({ from: { id: sh.id, name: sh.name }, into: { id: lo.id, name: lo.name } });
+    }
+    return { rows, shown, counts, cats, waiting, prefMap, srcMap, catFor, dupPairs };
+  }, [data, filter, search, catFilter, dueFilter]);
+
+  const paidSum = (f: FileRow) => (f.paid ? Number(f.paid_amount ?? f.amount ?? 0) : Number(f.paid_amount ?? 0));
+  const owedOf = (f: FileRow) => (f.paid ? 0 : Math.max(0, Number(f.amount ?? 0) - Number(f.paid_amount ?? 0) - Number(f.credit_applied ?? 0)));
+  const totals = (rs: Row[]) => {
+    let t = 0, p = 0, o = 0;
+    for (const r of rs) if (r.kind === "bill") { t += Number(r.f.amount ?? 0); p += paidSum(r.f); o += owedOf(r.f); }
+    return { t, p, o };
   };
 
-  const finance = role === "finance";
-  const visible = accounts.filter((a) => a.name.toLowerCase().includes(search.trim().toLowerCase()));
-  const missingLast = lastDue >= 1 ? accounts.filter((a) => status(a, lastDue) === "missing") : [];
-  const totalMissing = accounts.reduce((n, a) => { let c = 0; for (let m = 1; m <= lastDue; m++) if (status(a, m) === "missing") c++; return n + c; }, 0);
+  const allCats = useMemo(() => {
+    const used = new Set<string>(); view?.rows.forEach((r) => used.add(r.cat));
+    data?.prefs.forEach((p) => p.category && used.add(normCat(p.category)));
+    return [...new Set([...DEFAULT_CATS.filter((c) => c !== "Other"), ...[...used].filter((c) => !DEFAULT_CATS.includes(c)).sort(), "Other"])];
+  }, [view, data]);
 
+  // ---------------- Actions ----------------
   async function download(f: FileRow) {
     setMsg("");
     const r = await api("/api/statements/download-url", { id: f.id });
     if (!r.ok) { setMsg(r.json.error ?? "Couldn't create the download link."); return; }
     const a = document.createElement("a"); a.href = r.json.url; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
   }
+  async function manage(body: Record<string, unknown>, fail = "Couldn't save."): Promise<boolean> {
+    setBusy(true); setMsg("");
+    const r = await api("/api/statements/manage", body);
+    setBusy(false);
+    if (!r.ok) { setMsg(r.json.error ?? fail); return false; }
+    return true;
+  }
+  async function skipVendor(vendorId: string, vendor: string) {
+    if (await manage({ action: "markNone", accountKind: "vendor", accountId: vendorId, accountName: vendor, month, note: "Skipped this month" })) changed();
+  }
+  async function undoSkip(f: FileRow) { if (await manage({ action: "remove", id: f.id })) changed(); }
+  async function setExpect(vendorId: string, expect: "monthly" | "never") {
+    if (await manage({ action: "setPrefs", key: `vendor:${vendorId}`, expect })) changed();
+  }
+  async function removeFile(f: FileRow) {
+    if (!window.confirm(`Delete ${f.invoice_number ? `invoice ${f.invoice_number}` : f.file_name ?? "this statement"} from ${f.account_name}? This can't be undone.`)) return;
+    if (await manage({ action: "remove", id: f.id })) changed();
+  }
+  async function undoPaid(f: FileRow) { if (await manage({ action: "markInvoicePaid", id: f.id, paid: false })) changed(); }
+  async function autopayFailed(f: FileRow) {
+    if (!window.confirm(`Mark ${f.account_name} unpaid? Use this when the autopay didn't go through. It won't be set to autopay again for this statement.`)) return;
+    if (await manage({ action: "autopayFailed", id: f.id })) changed();
+  }
+  async function unlinkBill(f: FileRow) { if (await manage({ action: "matchInvoice", id: f.id, billId: null })) changed(); }
 
-  async function upload(a: Account, month: string, file: File, ignoreDup = false) {
-    setMsg(""); setDup(null);
-    if (!/\.pdf$/i.test(file.name)) { setMsg("Only PDF files can be uploaded."); return; }
-    if (sAmount.trim() === "" || isNaN(Number(sAmount))) { setMsg("Enter the statement amount first."); return; }
+  // ---------------- Vendors: rename, merge ----------------
+  async function renameVendor(id: string, current: string) {
+    const name = (window.prompt("Rename this vendor:", current) ?? "").trim().slice(0, 80);
+    if (!name || name === current) return;
+    if (await manage({ action: "updateSource", id, name })) changed();
+  }
+  async function changeCategory(vendorId: string, value: string) {
+    let cat = value;
+    if (value === "__new") { cat = (window.prompt("New category name:") ?? "").trim().slice(0, 40); if (!cat) return; }
+    if (await manage({ action: "setPrefs", key: `vendor:${vendorId}`, category: cat })) changed();
+  }
+  function openMerge(fromId: string, intoId = "") { setMErr(""); setMergeDlg({ fromId, intoId }); }
+  async function doMerge() {
+    if (!mergeDlg || !data) return;
+    if (!mergeDlg.intoId) { setMErr("Choose the vendor to keep."); return; }
+    const from = data.sources.find((x) => x.id === mergeDlg.fromId), into = data.sources.find((x) => x.id === mergeDlg.intoId);
+    if (!from || !into) return;
+    setBusy(true); setMErr("");
+    const r = await api("/api/statements/manage", { action: "mergeSource", fromId: from.id, intoId: into.id });
+    setBusy(false);
+    if (!r.ok) { setMErr(r.json.error ?? "Couldn't merge."); return; }
+    setMergeDlg(null); setMsg(`Merged ${from.name} into ${into.name}${r.json.moved ? ` (${r.json.moved} statement${r.json.moved === 1 ? "" : "s"} moved)` : ""}.`); changed();
+  }
+
+  // ---------------- Add a statement ----------------
+  const vendorByName = (name: string) => data?.sources.find((s) => s.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const defaultDate = () => (data && month !== data.currentMonth ? `${month}-01` : data?.today ?? new Date().toISOString().slice(0, 10));
+  function applyVendor(name: string) {
+    setAVendor(name);
+    const s = vendorByName(name);
+    if (!s || !view || !data) return;
+    const p = view.prefMap[`vendor:${s.id}`];
+    setACat(view.catFor(s.id));
+    setAAuto(!!p?.autopay);
+    setAAutoFrom(p?.autopayFromId ? `${p.autopayFromKind}:${p.autopayFromId}` : "");
+  }
+  function openAdd(opts?: { vendor?: string; file?: File }) {
+    setAFile(opts?.file ?? null); setAVendor(""); setACat(""); setAInv(""); setADate(defaultDate()); setADue(""); setAAmount("");
+    setAPaidNow(false); setAAuto(false); setAAutoFrom(""); setAMatch(null); setAErr(""); setAddOpen(true);
+    if (opts?.vendor) setTimeout(() => applyVendor(opts.vendor!), 0);
+  }
+  async function fileStatement(addAnother: boolean, ignoreDup = false) {
+    if (!data) return;
+    setAErr("");
+    const name = aVendor.trim();
+    if (!aFile) { setAErr("Attach the statement PDF first."); return; }
+    if (!/\.pdf$/i.test(aFile.name)) { setAErr("Only PDF files can be uploaded."); return; }
+    if (!name) { setAErr("Choose a vendor, or type a new one."); return; }
+    if (!aDate) { setAErr("Enter the statement date."); return; }
+    if (!aInv.trim()) { setAErr("Enter the invoice number."); return; }
+    if (!isNum(aAmount)) { setAErr("Enter the amount due."); return; }
+    const autoAcct = aAutoFrom ? data.payAccounts.find((a) => `${a.kind}:${a.id}` === aAutoFrom) : undefined;
+    if (aAuto && !aDue) { setAErr("Enter the due date. Autopay is paid on it."); return; }
+    if (aAuto && !autoAcct) { setAErr("Choose the account autopay is paid from."); return; }
     setBusy(true);
-    if (!ignoreDup) {
-      const chk = await api("/api/statements/manage", { action: "checkDuplicate", docType: "statement", accountKind: a.kind, accountId: a.id, accountName: a.name, month, amount: sAmount });
-      const cf: number | null | undefined = chk.json.cfBalance;
-      const cfDiffers = cf != null && Math.abs(cf - Number(sAmount)) > 0.004;
-      if (chk.ok && ((chk.json.matches ?? []).length > 0 || cfDiffers)) {
+    // A name that isn't on the list yet joins it now, and shows up every month after this.
+    let vendor = vendorByName(name);
+    if (!vendor) {
+      const mapped = CAT_TO_SOURCE[normCat(aCat)] ?? "Other";
+      const made = await api("/api/statements/manage", { action: "addSource", name, category: mapped, startMonth: data.currentMonth, expectsStatement: true });
+      if (!made.ok || !made.json.data?.id) { setBusy(false); setAErr(made.json.error ?? "Couldn't add the vendor."); return; }
+      vendor = { id: String(made.json.data.id), name, category: mapped, active: true, startMonth: data.currentMonth, expects: true };
+    } else if (!ignoreDup) {
+      const chk = await api("/api/statements/manage", { action: "checkDuplicate", docType: "invoice", accountKind: "vendor", accountId: vendor.id, accountName: vendor.name, invoiceDate: aDate, invoiceNumber: aInv, amount: num(aAmount) });
+      const m = (chk.ok ? chk.json.matches ?? [] : []) as any[];
+      if (m.length > 0) {
         setBusy(false);
-        setDup({ matches: chk.json.matches ?? [], note: cfDiffers ? `Cash Flow already has $${Number(cf).toLocaleString("en-US", { minimumFractionDigits: 2 })} as this month's statement balance. Filing this will replace it with $${Number(sAmount).toLocaleString("en-US", { minimumFractionDigits: 2 })}.` : undefined, proceed: () => upload(a, month, file, true) });
+        const x = m[0];
+        if (window.confirm(`This may be a duplicate: ${x.account_name}${x.invoice_number ? ` invoice ${x.invoice_number}` : ""}, ${money(x.amount)}, already filed (${x.reason}). File it anyway?`)) return fileStatement(addAnother, true);
         return;
       }
     }
-    const slot = await api("/api/statements/upload-url", { accountKind: a.kind, accountName: a.name, month, fileName: file.name, size: file.size });
-    if (!slot.ok) { setBusy(false); setMsg(slot.json.error ?? "Couldn't start the upload."); return; }
-    const up = await supabase.storage.from("statements").uploadToSignedUrl(slot.json.path, slot.json.token, file, { contentType: "application/pdf" });
-    if (up.error) { setBusy(false); setMsg(`Upload failed: ${up.error.message}`); return; }
-    const rec = await api("/api/statements/manage", { action: "confirm", path: slot.json.path, accountKind: a.kind, accountId: a.id, accountName: a.name, month, fileName: file.name, size: file.size, amount: sAmount, dupIgnored: ignoreDup });
-    setBusy(false);
-    if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't record the upload."); return; }
-    setSAmount(""); setSFile(null); setMsg(`Filed ${file.name}.${rec.json.synced ? " Saved as this month's statement balance in Cash Flow." : ""}`); load();
-  }
-
-  async function markNone(a: Account, month: string) {
-    const note = window.prompt("Why is there no statement? (optional, e.g. account had no activity)") ?? "";
-    setBusy(true);
-    const r = await api("/api/statements/manage", { action: "markNone", accountKind: a.kind, accountId: a.id, accountName: a.name, month, note });
-    setBusy(false);
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't save."); return; }
-    load();
-  }
-
-  const loadPackageTab = useCallback(async () => {
-    if (role !== "finance") return;
-    const [pre, list, set] = await Promise.all([
-      api("/api/statements/package", { action: "preview", month: pkgMonth }),
-      api("/api/statements/package", { action: "list" }),
-      api("/api/statements/package", { action: "settings" }),
-    ]);
-    if (pre.ok) setPkgPreview(pre.json); else setPkgPreview(null);
-    if (list.ok) setPkgList(list.json.packages ?? []); else if (!list.ok && list.json.error) setPkgMsg(list.json.error);
-    if (set.ok) setCpaEmail(set.json.cpaEmail ?? "");
-  }, [role, pkgMonth]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (tab === "package") loadPackageTab(); }, [tab, loadPackageTab]);
-
-  async function saveCpaEmail() {
-    const r = await api("/api/statements/package", { action: "setCpaEmail", email: cpaEmail });
-    setPkgMsg(r.ok ? "CPA email saved." : (r.json.error ?? "Couldn't save."));
-  }
-  async function createPackage() {
-    setPkgBusy("create"); setPkgMsg("Building the package. A busy month can take up to a minute…");
-    const r = await api("/api/statements/package", { action: "create", month: pkgMonth });
-    setPkgBusy("");
-    if (!r.ok) { setPkgMsg(r.json.error ?? "Couldn't build the package."); return; }
-    setPkgMsg(`Package ready: ${r.json.package?.stats ?? ""}.${(r.json.missingFiles ?? []).length ? ` ${(r.json.missingFiles ?? []).length} file(s) couldn't be read and are listed in Missing-files.txt.` : ""}`);
-    loadPackageTab();
-  }
-  async function downloadPackage(id: string) {
-    setPkgBusy(`dl:${id}`);
-    const r = await api("/api/statements/package", { action: "download", id });
-    setPkgBusy("");
-    if (!r.ok) { setPkgMsg(r.json.error ?? "Couldn't create the download link."); return; }
-    const a = document.createElement("a"); a.href = r.json.url; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
-  }
-  async function emailPackage(pk: any) {
-    if (!cpaEmail.trim()) { setPkgMsg("Save the CPA's email address first."); return; }
-    if (!window.confirm(`Email a download link for ${pk.month} to ${cpaEmail.trim()}? The link works for 7 days.`)) return;
-    setPkgBusy(`em:${pk.id}`);
-    const r = await api("/api/statements/package", { action: "email", id: pk.id, to: cpaEmail.trim() });
-    setPkgBusy("");
-    if (!r.ok) { setPkgMsg(r.json.error ?? "The email couldn't be sent."); return; }
-    setPkgMsg(`Link emailed to ${r.json.to}. It works until ${r.json.expires}.`); loadPackageTab();
-  }
-  async function deletePackage(pk: any) {
-    if (!window.confirm(`Delete the ${pk.month} package? Any link already emailed will stop working.`)) return;
-    const r = await api("/api/statements/package", { action: "delete", id: pk.id });
-    if (!r.ok) { setPkgMsg(r.json.error ?? "Couldn't delete."); return; }
-    loadPackageTab();
-  }
-
-  const loadChecks = useCallback(async () => {
-    if (!role) return;
-    const r = await api("/api/statements/checks", { action: "list" });
-    if (r.status === 401) { logout(); return; }
-    if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load the check register."); return; }
-    setChecks(r.json.checks ?? []); setCheckDocs(r.json.docs ?? []); setCheckInvoices(r.json.invoices ?? []);
-  }, [role]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { loadChecks(); }, [loadChecks]);
-
-  useEffect(() => {
-    if (role !== "finance" || tab !== "checks") return;
-    loadStaff().then((list) => setStaffNames(list.filter((e) => !e.archived).map((e) => e.name).sort())).catch(() => {});
-  }, [role, tab]);
-
-  const loadPending = useCallback(async () => {
-    if (role !== "finance") return;
-    const r = await api("/api/statements/list", { docType: "invoice", unpaid: true });
-    if (r.ok) setPending((r.json.files ?? []).filter((f: FileRow) => !f.paid));
-  }, [role]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { loadPending(); }, [loadPending]);
-
-  const loadInvoices = useCallback(async () => {
-    if (!role) return;
-    setLoading(true); setLoadError("");
-    const r = await api("/api/statements/list", { docType: "invoice", month: invMonth, unpaid: unpaidOnly });
-    setLoading(false);
-    if (r.status === 401) { logout(); return; }
-    if (!r.ok) { setLoadError(r.json.error ?? "Couldn't load invoices."); return; }
-    setInvFiles(r.json.files ?? []); setInvVendors(r.json.vendors ?? []); setUsedCategories(r.json.categories ?? []); setVendorsAll(r.json.vendorsAll ?? []); setUsedNames(r.json.usedNames ?? []);
-  }, [role, invMonth, unpaidOnly]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (tab === "invoices") loadInvoices(); }, [tab, loadInvoices]);
-  // Anything that changes an invoice also refreshes the warning.
-  useEffect(() => { if (role === "finance") loadPending(); }, [invFiles]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // A vendor added here only sends invoices, so it never appears on the monthly statement checklist.
-  async function createVendor(): Promise<{ id: string; name: string; category: string } | null> {
-    const name = nvName.trim();
-    if (!name) { setMsg("Enter the vendor's name."); return null; }
-    const existing = invVendors.find((v) => v.name.trim().toLowerCase() === name.toLowerCase());
-    if (existing) { setIVendor(existing.id); setNvName(""); return existing; }
-    const r = await api("/api/statements/manage", { action: "addSource", name, category: nvType, startMonth: new Date().toISOString().slice(0, 7), expectsStatement: false });
-    if (!r.ok || !r.json.data?.id) { setMsg(r.json.error ?? "Couldn't add the vendor."); return null; }
-    const made = { id: String(r.json.data.id), name, category: nvType };
-    setInvVendors((v) => [...v, made]);
-    setIVendor(made.id); setNvName("");
-    return made;
-  }
-  async function addVendorHere() {
-    setBusy(true); setMsg("");
-    const v = await createVendor();
-    setBusy(false);
-    if (v) { setMsg(`${v.name} is saved and selected.`); loadInvoices(); }
-  }
-
-  async function addInvoice(file: File, ignoreDup = false) {
-    setMsg(""); setDup(null);
-    let vendor = invVendors.find((v) => v.id === iVendor);
-    // A new vendor name typed in but not yet added is added now, so filing the invoice never silently fails.
-    if (!vendor && iVendor === "__new" && nvName.trim()) {
-      setBusy(true);
-      const made = await createVendor();
-      setBusy(false);
-      if (!made) return;
-      vendor = made;
-    }
-    if (!vendor) { setMsg("Choose a vendor, or add a new one."); return; }
-    const name = vendor.name;
-    if (!iDate) { setMsg("Enter the invoice date."); return; }
-    if (!iNumber.trim()) { setMsg("Enter the invoice number."); return; }
-    if (iAmount.trim() === "" || isNaN(Number(iAmount))) { setMsg("Enter the invoice amount."); return; }
-    if (!/\.pdf$/i.test(file.name)) { setMsg("Only PDF files can be uploaded."); return; }
-    setBusy(true);
-    const kind = "vendor";
-    if (!ignoreDup) {
-      const chk = await api("/api/statements/manage", { action: "checkDuplicate", docType: "invoice", accountKind: kind, accountId: vendor.id, accountName: name, invoiceDate: iDate, invoiceNumber: iNumber, amount: iAmount });
-      if (chk.ok && (chk.json.matches ?? []).length > 0) { setBusy(false); setDup({ matches: chk.json.matches, proceed: () => addInvoice(file, true) }); return; }
-    }
-    const slot = await api("/api/statements/upload-url", { docType: "invoice", accountKind: kind, accountName: name, month: iDate.slice(0, 7), fileName: file.name, size: file.size });
-    if (!slot.ok) { setBusy(false); setMsg(slot.json.error ?? "Couldn't start the upload."); return; }
-    const up = await supabase.storage.from("statements").uploadToSignedUrl(slot.json.path, slot.json.token, file, { contentType: "application/pdf" });
-    if (up.error) { setBusy(false); setMsg(`Upload failed: ${up.error.message}`); return; }
-    const rec = await api("/api/statements/manage", { action: "confirm", docType: "invoice", path: slot.json.path, accountKind: kind, accountId: vendor?.id ?? "", accountName: name, invoiceDate: iDate, invoiceNumber: iNumber, amount: iAmount, fileName: file.name, size: file.size, dupIgnored: ignoreDup, matchedBillId: iMatch?.billId, matchedDueDate: iMatch?.dueDate, category: iCategory });
-    setBusy(false);
-    if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't record the invoice."); return; }
-    setMsg(`Filed invoice ${iNumber.trim()} from ${name}.`);
-    const filedMonth = iDate.slice(0, 7);
-    // Clear the whole form so the next invoice starts fresh.
-    setIVendor(""); setIDate(new Date().toISOString().slice(0, 10)); setINumber(""); setIAmount(""); setICategory(""); setIMatch(null); setNvName(""); setIFile(null);
-    if (!unpaidOnly && filedMonth !== invMonth) setInvMonth(filedMonth); else loadInvoices();
-  }
-
-  // Marking paid opens a small dialog (date, which account, note). Undo needs no questions.
-  function openPay(f: FileRow) {
-    const first = accounts.find((a) => a.kind === "bank");
-    const from = payFrom || (first ? `bank:${first.id}` : "other");
-    setPayEditing(false);
-    setPayFor(f); setPayDate(new Date().toISOString().slice(0, 10)); setPayNote(""); setPayFrom(from);
-    setPayMethod(payFrom.startsWith("card:") ? "card" : "check");
-    setPayCheckNo(from.startsWith("bank:") ? nextCheckFor(from.slice(5)) : "");
-  }
-  // Changing a payment that's already marked paid: the same box, filled in with what was recorded.
-  function openEditPay(f: FileRow) {
-    setPayEditing(true); setPayFor(f);
-    setPayDate(f.paid_date ?? new Date().toISOString().slice(0, 10));
-    setPayFrom(f.paid_from_kind && f.paid_from_kind !== "other" && f.paid_from_id ? `${f.paid_from_kind}:${f.paid_from_id}` : "other");
-    setPayMethod((f.paid_method as typeof payMethod) ?? (f.paid_from_kind === "card" ? "card" : "other"));
-    setPayCheckNo(f.paid_check_number ?? ""); setPayNote(f.paid_note ?? "");
-  }
-  async function confirmPay(allowDuplicateCheck = false) {
-    if (!payFor) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(payDate)) { setMsg("Enter the date paid."); return; }
-    const acct = accounts.find((a) => `${a.kind}:${a.id}` === payFrom);
-    if (payMethod === "check") {
-      if (!payCheckNo.trim()) { setMsg("Enter the check number."); return; }
-      if (!acct || acct.kind !== "bank") { setMsg("Choose the bank account the check is drawn on."); return; }
-    }
-    setBusy(true);
-    const r = await api("/api/statements/manage", {
-      action: "markInvoicePaid", id: payFor.id, paid: true, paidDate: payDate, method: payMethod, checkNumber: payCheckNo, allowDuplicateCheck,
-      paidFromKind: acct ? acct.kind : "other", paidFromId: acct?.id ?? "", paidFromName: acct ? acct.name : "Other", paidNote: payNote,
+    const slot = await api("/api/statements/upload-url", { docType: "invoice", accountKind: "vendor", accountName: vendor.name, month: aDate.slice(0, 7), fileName: aFile.name, size: aFile.size });
+    if (!slot.ok) { setBusy(false); setAErr(slot.json.error ?? "Couldn't start the upload."); return; }
+    const up = await supabase.storage.from("statements").uploadToSignedUrl(slot.json.path, slot.json.token, aFile, { contentType: "application/pdf" });
+    if (up.error) { setBusy(false); setAErr(`Upload failed: ${up.error.message}`); return; }
+    const rec = await api("/api/statements/manage", {
+      action: "confirm", docType: "invoice", path: slot.json.path, accountKind: "vendor", accountId: vendor.id, accountName: vendor.name,
+      invoiceDate: aDate, invoiceNumber: aInv, amount: num(aAmount), fileName: aFile.name, size: aFile.size, dupIgnored: ignoreDup,
+      matchedBillId: aMatch?.billId, matchedDueDate: aMatch?.dueDate, category: aCat, dueDate: aDue || undefined,
+      autopay: aAuto, paidFromKind: autoAcct?.kind, paidFromId: autoAcct?.id, paidFromName: autoAcct?.name,
     });
     setBusy(false);
-    if (r.status === 409 && r.json.duplicate) {
-      const d = r.json.duplicate;
-      if (window.confirm(`Check #${payCheckNo.trim()} on ${acct?.name ?? "this account"} is already on the register (${d.payee || "no payee"}, ${money(d.amount)}, ${d.check_date}). Use this number anyway?`)) confirmPay(true);
-      return;
-    }
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
-    setPayFor(null); loadInvoices(); loadChecks();
-  }
-  async function undoPaid(f: FileRow) {
-    setBusy(true);
-    const r = await api("/api/statements/manage", { action: "markInvoicePaid", id: f.id, paid: false });
-    setBusy(false);
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
-    loadInvoices(); loadChecks();
+    if (!rec.ok) { setAErr(rec.json.error ?? "Couldn't record the statement."); return; }
+    setMsg(`Filed invoice ${aInv.trim()} from ${vendor.name}.`);
+    const filed: FileRow = rec.json.data;
+    const wantPay = aPaidNow;
+    const newMonth = aDate.slice(0, 7);
+    if (addAnother) { setAFile(null); setAInv(""); setAAmount(""); setADue(""); setAMatch(null); setAPaidNow(false); }
+    else setAddOpen(false);
+    if (newMonth !== month) setMonth(newMonth); else changed();
+    if (wantPay && filed) openPay(filed, false);
   }
 
-  function openEditInvoice(f: FileRow) {
-    setEError("");
-    setEVendor(f.account_id); setEDate(f.invoice_date ?? ""); setENumber(f.invoice_number ?? ""); setEAmount(f.amount != null ? String(f.amount) : "");
-    setEditInv(f);
-  }
-  async function saveEditInvoice(ignoreDup = false) {
-    if (!editInv) return;
-    if (!eDate) { setEError("Enter the invoice date."); return; }
-    if (!eNumber.trim()) { setEError("Enter the invoice number."); return; }
-    if (eAmount.trim() === "" || isNaN(Number(eAmount))) { setEError("Enter the invoice amount."); return; }
-    setBusy(true); setEError("");
-    const r = await api("/api/statements/manage", { action: "editInvoice", id: editInv.id, accountId: eVendor, invoiceDate: eDate, invoiceNumber: eNumber, amount: eAmount, ignoreDup });
-    setBusy(false);
-    if (r.status === 409 && r.json.error === "duplicate") {
-      const m = (r.json.matches ?? [])[0];
-      if (window.confirm(`This looks like a duplicate of ${m?.account_name ?? "another invoice"} #${m?.invoice_number || "(no number)"} (${m?.reason ?? "same details"}). Save it anyway?`)) saveEditInvoice(true);
-      return;
-    }
-    if (!r.ok) { setEError(r.json.error ?? "Couldn't save the changes."); return; }
-    const newMonth = eDate.slice(0, 7);
-    setEditInv(null);
-    setMsg(`Invoice ${eNumber.trim()} updated.`);
-    // If the date moved it into another month, show that month so it doesn't seem to vanish.
-    if (!unpaidOnly && newMonth !== invMonth) setInvMonth(newMonth); else loadInvoices();
-    loadPending(); loadChecks();
-  }
-
-  async function newCategory(): Promise<string> {
-    const c = (window.prompt("New category name:") ?? "").trim().slice(0, 40);
-    if (c) setUsedCategories((u) => (u.includes(c) ? u : [...u, c]));
-    return c;
-  }
-  async function changeCategory(f: FileRow, value: string) {
-    let category = value;
-    if (value === "__new") { category = await newCategory(); if (!category) return; }
-    setInvFiles((list) => list.map((x) => (x.id === f.id ? { ...x, category } : x)));
-    const r = await api("/api/statements/manage", { action: "setInvoiceCategory", id: f.id, category });
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't save the category."); loadInvoices(); }
-  }
-
-  async function updateVendor(id: string, patch: Record<string, unknown>) {
-    const r = await api("/api/statements/manage", { action: "updateSource", id, ...patch });
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update the vendor."); return; }
-    loadInvoices();
-  }
-  async function mergeVendor(from: { id: string; name: string }, intoId: string) {
-    const into = vendorsAll.find((v) => v.id === intoId);
-    if (!into) return;
-    if (!window.confirm(`Merge "${from.name}" into "${into.name}"?\n\nEvery invoice and statement filed under "${from.name}" moves to "${into.name}", and "${from.name}" is removed from your list. This can't be undone.`)) return;
-    setBusy(true);
-    const r = await api("/api/statements/manage", { action: "mergeSource", fromId: from.id, intoId });
-    setBusy(false);
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't merge."); return; }
-    setMsg(`Merged "${r.json.from}" into "${r.json.into}" (${r.json.moved} item${r.json.moved === 1 ? "" : "s"} moved).`);
-    loadInvoices(); loadPending(); load();
-  }
-  async function renameDirVendor(v: { id: string; name: string }) {
-    const name = window.prompt("Rename:", v.name);
-    if (name && name.trim() && name.trim() !== v.name) updateVendor(v.id, { name });
-  }
-  async function unlinkInvoice(f: FileRow) {
-    const r = await api("/api/statements/manage", { action: "matchInvoice", id: f.id, billId: null });
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
-    loadInvoices();
-  }
-
-  async function removeInvoice(f: FileRow) {
-    if (!window.confirm(`Delete this invoice (${f.account_name}${f.invoice_number ? ` #${f.invoice_number}` : ""})? This can't be undone.`)) return;
-    setBusy(true);
-    const r = await api("/api/statements/manage", { action: "remove", id: f.id });
-    setBusy(false);
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't remove."); return; }
-    loadInvoices();
-  }
-
-  async function addVendor() {
-    if (!vName.trim()) { setMsg("Enter a name."); return; }
-    setBusy(true);
-    const r = await api("/api/statements/manage", { action: "addSource", name: vName, category: vCategory, startMonth: vStart, expectsStatement: vExpects });
-    setBusy(false);
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't add it."); return; }
-    setVName(""); setAdding(false); setMsg(`Added ${vName.trim()}.`); load();
-  }
-  async function renameVendor(a: Account) {
-    const name = window.prompt("Rename:", a.name);
-    if (!name || !name.trim() || name.trim() === a.name) return;
-    const r = await api("/api/statements/manage", { action: "updateSource", id: a.id, name });
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't rename."); return; }
-    load();
-  }
-  async function toggleVendor(a: Account) {
-    const retiring = a.active !== false;
-    if (retiring && !window.confirm(`Stop expecting statements from ${a.name}? Files already filed stay available.`)) return;
-    const r = await api("/api/statements/manage", { action: "updateSource", id: a.id, active: !retiring });
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); return; }
-    load();
-  }
-
-  async function remove(f: FileRow) {
-    if (!window.confirm(f.no_statement ? "Remove this mark?" : `Delete ${f.file_name ?? "this statement"}? This can't be undone.`)) return;
-    setBusy(true);
-    const r = await api("/api/statements/manage", { action: "remove", id: f.id });
-    setBusy(false);
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't remove."); return; }
-    load();
-  }
-
-  if (!checked) return null;
-
-  // ---------------- Login ----------------
-  if (!role) {
-    return (
-      <main className="min-h-screen flex items-center justify-center px-4" style={{ background: "#f5f5f5" }}>
-        <div className="rounded-2xl bg-white p-6 sm:p-10 shadow-lg w-full max-w-sm text-center">
-          <h1 className="text-2xl font-bold mb-1" style={{ color: "#5a5a5a" }}>Statements</h1>
-          <p className="text-gray-400 text-sm mb-6">Enter your PIN or passcode.</p>
-          <input type="password" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-            placeholder="PIN or passcode" maxLength={64}
-            className={`w-full rounded-xl border px-4 py-3 text-center text-lg font-bold focus:outline-none mb-3 ${loginError ? "border-red-300 bg-red-50" : "border-gray-200"}`} />
-          {loginError && <p className="text-red-500 text-sm mb-3">{loginError}</p>}
-          <button onClick={handleLogin} className="w-full rounded-xl py-3 font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Continue</button>
-        </div>
-      </main>
-    );
-  }
-
-  const categoryOptions = [...new Set([...DEFAULT_CATEGORIES, ...usedCategories])];
-  const money = (n: number | null | undefined) => (n == null ? "no amount" : `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-  const dupBanner = dup && (
-    <div className="rounded-xl px-4 py-3 text-sm space-y-1" style={{ background: "#FAEEDA", color: "#854F0B", border: "1px solid #f2d3a0" }}>
-      <p className="font-semibold">⚠️ {dup.matches.length > 0 ? "Possible duplicate" : "Please check"}</p>
-      {dup.note && <p>{dup.note}</p>}
-      {dup.matches.map((m) => (
-        <p key={m.id}>
-          {m.account_name}{m.doc_type === "invoice" ? ` · invoice ${m.invoice_number || "(no number)"} · ${m.invoice_date ?? ""}` : ` · ${m.month}`} · {money(m.amount)} · filed {new Date(m.uploaded_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })} by {m.uploaded_by}
-          <span className="opacity-80"> — {(m as any).reason}</span>
-        </p>
-      ))}
-      <div className="flex items-center gap-3 pt-1">
-        <button onClick={() => { const go = dup.proceed; setDup(null); go(); }} className="rounded-lg px-4 py-1.5 text-xs font-semibold text-white" style={{ backgroundColor: "#e8622a" }}>File it anyway</button>
-        <button onClick={() => setDup(null)} className="text-xs font-semibold underline">Cancel</button>
-      </div>
-    </div>
-  );
-
-  const STOP = new Set(["the", "inc", "llc", "corp", "company", "payment", "bill", "and", "for", "dental"]);
-  const toks = (t: string) => t.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length >= 3 && !STOP.has(x));
-  const invVendorName = (invVendors.find((v) => v.id === iVendor)?.name ?? "").trim();
-  const suggestions = (() => {
-    if (!invAdding || !invVendorName || !iDate || bills.length === 0) return [];
-    const vt = toks(invVendorName); if (vt.length === 0) return [];
-    const amt = Number(iAmount); const target = new Date(iDate + "T00:00:00").getTime();
+  // Match a new statement to a scheduled bill already being tracked.
+  const suggestions = useMemo(() => {
+    if (!addOpen || !aVendor.trim() || !aDate || bills.length === 0) return [];
+    const STOP = new Set(["the", "inc", "llc", "corp", "company", "payment", "bill", "and", "for", "dental"]);
+    const toks = (t: string) => t.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length >= 3 && !STOP.has(x));
+    const vt = toks(aVendor); if (vt.length === 0) return [];
+    const amt = Number(aAmount); const target = new Date(aDate + "T00:00:00").getTime();
     const out: { bill: RecurringBill; dueDate: string; overlap: number; diff: number | null }[] = [];
     for (const b of bills) {
       if (!b.active || b.direction !== "outflow" || b.linkedCreditCardId || b.linkedDebtId) continue;
       const bt = toks(b.name); const overlap = vt.filter((t) => bt.includes(t)).length; if (!overlap) continue;
-      const occ = buildOccurrences([b], billPayments, addDays(iDate, -25), addDays(iDate, 45)).filter((o) => !o.isPaid)
+      const occ = buildOccurrences([b], billPayments, addDays(aDate, -25), addDays(aDate, 45)).filter((o) => !o.isPaid)
         .sort((x, y) => Math.abs(new Date(x.dueDate + "T00:00:00").getTime() - target) - Math.abs(new Date(y.dueDate + "T00:00:00").getTime() - target))[0];
       if (!occ) continue;
       out.push({ bill: b, dueDate: occ.dueDate, overlap, diff: amt > 0 && b.estimatedAmount > 0 ? Math.abs(amt - b.estimatedAmount) / b.estimatedAmount : null });
     }
     return out.sort((a, z) => z.overlap - a.overlap || (a.diff ?? 9) - (z.diff ?? 9)).slice(0, 3);
+  }, [addOpen, aVendor, aDate, aAmount, bills, billPayments]);
+
+  // ---------------- Mark paid ----------------
+  function nextCheckFor(fromKey: string): string {
+    if (!data || !fromKey.startsWith("bank:")) return "";
+    const n = data.lastCheck[fromKey.slice(5)];
+    return n ? String(n + 1) : "";
+  }
+  function openPay(f: FileRow, editing: boolean) {
+    if (!data) return;
+    const credit = !editing && f.account_kind === "vendor" ? data.credits[f.account_id] ?? 0 : 0;
+    const prior = editing ? 0 : f.paid ? 0 : Number(f.paid_amount ?? 0);
+    const due0 = Math.max(0, Number(f.amount ?? 0) - Number(f.credit_applied ?? 0) - prior);
+    const due = Math.max(0, due0 - Math.min(credit, due0));
+    const method = (editing && (f.paid_method as any)) || "check";
+    const from = editing && f.paid_from_kind && f.paid_from_id ? `${f.paid_from_kind}:${f.paid_from_id}` : f.paid_from_kind && f.paid_from_id && f.autopay ? `${f.paid_from_kind}:${f.paid_from_id}` : data.payAccounts[0] ? `${data.payAccounts[0].kind}:${data.payAccounts[0].id}` : "other";
+    setPayFor(f); setPEditing(editing); setPErr(""); setPNote(editing ? f.paid_note ?? "" : "");
+    setPDate(editing ? f.paid_date ?? data.today : data.today);
+    setPMethod(method); setPFrom(from);
+    setPCheck(editing ? f.paid_check_number ?? "" : method === "check" ? nextCheckFor(from) : "");
+    setPAmount(editing ? String(f.paid_amount ?? f.amount ?? "") : due.toFixed(2));
+    setPDiff(""); setPUseCredit(true);
+  }
+  // What's due, what's being paid, and the difference between them.
+  const payCalc = (() => {
+    if (!payFor || !data) return null;
+    const credit = !pEditing && payFor.account_kind === "vendor" ? data.credits[payFor.account_id] ?? 0 : 0;
+    const prior = pEditing ? 0 : payFor.paid ? 0 : Number(payFor.paid_amount ?? 0);
+    const due0 = Math.max(0, Number(payFor.amount ?? 0) - Number(payFor.credit_applied ?? 0) - prior);
+    const creditUse = pUseCredit ? Math.min(credit, due0) : 0;
+    const due = Math.max(0, due0 - creditUse);
+    const pay = isNum(pAmount) ? num(pAmount) : NaN;
+    const delta = isNaN(pay) ? 0 : Math.round((pay - due) * 100) / 100;
+    const under = delta < -0.004, over = delta > 0.004;
+    const diff = under ? (pDiff === "partial" ? "partial" : "settled") : over ? (pDiff === "note" ? "note" : "credit") : "";
+    return { credit, creditUse, due, pay, delta, under, over, diff, prior };
   })();
-
-  const pendingCutoff = addDays(new Date().toISOString().slice(0, 10), -30);
-  const pendingOld = pending.filter((f) => f.invoice_date && f.invoice_date < pendingCutoff).sort((a, z) => String(a.invoice_date).localeCompare(String(z.invoice_date)));
-  const pendingTotal = pending.reduce((n, f) => n + (f.amount ?? 0), 0);
-  const pendingBanner = finance && pending.length > 0 && (
-    <div className="rounded-xl px-4 py-3 text-sm flex flex-wrap items-center gap-x-4 gap-y-1"
-      style={{ background: pendingOld.length > 0 ? "#fee2e2" : "#FAEEDA", color: pendingOld.length > 0 ? "#991b1b" : "#854F0B", border: `1px solid ${pendingOld.length > 0 ? "#fca5a5" : "#f2d3a0"}` }}>
-      <span>
-        <strong>⚠️ {pending.length} unpaid invoice{pending.length === 1 ? "" : "s"}</strong> totalling {money(pendingTotal)}
-        {pendingOld.length > 0 && <> — <strong>{pendingOld.length} more than 30 days old</strong> (oldest: {pendingOld[0].account_name}, {pendingOld[0].invoice_date ? new Date(pendingOld[0].invoice_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""})</>}
-        . They count in Need to collect until you mark them paid.
-      </span>
-      <button onClick={() => setTab("statements")} className="underline font-semibold">Review unpaid</button>
-    </div>
-  );
-
-  async function addCheck(allowDuplicate = false) {
-    const acct = accounts.find((a) => a.kind === "bank" && a.id === cAccount);
-    if (!cNumber.trim() || !cDate) { setMsg("Enter the check number and date."); return; }
-    setBusy(true); setMsg("");
-    const r = await api("/api/statements/checks", { action: cEditId ? "update" : "add", id: cEditId, checkNumber: cNumber, checkDate: cDate, accountId: acct?.id ?? "", accountName: acct?.name ?? "", payee: cPayee, amount: cAmount, memo: cMemo, category: cType, allowDuplicate });
+  async function confirmPay(allowDuplicateCheck = false) {
+    if (!payFor || !payCalc) return;
+    if (isNaN(payCalc.pay) || payCalc.pay < 0) { setPErr("Enter the amount paid."); return; }
+    const acct = data?.payAccounts.find((a) => `${a.kind}:${a.id}` === pFrom);
+    if (pMethod === "check") {
+      if (!pCheck.trim()) { setPErr("Enter the check number."); return; }
+      if (!acct || acct.kind !== "bank") { setPErr("Choose the bank account the check is drawn on."); return; }
+    }
+    setBusy(true); setPErr("");
+    const r = await api("/api/statements/manage", {
+      action: "markInvoicePaid", id: payFor.id, paid: true, editing: pEditing, paidDate: pDate, method: pMethod, checkNumber: pCheck, allowDuplicateCheck,
+      paidFromKind: acct ? acct.kind : "other", paidFromId: acct?.id ?? "", paidFromName: acct ? acct.name : "Other", paidNote: pNote,
+      paidAmount: payCalc.pay, diff: payCalc.diff || undefined, useCredit: pUseCredit && payCalc.creditUse > 0,
+    });
     setBusy(false);
     if (r.status === 409 && r.json.duplicate) {
       const d = r.json.duplicate;
-      if (window.confirm(`Check #${cNumber.trim()} on ${acct?.name ?? "this account"} is already on the register (${d.payee || "no payee"}, ${d.check_date}). Use this number anyway?`)) addCheck(true);
+      if (window.confirm(`Check #${pCheck.trim()} on ${acct?.name ?? "this account"} is already on the register (${d.payee || "no payee"}, ${money(d.amount)}, ${d.check_date}). Use this number anyway?`)) confirmPay(true);
       return;
     }
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't save the check."); return; }
-    const wasEditing = !!cEditId;
-    setCEditId(null);
-    setCNumber(!wasEditing && /^\d+$/.test(cNumber.trim()) ? String(Number(cNumber.trim()) + 1) : ""); setCPayee(""); setCAmount(""); setCMemo("");
-    setMsg(wasEditing ? "Check updated." : `Check #${r.json.data?.check_number ?? ""} added.`); loadChecks();
-  }
-  function startEditCheck(c: CheckRow) {
-    setCEditId(c.id); setChkAdding(true); setMsg("");
-    setCAccount(c.account_id ?? ""); setCNumber(c.check_number); setCDate(c.check_date); setCPayee(c.payee); setCAmount(c.amount != null ? String(c.amount) : "");
-    setCMemo(c.memo); setCType(c.category || "Other");
-  }
-  async function attachToCheck(c: CheckRow, file: File) {
-    setMsg("");
-    if (!/\.pdf$/i.test(file.name)) { setMsg("Only PDF files can be attached."); return; }
-    setBusy(true);
-    const slot = await api("/api/statements/upload-url", { docType: "check", checkId: c.id, fileName: file.name, size: file.size });
-    if (!slot.ok) { setBusy(false); setMsg(slot.json.error ?? "Couldn't start the upload."); return; }
-    const up = await supabase.storage.from("statements").uploadToSignedUrl(slot.json.path, slot.json.token, file, { contentType: "application/pdf" });
-    if (up.error) { setBusy(false); setMsg(`Upload failed: ${up.error.message}`); return; }
-    const rec = await api("/api/statements/checks", { action: "attachDoc", checkId: c.id, path: slot.json.path, fileName: file.name, size: file.size, kind: attKind, note: attNote });
-    setBusy(false);
-    if (!rec.ok) { setMsg(rec.json.error ?? "Couldn't attach the file."); return; }
-    setAttNote(""); setMsg(`Attached ${file.name} to check #${c.check_number}.`); loadChecks();
-  }
-  async function removeCheckDoc(d: CheckDoc) {
-    if (!window.confirm(`Remove ${d.file_name} from this check? This can't be undone.`)) return;
-    const r = await api("/api/statements/checks", { action: "removeDoc", id: d.id });
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't remove."); return; }
-    loadChecks();
-  }
-  async function downloadCheckDoc(d: CheckDoc) {
-    const r = await api("/api/statements/download-url", { id: d.id, source: "check" });
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't create the download link."); return; }
-    const a = document.createElement("a"); a.href = r.json.url; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
-  }
-  async function linkInvoiceToCheck(c: CheckRow) {
-    if (!linkInvId) { setMsg("Choose an invoice to link."); return; }
-    const inv = pending.find((x) => x.id === linkInvId);
-    if (inv && c.amount != null && inv.amount != null && Math.abs(Number(inv.amount) - Number(c.amount)) > 0.004
-        && !window.confirm(`The invoice is ${money(inv.amount)} but the check is ${money(c.amount)}. Link them anyway?`)) return;
-    setBusy(true);
-    const r = await api("/api/statements/checks", { action: "linkInvoice", checkId: c.id, invoiceId: linkInvId });
-    setBusy(false);
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't link the invoice."); return; }
-    setLinkInvId(""); setMsg("Invoice linked and marked paid by this check."); loadChecks(); loadPending(); loadInvoices();
+    if (!r.ok) { setPErr(r.json.error ?? "Couldn't save the payment."); return; }
+    setPayFor(null); changed();
   }
 
-  // The files panel under a check: its attachments, the invoices it paid, and (for finance) attach / link.
-  function renderCheckPanel(c: CheckRow) {
-    const docs = checkDocs.filter((d) => d.check_id === c.id);
-    const paidInv = checkInvoices.filter((i) => i.paid_from_id === c.account_id && i.paid_check_number === c.check_number);
-    const kindLabel: Record<string, string> = { invoice: "Invoice", statement: "Statement", other: "Other" };
+  // ---------------- Edit invoice ----------------
+  function openEdit(f: FileRow) {
+    setEErr(""); setEVendor(f.account_id); setEDate(f.invoice_date ?? `${f.month}-01`); setEDue(f.due_date ?? ""); setENumber(f.invoice_number ?? "");
+    setEAmount(f.amount != null ? String(f.amount) : ""); setECat(view?.catFor(f.account_id, f.category) ?? ""); setEditInv(f);
+    const pf = view?.prefMap[`vendor:${f.account_id}`]; setEFrom(pf?.autopayFromId ? `${pf.autopayFromKind}:${pf.autopayFromId}` : "");
+  }
+  async function saveEdit(ignoreDup = false) {
+    if (!editInv) return;
+    if (!eDate) { setEErr("Enter the statement date."); return; }
+    if (!eNumber.trim()) { setEErr("Enter the invoice number."); return; }
+    if (!isNum(eAmount)) { setEErr("Enter the amount."); return; }
+    setBusy(true); setEErr("");
+    const eFromAcct = eFrom && data && !editInv.paid && !editInv.autopay ? data.payAccounts.find((a) => `${a.kind}:${a.id}` === eFrom) : undefined;
+    const r = await api("/api/statements/manage", { action: "editInvoice", id: editInv.id, accountId: eVendor, invoiceDate: eDate, dueDate: eDue, invoiceNumber: eNumber, amount: num(eAmount), category: eCat, ignoreDup,
+      ...(eFromAcct ? { usualFromKind: eFromAcct.kind, usualFromId: eFromAcct.id, usualFromName: eFromAcct.name } : {}) });
+    setBusy(false);
+    if (r.status === 409 && r.json.error === "duplicate") {
+      const m = (r.json.matches ?? [])[0];
+      if (window.confirm(`This looks like a duplicate of ${m?.account_name ?? "another statement"} #${m?.invoice_number || "(no number)"} (${m?.reason ?? "same details"}). Save it anyway?`)) saveEdit(true);
+      return;
+    }
+    if (!r.ok) { setEErr(r.json.error ?? "Couldn't save the changes."); return; }
+    const nm = eDate.slice(0, 7);
+    setEditInv(null); setMsg(`Invoice ${eNumber.trim()} updated.`);
+    if (nm !== month) setMonth(nm); else changed();
+  }
+
+  // ---------------- Edit a filed statement ----------------
+  const isAcctKind = (f: FileRow) => f.account_kind === "bank" || f.account_kind === "card" || f.account_kind === "loan";
+  function openEditStmt(f: FileRow) {
+    setStErr(""); setStDate(isAcctKind(f) ? f.month : f.invoice_date ?? `${f.month}-01`); setStAmount(f.amount != null ? String(f.amount) : ""); setEditStmt(f);
+  }
+  async function saveEditStmt(ignoreDup = false) {
+    if (!editStmt) return;
+    const acct = isAcctKind(editStmt);
+    if (!stDate) { setStErr(acct ? "Choose the statement month." : "Enter the statement date."); return; }
+    if (!isNum(stAmount)) { setStErr("Enter the amount."); return; }
+    setBusy(true); setStErr("");
+    const r = await api("/api/statements/manage", { action: "editStatement", id: editStmt.id, amount: num(stAmount), ...(acct ? { month: stDate } : { date: stDate }), ignoreDup });
+    setBusy(false);
+    if (r.status === 409 && r.json.error === "duplicate") {
+      if (window.confirm("A statement is already filed for that month. Save this one there anyway?")) saveEditStmt(true);
+      return;
+    }
+    if (!r.ok) { setStErr(r.json.error ?? "Couldn't save the changes."); return; }
+    const nm = stDate.slice(0, 7);
+    setEditStmt(null); setMsg(`Statement updated.${r.json.synced ? " Cash Flow's statement balance was updated too." : ""}`);
+    if (nm !== month) setMonth(nm); else changed();
+  }
+
+  // ---------------- Account statements (bank / card / loan) ----------------
+  function openAcct(a: Acct) { setAcctDlg(a); setSFile(null); setSErr(""); setSAmount(data?.cfBalances[`${a.kind}:${a.id}`] != null ? String(data.cfBalances[`${a.kind}:${a.id}`]) : ""); }
+  async function fileAcct(ignoreDup = false) {
+    if (!acctDlg || !data) return;
+    if (!sFile) { setSErr("Attach the statement PDF first."); return; }
+    if (!/\.pdf$/i.test(sFile.name)) { setSErr("Only PDF files can be uploaded."); return; }
+    if (!isNum(sAmount)) { setSErr("Enter the statement balance."); return; }
+    const a = acctDlg;
+    setBusy(true); setSErr("");
+    if (!ignoreDup) {
+      const chk = await api("/api/statements/manage", { action: "checkDuplicate", docType: "statement", accountKind: a.kind, accountId: a.id, accountName: a.name, month, amount: num(sAmount) });
+      const cf: number | null | undefined = chk.json.cfBalance;
+      const cfDiffers = cf != null && Math.abs(cf - num(sAmount)) > 0.004;
+      if (chk.ok && ((chk.json.matches ?? []).length > 0 || cfDiffers)) {
+        setBusy(false);
+        const why = (chk.json.matches ?? []).length > 0 ? "A statement is already filed for this month." : `Cash Flow already has ${money(cf)} as this month's balance, and filing this will replace it with ${money(num(sAmount))}.`;
+        if (window.confirm(`${why} File it anyway?`)) return fileAcct(true);
+        return;
+      }
+    }
+    const slot = await api("/api/statements/upload-url", { accountKind: a.kind, accountName: a.name, month, fileName: sFile.name, size: sFile.size });
+    if (!slot.ok) { setBusy(false); setSErr(slot.json.error ?? "Couldn't start the upload."); return; }
+    const up = await supabase.storage.from("statements").uploadToSignedUrl(slot.json.path, slot.json.token, sFile, { contentType: "application/pdf" });
+    if (up.error) { setBusy(false); setSErr(`Upload failed: ${up.error.message}`); return; }
+    const rec = await api("/api/statements/manage", { action: "confirm", path: slot.json.path, accountKind: a.kind, accountId: a.id, accountName: a.name, month, fileName: sFile.name, size: sFile.size, amount: num(sAmount), dupIgnored: ignoreDup });
+    setBusy(false);
+    if (!rec.ok) { setSErr(rec.json.error ?? "Couldn't record the statement."); return; }
+    setAcctDlg(null); setMsg(`Filed ${sFile.name}.${rec.json.synced ? " Saved as this month's statement balance in Cash Flow." : ""}`); changed();
+  }
+  async function skipAcct(a: Acct) {
+    const note = window.prompt("Why is there no statement? (optional, e.g. account had no activity)") ?? "";
+    if (await manage({ action: "markNone", accountKind: a.kind, accountId: a.id, accountName: a.name, month, note })) changed();
+  }
+
+  // ---------------- Render ----------------
+  if (!view || !data) {
     return (
-      <tr key={`${c.id}-panel`} className="border-b border-slate-100">
-        <td colSpan={10} className="px-4 py-3" {...(finance && c.status !== "void" ? dropProps(`check-${c.id}`, (f) => attachToCheck(c, f)) : {})}
-          style={{ background: dragOver === `check-${c.id}` ? "#fff7ed" : "#f8fafc", outline: dragOver === `check-${c.id}` ? "2px dashed #e8622a" : "none", outlineOffset: -4 }}>
-          <div className="space-y-3">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Attached files</p>
-              {docs.length === 0 && <p className="text-xs text-slate-400">Nothing attached.</p>}
-              {docs.map((d) => (
-                <div key={d.id} className="flex items-center gap-3 text-sm py-0.5">
-                  <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "#e2e8f0", color: "#475569" }}>{kindLabel[d.doc_kind] ?? "Other"}</span>
-                  <span className="flex-1 min-w-0 truncate text-slate-700">{d.file_name}{d.note ? <span className="text-xs text-slate-400"> · {d.note}</span> : null}</span>
-                  <button onClick={() => downloadCheckDoc(d)} className="rounded px-2.5 py-0.5 text-xs font-semibold text-white" style={{ backgroundColor: "#0f766e" }}>Download</button>
-                  {finance && <button onClick={() => removeCheckDoc(d)} className="text-xs text-red-400 hover:text-red-600 hover:underline">Remove</button>}
-                </div>
-              ))}
-            </div>
-            {paidInv.length > 0 && (
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Invoices paid by this check</p>
-                {paidInv.map((i) => <p key={i.id} className="text-sm text-slate-700">{i.account_name} · #{i.invoice_number} · {money(i.amount)}</p>)}
-              </div>
-            )}
-            {finance && c.status !== "void" && (
-              <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Attach a PDF <span className="normal-case font-normal">· or drag it anywhere on this panel</span></p>
-                  <div className="flex items-center gap-2">
-                    <select value={attKind} onChange={(e) => setAttKind(e.target.value)} className="rounded border border-slate-200 bg-white px-1.5 py-1.5 text-xs focus:outline-none">
-                      <option value="invoice">Invoice copy</option><option value="statement">Statement</option><option value="other">Other (refund approval, check scan…)</option>
-                    </select>
-                    <input value={attNote} onChange={(e) => setAttNote(e.target.value)} placeholder="Note (optional)" className="rounded border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" style={{ width: 150 }} />
-                    <label className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white cursor-pointer hover:opacity-90" style={{ backgroundColor: "#e8622a", opacity: busy ? 0.5 : 1 }}>
-                      {busy ? "Working…" : "Choose PDF"}
-                      <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) attachToCheck(c, f); }} />
-                    </label>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Link an invoice already filed</p>
-                  <div className="flex items-center gap-2">
-                    <select value={linkInvId} onChange={(e) => setLinkInvId(e.target.value)} className="rounded border border-slate-200 bg-white px-1.5 py-1.5 text-xs focus:outline-none" style={{ maxWidth: 300 }}>
-                      <option value="">Choose an unpaid invoice…</option>
-                      {pending.map((i) => <option key={i.id} value={i.id}>{i.account_name} · #{i.invoice_number} · {money(i.amount)}</option>)}
-                    </select>
-                    <button onClick={() => linkInvoiceToCheck(c)} disabled={busy || !linkInvId} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40" style={{ backgroundColor: "#0f766e" }}>Link and mark paid</button>
-                  </div>
-                  {!c.account_id && <p className="text-[11px] text-amber-700 mt-1">Edit this check and choose its bank account first.</p>}
-                </div>
-              </div>
-            )}
-          </div>
-        </td>
-      </tr>
+      <div className="rounded-2xl bg-white shadow px-5 py-6 text-sm text-slate-500">
+        {loadError ? <p className="text-red-600 font-semibold">⚠️ {loadError}</p> : loading ? "Loading…" : null}
+      </div>
     );
   }
+  const today = data.today;
+  const monthWord = FULL[Number(month.slice(5)) - 1];
+  const grand = totals(view.shown);
+  const all = totals(view.rows);
+  let credits = 0, nUnpaid = 0, nAuto = 0, nAutoUnpaid = 0, autoAmt = 0, nOver = 0, overAmt = 0, nPaid = 0, nBills = 0;
+  for (const r of view.rows) if (r.kind === "bill") {
+    nBills++;
+    if (r.f.autopay) nAuto++;
+    if (r.f.paid) { nPaid++; credits += Math.max(0, Number(r.f.amount ?? 0) - paidSum(r.f)); }
+    else {
+      nUnpaid++;
+      if (r.f.autopay) { nAutoUnpaid++; autoAmt += owedOf(r.f); }
+      else if (r.f.due_date && r.f.due_date < today) { nOver++; overAmt += owedOf(r.f); }
+    }
+  }
+  const waitNames = view.waiting.map((w) => w.vendor);
+  const waitUnique = [...new Set(waitNames)].sort((x, y) => x.localeCompare(y, undefined, { sensitivity: "base" }));
+  const waitText = waitUnique.length <= 6 ? waitUnique.join(", ").replace(/, ([^,]*)$/, waitUnique.length > 1 ? " and $1" : "$1") : `${waitUnique.slice(0, 6).join(", ")} and ${waitUnique.length - 6} more`;
+  const notExpected = data.sources.filter((x) => x.active && view.prefMap[`vendor:${x.id}`]?.expect === "never");
 
-  async function setCheckStatus(c: CheckRow, status: string) {
-    setChecks((list) => list.map((x) => (x.id === c.id ? { ...x, status: status as CheckRow["status"] } : x)));
-    const r = await api("/api/statements/checks", { action: "setStatus", id: c.id, status });
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't update."); loadChecks(); }
-  }
-  async function deleteCheck(c: CheckRow) {
-    if (!window.confirm(`Delete check #${c.check_number}? Voiding it keeps the number on the register, so use Void unless it was entered by mistake.`)) return;
-    const r = await api("/api/statements/checks", { action: "delete", id: c.id });
-    if (!r.ok) { setMsg(r.json.error ?? "Couldn't delete."); return; }
-    loadChecks();
-  }
-  function downloadChecksCsv(rows: CheckRow[]) {
-    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const lines = [["Check #", "Date", "Account", "Payee", "Type", "Amount", "Memo", "Status", "Cleared date"].map(esc).join(",")]
-      .concat(rows.map((c) => [c.check_number, c.check_date, c.account_name, c.payee, c.category ?? "", c.amount ?? "", c.memo, c.status, c.cleared_date ?? ""].map(esc).join(",")));
-    const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
-    const a = document.createElement("a"); a.href = url; a.download = `check-register-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  }
-
-  const nextCheckFor = (accountId: string): string => {
-    const nums = checks.filter((c) => c.account_id === accountId && /^\d+$/.test(c.check_number)).map((c) => Number(c.check_number));
-    return nums.length ? String(Math.max(...nums) + 1) : "";
+  // ---- the table look: flat grid, pale blue-grey header, thin lines between columns and rows ----
+  const QINK = "#393A3D", QMUTED = "#6B6C72", QBORDER = "#D4D7DC", QROW = "#E3E5E8", QHEAD = "#E6ECF3", QLINK = "#0A5EB0";
+  const cell: React.CSSProperties = { height: 48, padding: "6px 8px", verticalAlign: "middle", borderTop: `1px solid ${QROW}`, borderRight: `1px solid ${QBORDER}` };
+  const thS: React.CSSProperties = { padding: "12px 8px", fontSize: 14, fontWeight: 700, color: QINK, background: QHEAD, borderRight: "1px solid #fff", textAlign: "left" };
+  const dash = <span style={{ color: "#8a8b90" }}>—</span>;
+  const tabBtn = (fl: Filter, label: string) => (
+    <button key={fl} type="button" onClick={() => setFilter(fl)} aria-pressed={filter === fl}
+      style={{ height: 44, padding: "0 22px", borderRadius: 6, fontSize: 16, ...(filter === fl ? { background: "#fff", color: QINK, border: `1px solid ${QBORDER}`, boxShadow: "0 1px 2px rgba(0,0,0,0.06)", fontWeight: 600 } : { background: "transparent", color: "#4a4b50", border: "1px solid transparent" }) }}>
+      {label} ({view.counts[fl]})
+    </button>
+  );
+  const card = (fl: Filter, label: string, big: string, sub: string, badge: number, tone = QINK) => {
+    const on = filter === fl;
+    return (
+      <button key={fl} type="button" onClick={() => setFilter(fl)} aria-pressed={on} className="text-left"
+        style={{ flex: "1 1 250px", minWidth: 0, background: "#fff", border: on ? `2px solid ${DEEP}` : `1px solid ${QBORDER}`, borderRadius: 10, padding: on ? "15px 19px" : "16px 20px", display: "flex", flexDirection: "column", gap: 6 }}>
+        <span className="flex items-center justify-between" style={{ fontSize: 15, color: "#4a4b50" }}>{label}<span className="inline-flex items-center justify-center" style={{ minWidth: 26, height: 26, padding: "0 6px", borderRadius: 999, background: "#4F5258", color: "#fff", fontSize: 13, fontWeight: 700 }}>{badge}</span></span>
+        <span style={{ fontSize: 26, fontWeight: 700, color: tone, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{big}</span>
+        <span style={{ fontSize: 14, color: QMUTED }}>{sub}</span>
+      </button>
+    );
   };
-  const payOptions = accounts.filter((a) => a.kind === "bank" || a.kind === "card");
-  const payDialog = payFor && (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.35)" }}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-3">
-        <h3 className="font-bold text-slate-800">{payEditing ? "Edit payment" : "Mark invoice paid"}</h3>
-        <p className="text-sm text-slate-500">{payFor.account_name}{payFor.invoice_number ? ` · #${payFor.invoice_number}` : ""} · {money(payFor.amount)}</p>
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Date paid</label>
-          <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">How was it paid?</label>
-          <select value={payMethod} onChange={(e) => { const m = e.target.value as typeof payMethod; setPayMethod(m); if (m === "check" && payFrom.startsWith("bank:") && !payCheckNo) setPayCheckNo(nextCheckFor(payFrom.slice(5))); }} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-            <option value="check">Check</option><option value="ach">ACH / bank transfer</option><option value="card">Credit card</option><option value="other">Cash / other</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Paid from</label>
-          <select value={payFrom} onChange={(e) => { const v = e.target.value; setPayFrom(v); if (payMethod === "check" && v.startsWith("bank:")) setPayCheckNo(nextCheckFor(v.slice(5))); }} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-            <optgroup label="Bank accounts">{payOptions.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
-            <optgroup label="Credit cards">{payOptions.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
-            <option value="other">Other (cash, owner, etc.)</option>
-          </select>
-        </div>
-        {payMethod === "check" && (
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">Check number (required)</label>
-            <input value={payCheckNo} onChange={(e) => setPayCheckNo(e.target.value)} placeholder="e.g. 1043" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-            <p className="text-xs text-slate-400 mt-1">It's added to the check register. The next number after your last check on this account is filled in for you.</p>
-          </div>
-        )}
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Note (optional)</label>
-          <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Check number, ACH, etc." className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-        </div>
-        <p className="text-xs text-slate-400">This records where it was paid from. It doesn't change any balance, so update that account's balance as usual.</p>
-        <div className="flex items-center gap-3 pt-1">
-          <button onClick={() => confirmPay()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>{busy ? "Saving…" : payEditing ? "Save changes" : "Mark paid"}</button>
-          <button onClick={() => setPayFor(null)} className="text-sm text-slate-400 hover:underline">Cancel</button>
-        </div>
-      </div>
-    </div>
-  );
 
-  const editInvDialog = editInv && (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.35)" }}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-3">
-        <h3 className="font-bold text-slate-800">Edit invoice</h3>
-        <p className="text-xs text-slate-400">The PDF stays as filed.{editInv.paid ? " If it was paid by check, that check on the register is updated too (unless it has already cleared)." : ""}</p>
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Vendor</label>
-          <select value={eVendor} onChange={(e) => setEVendor(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-            {!invVendors.some((v) => v.id === eVendor) && <option value={eVendor}>{editInv.account_name}</option>}
-            {invVendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
-        </div>
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <label className="block text-xs font-semibold text-slate-500 mb-1">Invoice date</label>
-            <input type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-          </div>
-          <div className="flex-1">
-            <label className="block text-xs font-semibold text-slate-500 mb-1">Invoice #</label>
-            <input value={eNumber} onChange={(e) => setENumber(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-          </div>
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 mb-1">Amount</label>
-          <input type="number" step="0.01" value={eAmount} onChange={(e) => setEAmount(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-        </div>
-        {eError && <p className="text-sm font-semibold text-red-600">{eError}</p>}
-        <div className="flex items-center gap-3 pt-1">
-          <button onClick={() => saveEditInvoice()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>{busy ? "Saving…" : "Save changes"}</button>
-          <button onClick={() => setEditInv(null)} className="text-sm text-slate-400 hover:underline">Cancel</button>
-        </div>
-      </div>
-    </div>
-  );
+  // One line per value, always: nothing wraps, long text is cut with "…" (hover shows all of it).
+  const clip: React.CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+  const shortAcct = (n: string) => n.replace(/\b(business|checking|savings|account)\b/gi, "").replace(/\s+/g, " ").trim();
+  const menuItem = "block w-full text-left px-3 py-2 text-sm hover:bg-slate-50";
 
-  const selAccount = sel ? accounts.find((a) => acctKey(a.kind, a.id) === sel.key) : null;
-  const selFiles = selAccount && sel ? filesFor(selAccount.kind, selAccount.id, sel.month) : [];
-  const monthLabel = (m: string) => `${MONTHS[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`;
-
-  const content = (
-    <div className="max-w-6xl space-y-4">
-      {(tab !== "statements" || !finance) && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {tab !== "statements" ? (
-            <div>
-              <h1 className="text-2xl font-bold">Statements</h1>
-              <p className="text-sm text-slate-500">{finance ? "The check register and the month-end package for your CPA. The CPA can view and download anything filed." : "View and download any statement. This page is read-only."}</p>
+  // Statement date and due date together: "Oct 1 → Oct 15". The due date turns red when overdue, amber when due within a week.
+  const datesCell = (f: FileRow) => {
+    const stmt = dlabel(f.invoice_date ?? `${f.month}-01`);
+    if (!f.due_date) return <div style={clip}>{stmt}</div>;
+    return <div style={clip}>{stmt} <span style={{ color: QMUTED }}>→</span> <span style={{ color: f.paid || f.autopay ? QINK : f.due_date < today ? "#B3261E" : daysBetween(f.due_date, today) <= 7 ? "#9A5B00" : QINK, fontWeight: !f.paid && !f.autopay && daysBetween(f.due_date, today) <= 7 ? 700 : 400 }}>{dlabel(f.due_date)}</span></div>;
+  };
+  // Status: what needs doing, or when it was paid. Single line.
+  const statusCell = (r: Extract<Row, { kind: "bill" }>) => {
+    const f = r.f;
+    if (f.paid) {
+      const paid = paidSum(f), amt = Number(f.amount ?? 0), diff = paid - amt;
+      return (
+        <div style={clip} title={Math.abs(diff) > 0.004 ? `Paid ${money(paid)} against ${money(amt)} billed` : undefined}>
+          <span className="inline-flex items-center gap-1.5 font-semibold" style={{ color: "#14532D" }}><Icon d={P.check} size={16} />{dlabel(f.paid_date)}</span>
+          {f.paid_auto && <span style={{ color: "#55565b" }}> · Auto</span>}
+          {Math.abs(diff) > 0.004 && <span style={{ color: QMUTED }}> · {diff < 0 ? "−" : "+"}{money(Math.abs(diff))}</span>}
+        </div>
+      );
+    }
+    if (f.autopay) return <span className="inline-flex items-center gap-1.5 rounded-full font-bold whitespace-nowrap" style={{ height: 28, padding: "0 10px", background: "#E4ECF8", color: "#1B3A6B", fontSize: 13 }}><Icon d={P.refresh} size={14} />Autopay {f.due_date ? dlabel(f.due_date) : ""}</span>;
+    if (Number(f.paid_amount ?? 0) > 0) return <div style={{ ...clip, color: "#9A5B00", fontWeight: 600 }}>Partial · {money(owedOf(f)).replace(/\.00$/, "")} left</div>;
+    if (f.due_date) {
+      const n = daysBetween(f.due_date, today);
+      if (n < 0) return <Pill text={`${-n}d overdue`} bg="#FADBD8" fg="#8E1F1A" />;
+      if (n === 0) return <Pill text="Due today" bg="#FDEBC8" fg="#7A4208" />;
+      if (n <= 7) return <Pill text={`Due in ${n}d`} bg="#FDEBC8" fg="#7A4208" />;
+    }
+    return <span style={{ color: QMUTED }}>Unpaid</span>;
+  };
+  const fromCell = (f: FileRow) => {
+    const nm = shortAcct(f.paid_from_name || "");
+    let t = "";
+    if (f.paid) t = f.paid_auto ? `Autopay · ${nm || "account on file"}` : f.paid_method === "check" ? `Check #${f.paid_check_number} · ${nm}` : f.paid_method === "ach" ? `ACH · ${nm}` : f.paid_method === "card" ? `Card · ${nm}` : nm || "Other";
+    else if (f.autopay) t = `Autopay · ${nm}`;
+    return t ? <div style={{ ...clip, fontSize: 14 }} title={t}>{t}</div> : dash;
+  };
+  // The blue action link, then an arrow for the rest. No divider line.
+  const actionCell = (key: string, label: string, onClick: () => void, items: { label: string; onClick: () => void; danger?: boolean }[] = []) => (
+    <div className="flex items-center whitespace-nowrap">
+      <button type="button" onClick={onClick} disabled={busy} className="font-semibold" style={{ color: QLINK, fontSize: 15, height: 40 }}>{label}</button>
+      {items.length > 0 && (
+        <span className="relative inline-block">
+          <button type="button" aria-label="More actions" onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === key ? null : key); }} className="inline-flex items-center justify-center rounded-lg" style={{ width: 32, height: 40, color: "#4a4b50" }}><Icon d={P.down} /></button>
+          {menuFor === key && (
+            <div className="absolute right-0 z-30 mt-1 rounded-xl bg-white shadow-lg py-1" style={{ minWidth: 230, border: `1px solid ${LINE}` }} onClick={(e) => e.stopPropagation()}>
+              {items.map((it) => <button key={it.label} type="button" className={menuItem} style={it.danger ? { color: "#b91c1c" } : undefined} onClick={() => { setMenuFor(null); it.onClick(); }}>{it.label}</button>)}
             </div>
-          ) : <span />}
-          {!finance && <button onClick={logout} className="text-sm text-slate-500 hover:underline">Log out</button>}
+          )}
+        </span>
+      )}
+    </div>
+  );
+  // The vendor's name sits on the first row of its block only; its other statements line up underneath.
+  const vendorCell = (r: Row, showName: boolean) => (
+    <td style={cell}>
+      {showName
+        ? <div style={{ ...clip, fontWeight: 700, fontSize: 15, color: r.kind === "skipped" ? "#55565b" : QINK }} title={r.vendor}>{r.vendor}</div>
+        : <span className="sr-only">{r.vendor}</span>}
+    </td>
+  );
+  const invoiceCell = (r: Row) => {
+    const f = "f" in r ? r.f : null;
+    return <td style={cell}>{f?.invoice_number ? <div style={clip} title={f.invoice_number}>#{f.invoice_number}</div> : r.kind === "doc" ? <span style={{ color: QMUTED }}>Statement</span> : dash}</td>;
+  };
+  // Category is a setting on the vendor: pick it here and all of that vendor's statements move.
+  const categoryCell = (r: Row) => (
+    <td style={cell}>
+      {finance && view.srcMap[r.vendorId] ? (
+        <select aria-label={`Category for ${r.vendor}`} value={r.cat} onChange={(e) => changeCategory(r.vendorId, e.target.value)} className="w-full rounded cursor-pointer hover:bg-slate-50 focus:outline-none" style={{ height: 34, fontSize: 14, border: "1px solid transparent", background: "transparent", color: QINK }}>
+          {[...new Set([...allCats, r.cat])].map((c) => <option key={c} value={c}>{c}</option>)}
+          <option value="__new">+ New category…</option>
+        </select>
+      ) : <div style={clip}>{r.cat}</div>}
+    </td>
+  );
+  const vendorItems = (vendorId: string, vendor: string) => (view.srcMap[vendorId]
+    ? [{ label: "Rename vendor…", onClick: () => renameVendor(vendorId, vendor) }, { label: "Merge into another vendor…", onClick: () => openMerge(vendorId) }]
+    : []);
+  const renderRow = (r: Row, showName: boolean) => {
+    if (r.kind === "waiting") {
+      return (
+        <tr key={`w:${r.vendorId}`}>
+          {vendorCell(r, showName)}<td style={cell}>{dash}</td>{categoryCell(r)}
+          <td style={{ ...cell, color: QMUTED, fontStyle: "italic" }} colSpan={2}><div style={clip}>{monthWord} statement hasn’t come in yet</div></td>
+          <td style={cell}><Pill text="Waiting" bg="#E8EAED" fg="#3d3e42" /></td>
+          <td style={cell}>{dash}</td>
+          <td style={cell}>{finance && actionCell(`w:${r.vendorId}`, "Add statement", () => openAdd({ vendor: r.vendor }), [
+            { label: "Skip this month", onClick: () => skipVendor(r.vendorId, r.vendor) },
+            { label: "Only expect when they bill", onClick: () => setExpect(r.vendorId, "never") },
+            ...vendorItems(r.vendorId, r.vendor),
+          ])}</td>
+        </tr>
+      );
+    }
+    if (r.kind === "skipped") {
+      return (
+        <tr key={`s:${r.f.id}`} style={{ background: "#FAFAFB" }}>
+          {vendorCell(r, showName)}<td style={cell}>{dash}</td>{categoryCell(r)}
+          <td style={{ ...cell, color: QMUTED, fontStyle: "italic" }} colSpan={3}><div style={clip}>Skipped for {monthWord}</div></td>
+          <td style={cell}>{dash}</td>
+          <td style={cell}>{finance && actionCell(`s:${r.f.id}`, "Undo skip", () => undoSkip(r.f))}</td>
+        </tr>
+      );
+    }
+    const f = r.f;
+    if (r.kind === "doc") {
+      return (
+        <tr key={f.id}>
+          {vendorCell(r, showName)}{invoiceCell(r)}{categoryCell(r)}
+          <td style={cell}><div style={clip}>{dlabel(f.invoice_date ?? `${f.month}-01`)}</div></td>
+          <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(f.amount)}</td>
+          <td style={cell}>{dash}</td><td style={cell}>{dash}</td>
+          <td style={cell}>{f.file_name ? actionCell(`d:${f.id}`, "View PDF", () => download(f), finance ? [{ label: "Edit date / amount", onClick: () => openEditStmt(f) }, { label: "Delete", onClick: () => removeFile(f), danger: true }] : []) : finance ? actionCell(`d:${f.id}`, "Edit", () => openEditStmt(f), [{ label: "Delete", onClick: () => removeFile(f), danger: true }]) : null}</td>
+        </tr>
+      );
+    }
+    // A bill: the main link depends on its state, the arrow holds the rest.
+    const items: { label: string; onClick: () => void; danger?: boolean }[] = [];
+    if (f.file_name) items.push({ label: "Open PDF", onClick: () => download(f) });
+    let primary = { label: "Mark paid", onClick: () => openPay(f, false) };
+    if (f.paid || f.autopay) primary = { label: "Edit", onClick: () => openEdit(f) };
+    if (!f.paid && !f.autopay) items.push({ label: "Edit invoice", onClick: () => openEdit(f) });
+    if (f.paid) { items.push({ label: "Edit payment", onClick: () => openPay(f, true) }); items.push({ label: "Undo paid", onClick: () => undoPaid(f) }); }
+    else if (Number(f.paid_amount ?? 0) > 0) items.push({ label: "Undo partial payment", onClick: () => undoPaid(f) });
+    if (f.autopay && f.paid_auto) items.push({ label: "Autopay didn’t go through", onClick: () => autopayFailed(f) });
+    if (f.matched_bill_id && !f.paid) items.push({ label: "Unlink scheduled bill", onClick: () => unlinkBill(f) });
+    items.push({ label: "Add another for this vendor", onClick: () => openAdd({ vendor: r.vendor }) });
+    items.push(...vendorItems(r.vendorId, r.vendor));
+    items.push({ label: "Delete", onClick: () => removeFile(f), danger: true });
+    return (
+      <tr key={f.id}>
+        {vendorCell(r, showName)}{invoiceCell(r)}{categoryCell(r)}
+        <td style={cell}>{datesCell(f)}</td>
+        <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(f.amount)}</td>
+        <td style={cell}>{statusCell(r)}</td>
+        <td style={cell}>{fromCell(f)}</td>
+        <td style={cell}>{finance ? actionCell(f.id, primary.label, primary.onClick, items) : f.file_name ? actionCell(f.id, "View PDF", () => download(f)) : null}</td>
+      </tr>
+    );
+  };
+
+  // ---- account statements join the list: banks, credit cards and loans, each group alphabetical (one bank's accounts sit together) ----
+  const ACCT_CAT: Record<string, string> = { bank: "Bank", card: "Credit card", loan: "Loan" };
+  const acctSort = (x: Acct, y: Acct) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: "base" });
+  const acctVisible = (x: Acct) => filter === "all" && dueFilter === "all" && (!catFilter || catFilter === ACCT_CAT[x.kind]) && x.name.toLowerCase().includes(search.trim().toLowerCase());
+  const bankAccts = !showAccts ? [] : data.accounts.filter((x) => x.kind === "bank" && acctVisible(x)).sort(acctSort);
+  const cardAccts = !showAccts ? [] : data.accounts.filter((x) => x.kind === "card" && acctVisible(x)).sort(acctSort);
+  const loanAccts = !showAccts ? [] : data.accounts.filter((x) => x.kind === "loan" && acctVisible(x)).sort(acctSort);
+  const acctRow = (a: Acct) => {
+    const fs = data.files.filter((f) => f.account_kind === a.kind && f.account_id === a.id && f.doc_type !== "invoice");
+    const filed = fs.find((f) => !f.no_statement), none = fs.find((f) => f.no_statement);
+    const late = month < data.currentMonth;
+    const status = filed ? <Pill text="Filed" bg="#E3F3E9" fg="#14532D" /> : none ? <Pill text="No statement" bg="#E8EAED" fg="#4a4b50" /> : late ? <Pill text="Waiting" bg="#FDEBC8" fg="#7A4208" /> : <Pill text="Not out yet" bg="#E8EAED" fg="#4a4b50" />;
+    let action: React.ReactNode = null;
+    if (filed) action = actionCell(`a:${a.kind}:${a.id}`, "View PDF", () => download(filed), finance ? [{ label: "Edit amount / month", onClick: () => openEditStmt(filed) }, { label: "Remove", onClick: () => removeFile(filed), danger: true }] : []);
+    else if (none) action = finance ? actionCell(`a:${a.kind}:${a.id}`, "Undo", () => undoSkip(none)) : null;
+    else if (finance) action = actionCell(`a:${a.kind}:${a.id}`, "File statement", () => openAcct(a), [{ label: "No statement this month", onClick: () => skipAcct(a) }]);
+    return (
+      <tr key={`${a.kind}:${a.id}`}>
+        <td style={cell}><div style={{ ...clip, fontWeight: 700, fontSize: 15 }} title={a.name}>{a.name}</div></td>
+        <td style={cell}>{dash}</td>
+        <td style={cell}><div style={clip}>{ACCT_CAT[a.kind]}</div></td>
+        <td style={cell}>{filed ? <div style={clip}>{MON[Number(month.slice(5)) - 1]} {month.slice(0, 4)}</div> : dash}</td>
+        <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{filed ? money(filed.amount) : dash}</td>
+        <td style={cell}>{status}</td>
+        <td style={cell}>{filed?.file_name ? <div style={{ ...clip, fontSize: 14 }} title={filed.file_name}>{filed.file_name}</div> : dash}</td>
+        <td style={cell}>{action}</td>
+      </tr>
+    );
+  };
+  // Main headings only: Vendors, Banks, Credit Cards, Loans. The category is a column, not a heading.
+  const mainBand = (key: string, title: string, count: string) => {
+    const open = !collapsed[`main:${key}`];
+    return (
+      <tr key={`main:${key}`}><td colSpan={8} style={{ padding: 0, background: "#D9E3EE", borderTop: `2px solid ${QBORDER}` }}>
+        <button type="button" onClick={() => setCollapsed((m) => ({ ...m, [`main:${key}`]: !m[`main:${key}`] }))} aria-expanded={open} className="w-full flex items-center gap-3 text-left" style={{ padding: "14px 14px" }}>
+          <span className="inline-flex" style={{ color: "#3b4a5c", transform: open ? "none" : "rotate(-90deg)" }}><Icon d={P.down} size={20} /></span>
+          <span style={{ fontWeight: 800, fontSize: 19, letterSpacing: "0.01em" }}>{title}</span>
+          <span style={{ fontSize: 14, color: "#4a5868" }}>{count}</span>
+        </button>
+      </td></tr>
+    );
+  };
+  const stmtCount = (rs: Row[]) => rs.filter((r) => r.kind === "bill" || r.kind === "doc").length;
+  const waitCount = (rs: Row[]) => rs.filter((r) => r.kind === "waiting").length;
+  const countText = (rs: Row[]) => `${stmtCount(rs)} statement${stmtCount(rs) === 1 ? "" : "s"}${waitCount(rs) ? ` · ${waitCount(rs)} waiting` : ""}`;
+  const blocks = (rs: Row[]) => rs.map((r, i) => renderRow(r, i === 0 || rs[i - 1].vendor.toLowerCase() !== r.vendor.toLowerCase()));
+
+  const modal = (children: React.ReactNode, wide = false) => (
+    <div className="fixed inset-0 z-50 flex items-start justify-center px-4 py-6 overflow-y-auto" style={{ background: "rgba(15,23,42,0.35)" }}>
+      <div className={`w-full ${wide ? "max-w-xl" : "max-w-md"} rounded-2xl bg-white p-5 shadow-xl space-y-3`}>{children}</div>
+    </div>
+  );
+  const closeX = (onClick: () => void) => <button type="button" aria-label="Close" onClick={onClick} className="inline-flex items-center justify-center rounded-lg" style={{ width: 44, height: 44, color: "#4a4a4a" }}><Icon d={P.x} size={20} /></button>;
+  const fileBox = (file: File | null, setFile: (f: File | null) => void, id: string) => (
+    <div className="rounded-xl flex items-center gap-3"
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setBoxOver(true); }}
+      onDragLeave={() => setBoxOver(false)}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setBoxOver(false); const f = e.dataTransfer.files?.[0]; if (!f) return; if (!/\.pdf$/i.test(f.name)) { setMsg("Only PDF files can be dropped here."); return; } setFile(f); }}
+      style={{ border: `2px dashed ${boxOver ? "#e8622a" : "#E2B48C"}`, background: boxOver ? "#FFEBD9" : "#FFF8F0", padding: "14px 16px" }}>
+      <span className="inline-flex items-center justify-center rounded-lg" style={{ width: 44, height: 44, background: "#FDEBD8", color: DEEP }}><Icon d={file ? P.doc : P.upload} size={22} /></span>
+      <div className="flex-1 min-w-0">
+        {file ? <><div className="font-bold text-sm truncate">{file.name}</div><div className="text-xs" style={{ color: "#5f5f5f" }}>{(file.size / 1024 / 1024).toFixed(1)} MB · attached</div></>
+          : <><div className="font-bold text-sm">Drop the statement PDF here</div><div className="text-xs" style={{ color: "#5f5f5f" }}>You can attach it now, or after filling in the details.</div></>}
+      </div>
+      <label htmlFor={id} className={`${btnBase} cursor-pointer`} style={{ height: 40, padding: "0 14px", fontSize: 13, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>{file ? "Replace" : "Choose a file"}</label>
+      <input id={id} type="file" accept="application/pdf,.pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setFile(f); }} />
+    </div>
+  );
+  const matchedVendor = vendorByName(aVendor);
+  const vendorCredit = matchedVendor ? data.credits[matchedVendor.id] ?? 0 : 0;
+
+  // ---- export ----
+  function exportCsv() {
+    const q = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [["Category", "Vendor", "Invoice #", "Statement date", "Amount", "Due by", "Paid", "Paid date", "Amount paid", "Paid from"].map(q).join(",")];
+    for (const r of view!.shown) if (r.kind === "bill") {
+      const f = r.f;
+      lines.push([r.cat, r.vendor, f.invoice_number ?? "", f.invoice_date ?? f.month, f.amount ?? "", f.due_date ?? "", f.paid ? "Yes" : "No", f.paid_date ?? "", f.paid ? paidSum(f) : "", f.paid_from_name ?? ""].map(q).join(","));
+    }
+    const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `statements-${month}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  return (
+    <div className="space-y-5" style={{ color: QINK }}>
+      <style>{`.stm td:last-child,.stm th:last-child{border-right:none !important}.stm tr.grand td{border-right:1px solid rgba(255,255,255,0.22) !important}@media print{.no-print{display:none !important}}`}</style>
+
+      {/* Title row */}
+      <div className="flex flex-wrap items-center justify-between gap-4 no-print">
+        <h1 className="m-0" style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 500, fontSize: 36, lineHeight: 1.15 }}>{section === "statements" ? "Account statements" : section === "bills" ? "Bills & invoices" : "Statements"}</h1>
+        <div className="flex items-center gap-5">
+          <button type="button" onClick={() => load()} className="inline-flex items-center gap-2 font-semibold" style={{ color: QLINK, fontSize: 17, height: 44 }}><Icon d={P.refresh} size={20} />Update</button>
+          {finance && showVendorRows && (
+            <button type="button" onClick={() => openAdd()} className="rounded-lg font-bold" style={{ background: ORANGE, color: INK, fontSize: 17, height: 48, padding: "0 26px" }}>{section === "bills" ? "Add bill / invoice" : "Add statement"}</button>
+          )}
+        </div>
+      </div>
+
+      {/* Month heading */}
+      <div className="flex flex-wrap items-center gap-4 no-print">
+        <span className="inline-flex items-center justify-center rounded-full" style={{ width: 56, height: 56, background: "#1F6FB2", color: "#fff" }}><Icon d={P.cal} size={28} /></span>
+        <div className="flex items-center gap-2">
+          <select aria-label="Month" value={Number(month.slice(5))} onChange={(e) => setMonth(`${month.slice(0, 4)}-${String(e.target.value).padStart(2, "0")}`)} className="bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 32, fontWeight: 500 }}>
+            {FULL.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+          <select aria-label="Year" value={month.slice(0, 4)} onChange={(e) => setMonth(`${e.target.value}-${month.slice(5)}`)} className="bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 32, fontWeight: 500 }}>
+            {Array.from({ length: 8 }, (_, i) => Number(data.currentMonth.slice(0, 4)) - 6 + i).map((y) => <option key={y} value={String(y)}>{y}</option>)}
+          </select>
+        </div>
+        <button type="button" aria-label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))} className="inline-flex items-center justify-center rounded-lg bg-white" style={{ width: 40, height: 40, border: `1px solid ${QBORDER}` }}><Icon d={P.left} /></button>
+        <button type="button" aria-label="Next month" onClick={() => setMonth(shiftMonth(month, 1))} className="inline-flex items-center justify-center rounded-lg bg-white" style={{ width: 40, height: 40, border: `1px solid ${QBORDER}` }}><Icon d={P.right} /></button>
+        {month !== data.currentMonth && <button type="button" onClick={() => setMonth(data.currentMonth)} className="font-semibold" style={{ color: QLINK, fontSize: 15 }}>Go to this month</button>}
+      </div>
+
+      {loadError && <p className="text-sm text-red-600 font-semibold">⚠️ {loadError}</p>}
+      {msg && <p className="text-sm font-semibold text-slate-600">{msg}</p>}
+
+      {/* Cards: they filter the list too */}
+      {showVendorRows && <div className="flex flex-wrap gap-4 no-print">
+        {card("all", "All statements", money(all.t), `Paid: ${money(all.p)}${credits > 0.004 ? ` · ${money(credits)} in credits` : ""}`, nBills)}
+        {card("unpaid", "Still owed", money(all.o), `${nOver} overdue (${money(overAmt)})`, nUnpaid, "#8E1F1A")}
+        {card("autopay", "On autopay", money(autoAmt), `${nAutoUnpaid} scheduled · ${nAuto - nAutoUnpaid} paid so far`, nAuto)}
+        {card("waiting", "Waiting on", `${waitUnique.length} vendor${waitUnique.length === 1 ? "" : "s"}`, waitUnique.length === 0 ? "Nothing outstanding" : waitUnique.length <= 2 ? waitUnique.join(", ") : `${waitUnique.slice(0, 2).join(", ")} +${waitUnique.length - 2} more`, view.counts.waiting)}
+      </div>}
+
+      {/* Waiting bar */}
+      {((showVendorRows && waitNames.length > 0) || (showAccts && data.prevMissing.length > 0)) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl no-print" style={{ background: "#FDEBC8", color: "#5E3306", padding: "8px 8px 8px 16px" }}>
+          <span className="inline-flex" style={{ color: "#7A4208" }}><Icon d={P.clock} size={20} /></span>
+          <div className="leading-snug" style={{ flex: "1 1 420px", fontSize: 15 }}>
+            {showVendorRows && waitUnique.length > 0 && <div><strong>Waiting on {waitUnique.length} vendor{waitUnique.length === 1 ? "" : "s"} for {monthWord}:</strong> {waitText}. Add each one when it arrives, or skip it if you don’t expect one this month.</div>}
+            {showAccts && data.prevMissing.length > 0 && <div className={showVendorRows && waitUnique.length > 0 ? "mt-1" : ""}><strong>{FULL[Number(data.prevMonth.slice(5)) - 1]} account statements still missing:</strong> {[...data.prevMissing].sort((x, y) => x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" })).join(", ")}.</div>}
+          </div>
+          <div className="flex gap-2">
+            {showVendorRows && waitUnique.length > 0 && <button type="button" onClick={() => setFilter("waiting")} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Show only waiting</button>}
+            {showAccts && data.prevMissing.length > 0 && <button type="button" onClick={() => setMonth(data.prevMonth)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Go to {FULL[Number(data.prevMonth.slice(5)) - 1]}</button>}
+          </div>
         </div>
       )}
 
-      <div className="flex gap-2">
-        {(["statements", "checks", "package"] as const).filter((t) => finance || t !== "package").map((t) => (
-          <button key={t} onClick={() => { setTab(t); setMsg(""); }} className="px-4 py-2 text-sm font-semibold rounded-lg border-2 transition"
-            style={tab === t ? { backgroundColor: "#e8622a", color: "white", borderColor: "#e8622a" } : { backgroundColor: "white", color: "#475569", borderColor: "#cbd5e1" }}>
-            {t === "statements" ? "Statements" : t === "checks" ? "Check register" : "CPA package"}
-          </button>
-        ))}
-      </div>
-
-      {payDialog}
-      {editInvDialog}
-      {tab !== "statements" && pendingBanner}
-
-      {tab === "statements" ? (
-      <StatementsMonth finance={finance} onAuthLost={logout} onChanged={loadPending} />
-      ) : tab === "checks" ? (
-      <div className="space-y-4">
-        {(() => {
-          const banks = accounts.filter((a) => a.kind === "bank");
-          const q = chkSearch.trim().toLowerCase();
-          const shown = checks.filter((c) => (!chkAccount || c.account_id === chkAccount) && (!chkStatus || c.status === chkStatus) && (!chkType || (c.category ?? "") === chkType)
-            && (!q || c.check_number.toLowerCase().includes(q) || c.payee.toLowerCase().includes(q) || c.memo.toLowerCase().includes(q)));
-          const outstanding = checks.filter((c) => c.status === "outstanding");
-          const outTotal = outstanding.reduce((n, c) => n + (c.amount ?? 0), 0);
-          // Numbers skipped in the sequence for each account (small gaps only), so a check that was written but never logged stands out.
-          const gaps: string[] = [];
-          for (const a of banks) {
-            const nums = [...new Set(checks.filter((c) => c.account_id === a.id && /^\d+$/.test(c.check_number)).map((c) => Number(c.check_number)))].sort((x, y) => x - y).slice(-100);
-            const missing: number[] = [];
-            for (let i = 1; i < nums.length; i++) { const d = nums[i] - nums[i - 1] - 1; if (d > 0 && d <= 15) for (let n = nums[i - 1] + 1; n < nums[i]; n++) missing.push(n); }
-            if (missing.length > 0) gaps.push(`${a.name}: ${missing.slice(0, 20).join(", ")}${missing.length > 20 ? "…" : ""}`);
-          }
-          return (
-            <>
-              <div className="flex flex-wrap items-center gap-3">
-                <select value={chkAccount} onChange={(e) => setChkAccount(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-                  <option value="">All accounts</option>
-                  {banks.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-                <select value={chkStatus} onChange={(e) => setChkStatus(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-                  <option value="">Any status</option><option value="outstanding">Outstanding</option><option value="cleared">Cleared</option><option value="void">Void</option>
-                </select>
-                <select value={chkType} onChange={(e) => setChkType(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-                  <option value="">Any type</option>
-                  {CHECK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <input value={chkSearch} onChange={(e) => setChkSearch(e.target.value)} placeholder="Search number, payee or memo…" className="w-full sm:w-72 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none" />
-                <button onClick={() => downloadChecksCsv(shown)} className="text-sm font-semibold text-orange-500 hover:underline">Download CSV</button>
-              </div>
-
-              {outstanding.length > 0 && (
-                <div className="rounded-xl px-4 py-2.5 text-sm" style={{ background: "#FAEEDA", color: "#854F0B" }}>
-                  <strong>{outstanding.length} outstanding check{outstanding.length === 1 ? "" : "s"}</strong> totalling {money(outTotal)}. They haven't cleared yet, so the bank balance doesn't reflect them.
-                </div>
-              )}
-              {gaps.length > 0 && (
-                <div className="rounded-xl px-4 py-2.5 text-xs" style={{ background: "#eef6ff", color: "#1e4e8c" }}>
-                  <strong>Check numbers not on the register:</strong> {gaps.join(" · ")}. If these were written, add them; if they were voided or never used, ignore this.
-                </div>
-              )}
-
-              {finance && (
-                <div className="rounded-2xl bg-white shadow px-5 py-3">
-                  {!chkAdding ? (
-                    <button onClick={() => { setChkAdding(true); const a = banks[0]; if (a && !cAccount) { setCAccount(a.id); setCNumber(nextCheckFor(a.id)); } }} className="text-sm font-semibold text-orange-500 hover:underline">+ Add a check</button>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-xs text-slate-500">{cEditId ? "Editing a check." : "Checks that pay an invoice are added automatically when you mark the invoice paid. Use this for any other check: a patient refund, a payroll check, rent, and so on."}</p>
-                      <div className="flex flex-wrap items-end gap-3">
-                        <div><label className="block text-xs font-semibold text-slate-500 mb-1">Account</label>
-                          <select value={cAccount} onChange={(e) => { setCAccount(e.target.value); setCNumber(nextCheckFor(e.target.value)); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-                            {banks.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}<option value="">Other / not listed</option>
-                          </select></div>
-                        <div><label className="block text-xs font-semibold text-slate-500 mb-1">Check #</label><input value={cNumber} onChange={(e) => setCNumber(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 100 }} /></div>
-                        <div><label className="block text-xs font-semibold text-slate-500 mb-1">Date</label><input type="date" value={cDate} onChange={(e) => setCDate(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
-                        <div><label className="block text-xs font-semibold text-slate-500 mb-1">Type</label>
-                          <select value={cType} onChange={(e) => setCType(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-                            {CHECK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                          </select></div>
-                        <div style={{ flex: "1 1 180px" }}>
-                          <label className="block text-xs font-semibold text-slate-500 mb-1">{cType === "Payroll" ? "Employee" : "Payee"}</label>
-                          {cType === "Payroll" && staffNames.length > 0 ? (
-                            <>
-                              <select value={cPayeeOther ? "__other" : (staffNames.includes(cPayee) ? cPayee : "")} onChange={(e) => { if (e.target.value === "__other") { setCPayeeOther(true); setCPayee(""); } else { setCPayeeOther(false); setCPayee(e.target.value); } }} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none">
-                                <option value="">Choose an employee…</option>
-                                {staffNames.map((n) => <option key={n} value={n}>{n}</option>)}
-                                <option value="__other">Someone else (type a name)…</option>
-                              </select>
-                              {cPayeeOther && <input value={cPayee} onChange={(e) => setCPayee(e.target.value)} placeholder="Name" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />}
-                            </>
-                          ) : (
-                            <input value={cPayee} onChange={(e) => setCPayee(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" />
-                          )}
-                        </div>
-                        <div><label className="block text-xs font-semibold text-slate-500 mb-1">Amount</label><input type="number" step="0.01" value={cAmount} onChange={(e) => setCAmount(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" style={{ width: 110 }} /></div>
-                        <div style={{ flex: "1 1 160px" }}><label className="block text-xs font-semibold text-slate-500 mb-1">Memo</label><input value={cMemo} onChange={(e) => setCMemo(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
-                        <button onClick={() => addCheck()} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>{cEditId ? "Save changes" : "Add"}</button>
-                        <button onClick={() => { setChkAdding(false); setCEditId(null); }} className="text-sm text-slate-400 hover:underline pb-2">{cEditId ? "Cancel" : "Close"}</button>
-                      </div>
-                    </div>
-                  )}
-                  {msg && <p className="text-sm font-semibold text-slate-600 mt-2">{msg}</p>}
-                </div>
-              )}
-
-              <div className="rounded-2xl bg-white shadow overflow-x-auto">
-                <table className="w-full text-sm border-collapse" style={{ minWidth: 760 }}>
-                  <thead>
-                    <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
-                      <th className="px-4 py-2 font-medium">Check #</th><th className="px-2 py-2 font-medium">Date</th><th className="px-2 py-2 font-medium">Account</th>
-                      <th className="px-2 py-2 font-medium">Payee</th><th className="px-2 py-2 font-medium">Type</th><th className="px-2 py-2 font-medium">Amount</th><th className="px-2 py-2 font-medium">Memo</th><th className="px-2 py-2 font-medium">Files</th>
-                      <th className="px-2 py-2 font-medium">Status</th><th className="px-2 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shown.length === 0 && <tr><td colSpan={10} className="px-4 py-6 text-slate-400">{checks.length === 0 ? "No checks logged yet." : "No checks match."}</td></tr>}
-                    {shown.map((c) => (
-                      <Fragment key={c.id}>
-                      <tr className="border-b border-slate-50" style={{ opacity: c.status === "void" ? 0.5 : 1 }}>
-                        <td className="px-4 py-1.5 font-semibold text-slate-700 whitespace-nowrap">#{c.check_number}</td>
-                        <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">{new Date(c.check_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}</td>
-                        <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">{c.account_name || "—"}</td>
-                        <td className="px-2 py-1.5 text-slate-700">{c.payee || "—"}</td>
-                        <td className="px-2 py-1.5 text-xs text-slate-500 whitespace-nowrap">{c.category || "—"}</td>
-                        <td className="px-2 py-1.5 text-slate-700 whitespace-nowrap">{c.amount != null ? money(c.amount) : "—"}</td>
-                        <td className="px-2 py-1.5 text-xs text-slate-500">{c.memo}</td>
-                        <td className="px-2 py-1.5 text-xs whitespace-nowrap">
-                          {(() => { const n = checkDocs.filter((d) => d.check_id === c.id).length; return (
-                            <button onClick={() => setOpenCheck(openCheck === c.id ? null : c.id)} disabled={!finance && n === 0 && !checkInvoices.some((i) => i.paid_from_id === c.account_id && i.paid_check_number === c.check_number)} className="font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-30">📎 {n > 0 ? n : finance ? "Attach" : "—"}</button>
-                          ); })()}
-                        </td>
-                        <td className="px-2 py-1.5 text-xs whitespace-nowrap">
-                          {finance ? (
-                            <select value={c.status} onChange={(e) => setCheckStatus(c, e.target.value)} className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none">
-                              <option value="outstanding">Outstanding</option><option value="cleared">Cleared</option><option value="void">Void</option>
-                            </select>
-                          ) : <span className="rounded-full px-2 py-0.5 font-semibold" style={{ background: c.status === "cleared" ? "#e7f6ec" : c.status === "void" ? "#f1f5f9" : "#fef3c7", color: c.status === "cleared" ? "#166534" : c.status === "void" ? "#475569" : "#92400e" }}>{c.status === "outstanding" ? "Outstanding" : c.status === "cleared" ? "Cleared" : "Void"}</span>}
-                        </td>
-                        <td className="px-2 py-1.5 text-right whitespace-nowrap">
-                          {finance && !c.invoice_id && <button onClick={() => startEditCheck(c)} className="text-xs text-slate-500 hover:text-slate-700 hover:underline mr-3">Edit</button>}
-                          {finance && <button onClick={() => deleteCheck(c)} className="text-xs text-red-400 hover:text-red-600 hover:underline">Delete</button>}
-                        </td>
-                      </tr>
-                      {openCheck === c.id && renderCheckPanel(c)}
-                      </Fragment>
-                    ))}
-                  </tbody>
-                </table>
-                {(() => {
-                  const by = shown.filter((c) => c.status !== "void").reduce<Record<string, number>>((m, c) => { const k = c.category || "Uncategorized"; m[k] = (m[k] ?? 0) + (c.amount ?? 0); return m; }, {});
-                  const entries = Object.entries(by).filter(([, v]) => v !== 0).sort((a, z) => z[1] - a[1]);
-                  return entries.length > 0 ? (
-                    <div className="flex flex-wrap gap-x-5 gap-y-1 px-4 py-2.5 border-t border-slate-100 text-xs text-slate-500">
-                      <span className="font-semibold text-slate-400">By type</span>
-                      {entries.map(([k, v]) => <span key={k}><span className="font-semibold text-slate-600">{k}</span> {money(v)}</span>)}
-                    </div>
-                  ) : null;
-                })()}
-              </div>
-            </>
-          );
-        })()}
-      </div>
-      ) : tab === "package" ? (
-      <div className="space-y-4 max-w-4xl">
-        <div className="rounded-2xl bg-white shadow px-5 py-4 space-y-3">
-          <h2 className="font-bold text-slate-800">Month-end package for your CPA</h2>
-          <p className="text-sm text-slate-500">One download with the check register, the invoices paid, and the statement and invoice PDFs. Statements are the ones covering the month; invoices are the ones paid in the month.</p>
-          <div className="flex flex-wrap items-end gap-3">
-            <div><label className="block text-xs font-semibold text-slate-500 mb-1">Month</label>
-              <input type="month" value={pkgMonth} onChange={(e) => e.target.value && setPkgMonth(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
-            <div style={{ flex: "1 1 240px" }}><label className="block text-xs font-semibold text-slate-500 mb-1">CPA's email address</label>
-              <input type="email" value={cpaEmail} onChange={(e) => setCpaEmail(e.target.value)} placeholder="cpa@firm.com" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none" /></div>
-            <button onClick={saveCpaEmail} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Save email</button>
+      {finance && showVendorRows && view.dupPairs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl no-print" style={{ background: "#E4ECF8", color: "#1B3A6B", padding: "8px 8px 8px 16px" }}>
+          <div className="leading-snug" style={{ flex: "1 1 420px", fontSize: 15 }}>
+            <strong>These may be the same vendor:</strong> {view.dupPairs.slice(0, 3).map((d, i) => <span key={d.from.id + d.into.id}>{i > 0 && "; "}{d.from.name} / {d.into.name}</span>)}. Merge them so their statements sit under one title.
           </div>
+          <button type="button" onClick={() => openMerge(view.dupPairs[0].from.id, view.dupPairs[0].into.id)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Merge…</button>
+        </div>
+      )}
 
-          {pkgPreview && (
-            <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm space-y-1">
-              <p className="font-semibold text-slate-700">{pkgPreview.statements} statement{pkgPreview.statements === 1 ? "" : "s"} · {pkgPreview.invoices} invoice{pkgPreview.invoices === 1 ? "" : "s"} paid ({money(pkgPreview.invoiceTotal)}) · {pkgPreview.checks} check{pkgPreview.checks === 1 ? "" : "s"}</p>
-              {pkgPreview.missing?.length > 0 && <p style={{ color: "#854F0B" }}>⚠️ No statement filed yet for: {pkgPreview.missing.join(", ")}.</p>}
-              {pkgPreview.invoices > pkgPreview.invoicePdfs && <p style={{ color: "#854F0B" }}>⚠️ {pkgPreview.invoices - pkgPreview.invoicePdfs} paid invoice(s) have no PDF attached.</p>}
-              {pkgPreview.unpaidInvoices > 0 && <p className="text-slate-500">{pkgPreview.unpaidInvoices} invoice(s) are still unpaid. They aren't in this package; they'll be in the month they're paid.</p>}
-              {pkgPreview.outstanding > 0 && <p className="text-slate-500">{pkgPreview.outstanding} check(s) are still outstanding. The summary page mentions them.</p>}
-            </div>
-          )}
+      {/* Tabs */}
+      {showVendorRows && <div className="inline-flex self-start rounded-lg no-print" style={{ background: "#E9EBEF", padding: 4, gap: 2, border: `1px solid ${QBORDER}` }}>
+        {tabBtn("all", "All")}{tabBtn("unpaid", "Unpaid")}{tabBtn("paid", "Paid")}{tabBtn("waiting", "Waiting")}{tabBtn("autopay", "Autopay")}{tabBtn("skipped", "Skipped")}
+      </div>}
 
-          <div className="flex flex-wrap items-center gap-3">
-            <button onClick={createPackage} disabled={!!pkgBusy} className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
-              {pkgBusy === "create" ? "Building…" : `Create package for ${monthLabel(pkgMonth)}`}
-            </button>
+      {/* Toolbar + table */}
+      <div className="bg-white overflow-hidden" style={{ border: `1px solid ${QBORDER}`, borderRadius: 10 }}>
+        <div className="flex flex-wrap items-center justify-between gap-3 no-print" style={{ padding: "18px 20px" }}>
+          <div className="flex flex-wrap gap-3">
+            <label className="flex items-center justify-between gap-2 rounded-lg" style={{ width: 280, height: 52, border: `1px solid ${QBORDER}`, padding: "0 14px", color: QMUTED }}>
+              <span className="sr-only">Search vendors</span>
+              <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" className="w-full bg-transparent focus:outline-none" style={{ fontSize: 17, color: QINK }} />
+              <Icon d={P.search} size={22} />
+            </label>
+            {showVendorRows && <label className="flex items-center gap-2 rounded-lg" style={{ width: 220, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px", color: QMUTED }}>
+              <span className="sr-only">Filter by due date</span>
+              <select value={dueFilter} onChange={(e) => setDueFilter(e.target.value as typeof dueFilter)} className="w-full bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 17, color: QINK }}>
+                <option value="all">All due dates</option><option value="overdue">Overdue</option><option value="week">Due in 7 days</option>
+              </select>
+              <Icon d={P.cal} size={22} />
+            </label>}
+            {showVendorRows && <label className="flex items-center gap-2 rounded-lg" style={{ width: 260, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px" }}>
+              <span className="sr-only">Filter by category</span>
+              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-full bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 17, color: QINK }}>
+                <option value="">All categories</option>
+                {[...allCats.filter((c) => c !== "Other"), "Bank", "Credit card", "Other"].map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>}
           </div>
-          {pkgMsg && <p className="text-sm font-semibold text-slate-600">{pkgMsg}</p>}
+          <div className="flex items-center gap-5" style={{ color: QMUTED, fontSize: 16 }}>
+            <span>1-{view.shown.length} of {view.shown.length}</span>
+            <span className="inline-flex items-center gap-1.5"><span style={{ color: "#B5B7BC" }}><Icon d={P.left} size={18} /></span>Page <span className="inline-block text-center rounded-md" style={{ minWidth: 44, border: `1px solid ${QBORDER}`, padding: "8px 0", color: QINK }}>1</span> of 1 <span style={{ color: "#B5B7BC" }}><Icon d={P.right} size={18} /></span></span>
+            <span className="inline-flex gap-4" style={{ color: "#4a4b50" }}>
+              <button type="button" aria-label="Print" onClick={() => window.print()} className="inline-flex"><Icon d={P.print} size={26} /></button>
+              <button type="button" aria-label="Export to a spreadsheet file" onClick={exportCsv} className="inline-flex"><Icon d={P.exp} size={26} /></button>
+            </span>
+          </div>
         </div>
 
-        <div className="rounded-2xl bg-white shadow overflow-x-auto">
-          <table className="w-full text-sm border-collapse" style={{ minWidth: 640 }}>
+        <div className="overflow-x-auto">
+          <table className="stm w-full" style={{ minWidth: 860, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
+            <caption className="sr-only">Statements for {mlabel(month)}, sorted by category and then by vendor</caption>
+            <colgroup><col style={{ width: "18%" }} /><col style={{ width: "9%" }} /><col style={{ width: "11%" }} /><col style={{ width: "14%" }} /><col style={{ width: "10%" }} /><col style={{ width: "12%" }} /><col style={{ width: "14%" }} /><col style={{ width: "12%" }} /></colgroup>
             <thead>
-              <tr className="text-xs text-slate-400 border-b border-slate-100 text-left">
-                <th className="px-4 py-2 font-medium">Month</th><th className="px-2 py-2 font-medium">Contents</th><th className="px-2 py-2 font-medium">Built</th>
-                <th className="px-2 py-2 font-medium">Emailed</th><th className="px-2 py-2" />
+              <tr>
+                <th scope="col" style={thS}>{section === "statements" ? "Account" : "Vendor"}</th><th scope="col" style={thS}>Inv #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Stmt / Due</th>
+                <th scope="col" style={{ ...thS, textAlign: "right" }}>Amount</th><th scope="col" style={thS}>Status</th><th scope="col" style={thS}>Paid from</th><th scope="col" style={thS}>Action</th>
               </tr>
             </thead>
             <tbody>
-              {pkgList.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-slate-400">No packages built yet.</td></tr>}
-              {pkgList.map((pk) => (
-                <tr key={pk.id} className="border-b border-slate-50">
-                  <td className="px-4 py-2 font-semibold text-slate-700 whitespace-nowrap">{monthLabel(pk.month)}</td>
-                  <td className="px-2 py-2 text-xs text-slate-500">{pk.stats}{pk.file_size ? ` · ${(pk.file_size / 1024 / 1024).toFixed(1)} MB` : ""}</td>
-                  <td className="px-2 py-2 text-xs text-slate-500 whitespace-nowrap">{new Date(pk.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td>
-                  <td className="px-2 py-2 text-xs text-slate-500">{pk.emailed_at ? `${pk.emailed_to} · ${new Date(pk.emailed_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Not yet"}</td>
-                  <td className="px-2 py-2 text-right whitespace-nowrap">
-                    <button onClick={() => emailPackage(pk)} disabled={!!pkgBusy} className="rounded-lg px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>{pkgBusy === `em:${pk.id}` ? "Sending…" : pk.emailed_at ? "Email new link" : "Email link to CPA"}</button>
-                    <button onClick={() => downloadPackage(pk.id)} disabled={!!pkgBusy} className="ml-2 rounded-lg px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: "#0f766e" }}>Download</button>
-                    <button onClick={() => deletePackage(pk)} className="ml-3 text-xs text-red-400 hover:text-red-600 hover:underline">Delete</button>
-                  </td>
-                </tr>
-              ))}
+              {(() => {
+                const vendorCats = view.cats.filter((c) => c !== "Loan");
+                const vendorRows = showVendorRows ? view.shown.filter((r) => r.cat !== "Loan") : [];
+                const loanVendorRows = showVendorRows ? view.shown.filter((r) => r.cat === "Loan") : [];
+                // Loans: loan payments to a lender and the loan accounts' own statements, mixed alphabetically
+                const entries: { name: string; nodes: React.ReactNode[] }[] = [];
+                const byVendor = new Map<string, Row[]>();
+                for (const r of loanVendorRows) { const k = r.vendor.toLowerCase(); byVendor.set(k, [...(byVendor.get(k) ?? []), r]); }
+                for (const rs of byVendor.values()) entries.push({ name: rs[0].vendor, nodes: rs.map((r, i) => renderRow(r, i === 0)) });
+                for (const x of loanAccts) entries.push({ name: x.name, nodes: [acctRow(x)] });
+                entries.sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: "base" }));
+                const loanCount = stmtCount(loanVendorRows) + loanAccts.length;
+                const nothing = vendorRows.length === 0 && bankAccts.length === 0 && cardAccts.length === 0 && entries.length === 0;
+                return (
+                  <>
+                    {nothing && <tr><td colSpan={8} className="px-4 py-8 text-slate-500">{loading ? "Loading…" : filter === "all" && !search && !catFilter && dueFilter === "all" ? `Nothing for ${mlabel(month)} yet. Use Add statement, or drop a PDF on this page.` : "Nothing matches."}</td></tr>}
+                    {vendorRows.length > 0 && (
+                      <>
+                        {mainBand("Vendors", "Vendors", countText(vendorRows))}
+                        {!collapsed["main:Vendors"] && vendorCats.map((cat) => <Fragment key={cat}>{blocks(vendorRows.filter((r) => r.cat === cat))}</Fragment>)}
+                      </>
+                    )}
+                    {bankAccts.length > 0 && (<>{mainBand("Banks", "Banks", `${bankAccts.length} account${bankAccts.length === 1 ? "" : "s"}`)}{!collapsed["main:Banks"] && bankAccts.map(acctRow)}</>)}
+                    {cardAccts.length > 0 && (<>{mainBand("Cards", "Credit Cards", `${cardAccts.length} account${cardAccts.length === 1 ? "" : "s"}`)}{!collapsed["main:Cards"] && cardAccts.map(acctRow)}</>)}
+                    {entries.length > 0 && (<>{mainBand("Loans", "Loans", `${loanCount} statement${loanCount === 1 ? "" : "s"}`)}{!collapsed["main:Loans"] && entries.map((e, i) => <Fragment key={`${e.name}:${i}`}>{e.nodes}</Fragment>)}</>)}
+                    {showVendorRows && view.shown.length > 0 && (
+                      <tr className="grand" style={{ background: QINK, color: "#fff" }}>
+                        <td style={{ padding: 16, fontWeight: 700, fontSize: 16 }} colSpan={3}>{monthWord} total <span style={{ fontWeight: 400, fontSize: 13, opacity: 0.8 }}>· statements with an amount due</span></td><td />
+                        <td style={{ padding: "16px 12px", textAlign: "right", fontWeight: 700, fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{money(grand.t)}</td>
+                        <td style={{ padding: "16px 12px", fontWeight: 700 }}><div style={clip}>Paid {money(grand.p)}</div></td>
+                        <td style={{ padding: "16px 12px", fontWeight: 700 }} colSpan={2}><div style={clip}>Still owed {money(grand.o)}</div></td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })()}
             </tbody>
           </table>
         </div>
-        <p className="text-xs text-slate-400">The emailed link works for 7 days and the file stays in your private storage. Delete a package once your CPA has it. "Email new link" sends a fresh 7-day link, and links already sent keep working until they expire.</p>
+        <div className="flex items-center justify-end gap-5 no-print" style={{ padding: "14px 20px", color: QMUTED, fontSize: 15, borderTop: `1px solid ${QBORDER}` }}>
+          <span>1-{view.shown.length} of {view.shown.length} items</span>
+          <span className="inline-flex items-center gap-2.5"><span style={{ color: "#B5B7BC" }}><Icon d={P.left} size={18} /></span><span className="inline-flex items-center justify-center rounded-md font-bold" style={{ width: 36, height: 36, background: "#DADDE1", color: QINK }}>1</span><span style={{ color: "#B5B7BC" }}><Icon d={P.right} size={18} /></span></span>
+        </div>
       </div>
-      ) : null}
+
+      {finance && showVendorRows && notExpected.length > 0 && (
+        <p className="text-sm no-print" style={{ color: QMUTED }}>
+          Only expected when they bill: {notExpected.map((x, i) => (<span key={x.id}>{i > 0 && ", "}{x.name} <button type="button" className="underline font-semibold" style={{ color: DEEP }} onClick={() => setExpect(x.id, "monthly")}>expect every month</button></span>))}
+        </p>
+      )}
+      {finance && <div className="flex items-center gap-2.5 text-sm no-print" style={{ color: QMUTED }}><Icon d={P.upload} />{showVendorRows ? "Drop statement PDFs anywhere on this page to file them." : "Open an account's File statement window, then drop the PDF there."}</div>}
+
+      {/* ---------------- Add statement ---------------- */}
+      {addOpen && modal(
+        <>
+          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Add a statement</h2>{closeX(() => setAddOpen(false))}</div>
+          {fileBox(aFile, setAFile, "add-file")}
+          <div>
+            <label htmlFor="add-vendor" className={lbl}>Vendor</label>
+            <input id="add-vendor" list="vendor-list" value={aVendor} onChange={(e) => applyVendor(e.target.value)} placeholder="Choose a vendor or type a new one" className={inputCls} style={inputBorder} autoComplete="off" />
+            <datalist id="vendor-list">{data.sources.filter((s) => s.active).map((s) => <option key={s.id} value={s.name} />)}</datalist>
+            <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>{aVendor.trim() && !matchedVendor ? "New vendor. It joins the list and appears every month after this one." : "Type to search. A new name joins the list and appears every month after this one."}</p>
+          </div>
+          {!aVendor.trim() && view.waiting.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 text-xs font-bold mb-1.5" style={{ color: "#3d3d3d" }}><span style={{ color: "#7A4208" }}><Icon d={P.clock} size={16} /></span>Still waiting on this month</div>
+              <div className="flex flex-wrap gap-2">{view.waiting.slice(0, 8).map((w) => <button key={w.vendorId} type="button" onClick={() => applyVendor(w.vendor)} className="rounded-full font-semibold" style={{ height: 44, padding: "0 16px", fontSize: 13, border: "1px solid #CFC6AF", background: "#fff", color: INK }}>{w.vendor}</button>)}</div>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <div className="flex-1 min-w-0">
+              <label htmlFor="add-cat" className={lbl}>Category</label>
+              <select id="add-cat" value={aCat} onChange={(e) => { if (e.target.value === "__new") { const c = (window.prompt("New category name:") ?? "").trim().slice(0, 40); if (c) setACat(c); } else setACat(e.target.value); }} className={inputCls} style={inputBorder}>
+                <option value="">{matchedVendor ? "—" : "Choose…"}</option>
+                {[...new Set([...allCats, ...(aCat ? [aCat] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
+                <option value="__new">+ New category…</option>
+              </select>
+            </div>
+            <div className="flex-1 min-w-0">
+              <label htmlFor="add-inv" className={lbl}>Invoice #</label>
+              <input id="add-inv" value={aInv} onChange={(e) => setAInv(e.target.value)} className={inputCls} style={inputBorder} />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1 min-w-0"><label htmlFor="add-date" className={lbl}>Statement date</label><input id="add-date" type="date" value={aDate} onChange={(e) => setADate(e.target.value)} className={inputCls} style={inputBorder} /></div>
+            <div className="flex-1 min-w-0"><label htmlFor="add-due" className={lbl}>Due by</label><input id="add-due" type="date" value={aDue} onChange={(e) => setADue(e.target.value)} className={inputCls} style={inputBorder} /></div>
+            <div className="flex-1 min-w-0"><label htmlFor="add-amt" className={lbl}>Amount due</label><input id="add-amt" inputMode="decimal" value={aAmount} onChange={(e) => setAAmount(e.target.value)} placeholder="0.00" className={inputCls} style={{ ...inputBorder, textAlign: "right", fontWeight: 700 }} /></div>
+          </div>
+          {vendorCredit > 0 && <p className="text-xs rounded-lg px-3 py-2" style={{ background: "#E3F3E9", color: "#14532D" }}>You have a {money(vendorCredit)} credit with {matchedVendor?.name}. It will be offered when you mark this one paid.</p>}
+          {suggestions.length > 0 && !aMatch && (
+            <div className="rounded-lg px-3 py-2 text-sm space-y-1.5" style={{ background: "#FAEEDA", color: "#854F0B" }}>
+              <p className="font-semibold">This may be a bill you already track in Cash Flow:</p>
+              {suggestions.map((sg) => (
+                <div key={`${sg.bill.id}${sg.dueDate}`} className="flex items-center gap-2 flex-wrap">
+                  <span>{sg.bill.name} · due {dlabel(sg.dueDate)}{sg.bill.estimatedAmount > 0 ? ` · est. ${money(sg.bill.estimatedAmount)}` : ""}</span>
+                  <button type="button" onClick={() => setAMatch({ billId: sg.bill.id, dueDate: sg.dueDate, billName: sg.bill.name })} className="underline font-semibold">Link it</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {aMatch && <p className="text-xs rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: "#dbeafe", color: "#1e4e8c" }}>Linked to {aMatch.billName} (due {dlabel(aMatch.dueDate)}). It counts through that bill. <button type="button" onClick={() => setAMatch(null)} className="underline font-semibold">Unlink</button></p>}
+          <div className="flex items-start gap-2.5">
+            <input id="add-paid" type="checkbox" checked={aPaidNow} onChange={(e) => setAPaidNow(e.target.checked)} disabled={aAuto} style={{ width: 20, height: 20, marginTop: 2, accentColor: DEEP }} />
+            <label htmlFor="add-paid" className="text-sm leading-snug">Already paid<br /><span className="text-xs" style={{ color: "#5f5f5f" }}>You’ll enter the date, amount paid and where from right after filing.</span></label>
+          </div>
+          <div className="flex items-start gap-2.5">
+            <input id="add-auto" type="checkbox" checked={aAuto} onChange={(e) => { setAAuto(e.target.checked); if (e.target.checked) setAPaidNow(false); }} style={{ width: 20, height: 20, marginTop: 2, accentColor: DEEP }} />
+            <label htmlFor="add-auto" className="text-sm leading-snug">On autopay<br /><span className="text-xs" style={{ color: "#5f5f5f" }}>Marked paid on the due date from the account you choose. Remembered for this vendor, so next month’s statement is already set up.</span></label>
+          </div>
+          {!aPaidNow && (
+            <div>
+              <label htmlFor="add-autofrom" className={lbl}>{aAuto ? "Autopay is paid from" : "Usually paid from"}</label>
+              <select id="add-autofrom" value={aAutoFrom} onChange={(e) => setAAutoFrom(e.target.value)} className={inputCls} style={inputBorder}>
+                <option value="">{aAuto ? "Choose an account…" : "Not sure yet"}</option>
+                <optgroup label="Bank accounts">{data.payAccounts.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
+                <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
+              </select>
+              {!aAuto && <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Cash Flow counts this statement as money going out of this account on its due date. Remembered for this vendor.</p>}
+            </div>
+          )}
+          {aErr && <p className="text-sm font-semibold text-red-600">{aErr}</p>}
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <button type="button" onClick={() => fileStatement(false)} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Working…" : "File statement"}</button>
+            <button type="button" onClick={() => fileStatement(true)} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}><Icon d={P.plus} size={16} />File &amp; add another</button>
+            <button type="button" onClick={() => setAddOpen(false)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
+          </div>
+        </>, true)}
+
+      {/* ---------------- Mark paid ---------------- */}
+      {payFor && payCalc && modal(
+        <>
+          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>{pEditing ? "Edit payment" : "Mark paid"}</h2>{closeX(() => setPayFor(null))}</div>
+          <p className="text-sm" style={{ color: "#4a4a4a" }}><strong style={{ color: INK }}>{payFor.account_name}</strong>{payFor.invoice_number ? ` · Invoice #${payFor.invoice_number}` : ""} · billed <strong style={{ color: INK }}>{money(payFor.amount)}</strong>{payCalc.prior > 0 && ` · ${money(payCalc.prior)} already paid`}</p>
+          <div className="flex gap-3">
+            <div className="flex-1"><label htmlFor="pay-date" className={lbl}>Date paid</label><input id="pay-date" type="date" value={pDate} onChange={(e) => setPDate(e.target.value)} className={inputCls} style={inputBorder} /></div>
+            <div className="flex-1">
+              <label htmlFor="pay-how" className={lbl}>How was it paid?</label>
+              <select id="pay-how" value={pMethod} onChange={(e) => { const m = e.target.value as typeof pMethod; setPMethod(m); if (m === "check" && pFrom.startsWith("bank:") && !pCheck) setPCheck(nextCheckFor(pFrom)); }} className={inputCls} style={inputBorder}>
+                <option value="check">Check</option><option value="ach">ACH / bank transfer</option><option value="card">Credit card</option><option value="other">Cash / other</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label htmlFor="pay-from" className={lbl}>Paid from</label>
+            <select id="pay-from" value={pFrom} onChange={(e) => { const v = e.target.value; setPFrom(v); if (pMethod === "check" && v.startsWith("bank:")) setPCheck(nextCheckFor(v)); }} className={inputCls} style={inputBorder}>
+              <optgroup label="Bank accounts">{data.payAccounts.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
+              <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
+              <option value="other">Other (cash, owner, etc.)</option>
+            </select>
+          </div>
+          {pMethod === "check" && (
+            <div>
+              <label htmlFor="pay-chk" className={lbl}>Check number (required)</label>
+              <input id="pay-chk" value={pCheck} onChange={(e) => setPCheck(e.target.value)} placeholder="e.g. 1043" className={inputCls} style={inputBorder} />
+              <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Goes into the check register as soon as you save. The next number after your last check on this account is filled in for you.</p>
+            </div>
+          )}
+          {payCalc.credit > 0 && !pEditing && (
+            <div className="flex items-start gap-2.5">
+              <input id="pay-credit" type="checkbox" checked={pUseCredit} onChange={(e) => { setPUseCredit(e.target.checked); const d0 = Math.max(0, Number(payFor.amount ?? 0) - Number(payFor.credit_applied ?? 0) - payCalc.prior); setPAmount(Math.max(0, d0 - (e.target.checked ? Math.min(payCalc.credit, d0) : 0)).toFixed(2)); }} style={{ width: 20, height: 20, marginTop: 2, accentColor: DEEP }} />
+              <label htmlFor="pay-credit" className="text-sm leading-snug">Apply the {money(payCalc.credit)} credit from an earlier overpayment<br /><span className="text-xs" style={{ color: "#5f5f5f" }}>The amount paid below is already reduced by it.</span></label>
+            </div>
+          )}
+          <div>
+            <label htmlFor="pay-amt" className={lbl}>Amount paid</label>
+            <input id="pay-amt" inputMode="decimal" value={pAmount} onChange={(e) => setPAmount(e.target.value)} className={inputCls} style={{ ...inputBorder, textAlign: "right", fontWeight: 700, ...(payCalc.under || payCalc.over ? { borderColor: "#C98216", background: "#FFFBF2" } : {}) }} />
+            <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Starts as the amount due ({money(payCalc.due)}). Change it if you paid a different amount.</p>
+          </div>
+          {(payCalc.under || payCalc.over) && (
+            <fieldset className="space-y-2">
+              <legend className="text-xs font-bold mb-2" style={{ color: "#3d3d3d" }}>{payCalc.under ? `You paid ${money(-payCalc.delta)} less than billed. What should happen to the difference?` : `You paid ${money(payCalc.delta)} more than billed. What should happen to the extra?`}</legend>
+              {(payCalc.under
+                ? [["settled", "Settled. Nothing more is owed", `A credit or discount. The statement shows as paid, with a ${money(-payCalc.delta)} credit noted.`], ["partial", `Partial payment. Keep ${money(-payCalc.delta)} owed`, `The statement stays in the unpaid list with ${money(-payCalc.delta)} still due.`]]
+                : [["credit", `Carry it as a credit with ${payFor.account_name}`, `Their next statement offers the ${money(payCalc.delta)} credit when you mark it paid.`], ["note", "Just note it on this row", `The statement shows as paid, with a ${money(payCalc.delta)} overpayment noted. Nothing carries forward.`]]
+              ).map(([v, t, s]) => (
+                <label key={v} className="flex items-start gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer" style={{ border: `1px solid ${payCalc.diff === v ? "#C98216" : "#E2D9C3"}`, background: payCalc.diff === v ? "#FFFBF2" : "#fff" }}>
+                  <input type="radio" name="pay-diff" checked={payCalc.diff === v} onChange={() => setPDiff(v)} style={{ width: 20, height: 20, marginTop: 1, accentColor: DEEP }} />
+                  <span className="text-sm leading-snug"><strong>{t}</strong><br /><span style={{ color: "#5f5f5f" }}>{s}</span></span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+          <div><label htmlFor="pay-note" className={lbl}>Note (optional)</label><input id="pay-note" value={pNote} onChange={(e) => setPNote(e.target.value)} className={inputCls} style={inputBorder} /></div>
+          {pMethod === "check" && !isNaN(payCalc.pay) && <p className="text-sm rounded-lg px-3 py-2" style={{ background: BAND }}>The check on the register is written for <strong>{money(payCalc.pay)}</strong>, the amount paid.</p>}
+          {pErr && <p className="text-sm font-semibold text-red-600">{pErr}</p>}
+          <div className="flex items-center gap-3 pt-1">
+            <button type="button" onClick={() => confirmPay()} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Saving…" : pEditing ? "Save changes" : "Mark paid"}</button>
+            <button type="button" onClick={() => setPayFor(null)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
+          </div>
+        </>)}
+
+      {/* ---------------- Edit invoice ---------------- */}
+      {editInv && modal(
+        <>
+          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Edit invoice</h2>{closeX(() => setEditInv(null))}</div>
+          <p className="text-xs" style={{ color: "#5f5f5f" }}>The PDF stays as filed.{editInv.paid ? " If it was paid by check, that check on the register is updated too (unless it has already cleared)." : ""}</p>
+          <div>
+            <label htmlFor="ed-vendor" className={lbl}>Vendor</label>
+            <select id="ed-vendor" value={eVendor} onChange={(e) => setEVendor(e.target.value)} className={inputCls} style={inputBorder}>
+              {!data.sources.some((s) => s.id === eVendor) && <option value={eVendor}>{editInv.account_name}</option>}
+              {data.sources.filter((s) => s.active || s.id === eVendor).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1"><label htmlFor="ed-date" className={lbl}>Statement date</label><input id="ed-date" type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} className={inputCls} style={inputBorder} /></div>
+            <div className="flex-1"><label htmlFor="ed-due" className={lbl}>Due by</label><input id="ed-due" type="date" value={eDue} onChange={(e) => setEDue(e.target.value)} className={inputCls} style={inputBorder} /></div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1"><label htmlFor="ed-no" className={lbl}>Invoice #</label><input id="ed-no" value={eNumber} onChange={(e) => setENumber(e.target.value)} className={inputCls} style={inputBorder} /></div>
+            <div className="flex-1"><label htmlFor="ed-amt" className={lbl}>Amount due</label><input id="ed-amt" inputMode="decimal" value={eAmount} onChange={(e) => setEAmount(e.target.value)} className={inputCls} style={{ ...inputBorder, textAlign: "right", fontWeight: 700 }} /></div>
+          </div>
+          <div>
+            <label htmlFor="ed-cat" className={lbl}>Category</label>
+            <select id="ed-cat" value={eCat} onChange={(e) => setECat(e.target.value)} className={inputCls} style={inputBorder}>
+              {[...new Set([...allCats, ...(eCat ? [eCat] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          {!editInv.paid && !editInv.autopay && (
+            <div>
+              <label htmlFor="ed-from" className={lbl}>Usually paid from</label>
+              <select id="ed-from" value={eFrom} onChange={(e) => setEFrom(e.target.value)} className={inputCls} style={inputBorder}>
+                <option value="">Not sure yet</option>
+                <optgroup label="Bank accounts">{data.payAccounts.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
+                <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
+              </select>
+              <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Cash Flow counts this statement as money going out of this account on its due date. Remembered for this vendor.</p>
+            </div>
+          )}
+          {eErr && <p className="text-sm font-semibold text-red-600">{eErr}</p>}
+          <div className="flex items-center gap-3 pt-1">
+            <button type="button" onClick={() => saveEdit()} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Saving…" : "Save changes"}</button>
+            <button type="button" onClick={() => setEditInv(null)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
+          </div>
+        </>)}
+
+      {/* ---------------- Merge vendors ---------------- */}
+      {mergeDlg && (() => {
+        const from = data.sources.find((x) => x.id === mergeDlg.fromId);
+        const others = data.sources.filter((x) => x.id !== mergeDlg.fromId).sort((x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: "base" }));
+        const into = data.sources.find((x) => x.id === mergeDlg.intoId);
+        return modal(
+          <>
+            <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Merge vendors</h2>{closeX(() => setMergeDlg(null))}</div>
+            <p className="text-sm" style={{ color: "#4a4a4a" }}>Everything filed under <strong style={{ color: INK }}>{from?.name}</strong> moves to the vendor you keep, and <strong style={{ color: INK }}>{from?.name}</strong> is removed from your list. Statements and PDFs aren’t deleted.</p>
+            <div>
+              <label htmlFor="merge-into" className={lbl}>Keep this vendor</label>
+              <select id="merge-into" value={mergeDlg.intoId} onChange={(e) => setMergeDlg({ ...mergeDlg, intoId: e.target.value })} className={inputCls} style={inputBorder}>
+                <option value="">Choose…</option>
+                {others.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </div>
+            {into && from && <button type="button" onClick={() => setMergeDlg({ fromId: into.id, intoId: from.id })} className="text-xs underline font-semibold" style={{ color: DEEP }}>Keep {from.name} instead</button>}
+            {mErr && <p className="text-sm font-semibold text-red-600">{mErr}</p>}
+            <div className="flex items-center gap-3 pt-1">
+              <button type="button" onClick={doMerge} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Merging…" : "Merge"}</button>
+              <button type="button" onClick={() => setMergeDlg(null)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
+            </div>
+          </>);
+      })()}
+
+      {/* ---------------- Edit statement ---------------- */}
+      {editStmt && modal(
+        <>
+          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Edit statement</h2>{closeX(() => setEditStmt(null))}</div>
+          <p className="text-sm" style={{ color: "#4a4a4a" }}><strong style={{ color: INK }}>{editStmt.account_name}</strong>. The PDF stays as filed.{isAcctKind(editStmt) ? " Changing the balance or month updates Cash Flow too." : ""}</p>
+          <div className="flex gap-3">
+            <div className="flex-1 min-w-0">
+              <label htmlFor="st-date" className={lbl}>{isAcctKind(editStmt) ? "Statement month" : "Statement date"}</label>
+              <input id="st-date" type={isAcctKind(editStmt) ? "month" : "date"} value={stDate} onChange={(e) => setStDate(e.target.value)} className={inputCls} style={inputBorder} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <label htmlFor="st-amt" className={lbl}>{isAcctKind(editStmt) ? "Statement balance" : "Amount due"}</label>
+              <input id="st-amt" inputMode="decimal" value={stAmount} onChange={(e) => setStAmount(e.target.value)} className={inputCls} style={{ ...inputBorder, textAlign: "right", fontWeight: 700 }} />
+            </div>
+          </div>
+          {stErr && <p className="text-sm font-semibold text-red-600">{stErr}</p>}
+          <div className="flex items-center gap-3 pt-1">
+            <button type="button" onClick={() => saveEditStmt()} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Saving…" : "Save changes"}</button>
+            <button type="button" onClick={() => setEditStmt(null)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
+          </div>
+        </>)}
+
+      {/* ---------------- Account statement ---------------- */}
+      {acctDlg && modal(
+        <>
+          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>File statement</h2>{closeX(() => setAcctDlg(null))}</div>
+          <p className="text-sm" style={{ color: "#4a4a4a" }}><strong style={{ color: INK }}>{acctDlg.name}</strong> · {mlabel(month)}</p>
+          {fileBox(sFile, setSFile, "acct-file")}
+          <div>
+            <label htmlFor="acct-amt" className={lbl}>Statement balance (required)</label>
+            <input id="acct-amt" inputMode="decimal" value={sAmount} onChange={(e) => setSAmount(e.target.value)} placeholder="Ending balance" className={inputCls} style={{ ...inputBorder, textAlign: "right", fontWeight: 700 }} />
+            <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>It’s saved as this month’s statement balance in Cash Flow, so it’s only entered once.</p>
+          </div>
+          {sErr && <p className="text-sm font-semibold text-red-600">{sErr}</p>}
+          <div className="flex items-center gap-3 pt-1">
+            <button type="button" onClick={() => fileAcct()} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Working…" : "File statement"}</button>
+            <button type="button" onClick={() => setAcctDlg(null)} className="text-sm" style={{ color: "#4a4a4a", height: 44 }}>Cancel</button>
+          </div>
+        </>)}
     </div>
-  );
-
-  if (role === "cpa") {
-    return <main className="min-h-screen p-4 lg:p-8" style={{ background: "#f5f5f5" }}>{content}</main>;
-  }
-  return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
-      <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">{content}</div>
-    </main>
-  );
-}
-
-// A section heading row followed by its rows.
-function FragmentRows({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <>
-      <tr><td colSpan={13} className="px-4 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</td></tr>
-      {children}
-    </>
   );
 }
