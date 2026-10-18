@@ -5,6 +5,8 @@ import { Sidebar } from "@/components/Sidebar";
 import { formatMoney, formatUSD } from "@/lib/format";
 import WeeklyUpdatePanel from "@/components/WeeklyUpdatePanel";
 import UpdateNumbersFlow from "@/components/UpdateNumbersFlow";
+import AccountsPanel from "@/components/AccountsPanel";
+import DebtPanel from "@/components/DebtPanel";
 import { buildStaleItems, StaleItem, newestMonth, monthLabel as stmtMonthLabel, coveredMonth, previousMonth } from "@/lib/staleness";
 import BarChart, { BarPoint, BarSeries } from "@/components/BarChart";
 import { UpdatedStamp, MonthSelect, NumInput, HistoryBlock, HistColumn, HistRow } from "@/components/CashHistory";
@@ -453,6 +455,8 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
   const [balanceHist, setBalanceHist] = useState<Record<string, BalanceCheck[]>>({});
   const [statementPts, setStatementPts] = useState<Record<string, BarPoint[]>>({});
   const [loans, setLoans] = useState<Debt[]>([]);
+  // Which account's Edit window is open (bank, card or loan).
+  const [editTile, setEditTile] = useState<{ kind: "bank" | "card" | "loan"; key: string; name: string } | null>(null);
   const [odSeries, setOdSeries] = useState<{ production: BarPoint[]; income: BarPoint[]; patient: BarPoint[]; insurance: BarPoint[] }>({ production: [], income: [], patient: [], insurance: [] });
   const [arPoints, setArPoints] = useState<BarPoint[]>([]);
   useEffect(() => {
@@ -824,7 +828,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     const q = getQ(t); const n = Number(q.payAmt);
     if (q.payAmt === "" || isNaN(n) || n <= 0) return;
     const bill = t.payBill;
-    if (!bill) { setQ(t, { msg: "Link a scheduled payment first (loans: Edit on the Numbers tab)." }); return; }
+    if (!bill) { setQ(t, { msg: "Link a scheduled payment first (use Edit on this card)." }); return; }
     // The payment settles the earliest unpaid occurrence of this bill, so it leaves Need to collect.
     const occ = buildOccurrences([bill], allPayments, addDays(today, -35), monthEnd).filter((o) => !o.isPaid && o.direction === "outflow")[0];
     if (!occ) { setQ(t, { msg: "Nothing unpaid on this payment schedule right now." }); return; }
@@ -919,6 +923,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
                 <h3 className="font-bold text-base text-slate-800">{t.name}</h3>
                 <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 rounded-full px-2 py-0.5">{t.tag}</span>
                 <button onClick={() => setQ(t, { open: !getQ(t).open })} className="text-xs font-semibold text-orange-500 hover:underline">{getQ(t).open ? "Close" : "Update"}</button>
+                <button onClick={() => setEditTile({ kind: t.kind, key: t.key, name: t.name })} className="text-xs font-semibold text-slate-500 hover:text-slate-800 hover:underline">Edit</button>
               </div>
               <div>
                 <p className="text-3xl font-bold leading-tight" style={{ color: "#4A4238" }}>{t.balance != null ? formatUSD(t.balance) : "—"}</p>
@@ -1016,6 +1021,27 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
 
   return (
     <div className="space-y-3">
+      {/* Edit window for one account: its name, rates, payments and where it is paid from. Opened by the Edit link on its card. */}
+      {editTile && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-8" style={{ background: "rgba(15,23,42,0.35)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setEditTile(null); }}>
+          <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-lg text-slate-800">Edit {editTile.name}</h2>
+              <button onClick={() => setEditTile(null)} aria-label="Close" className="text-slate-400 hover:text-slate-700 text-xl leading-none px-2">×</button>
+            </div>
+            {editTile.kind === "loan" ? (
+              <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={null}
+                cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments}
+                focusDebtId={editTile.key} onFocusDone={() => setEditTile(null)} />
+            ) : (
+              <AccountsPanel allBills={allBills} latestBalances={latestBalances} refreshAll={refreshAll}
+                focus={{ kind: editTile.kind, id: editTile.key }} onDone={() => setEditTile(null)} />
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 1. Check a bill before paying — one compact row */}
       <div className="rounded-2xl px-5 py-3.5" style={{ background: "#e6f1f9" }}>
         <div className="flex flex-wrap items-end gap-3">
