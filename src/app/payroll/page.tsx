@@ -1699,7 +1699,7 @@ function HygieneBonusPanel() {
       const override = overrideMap[p.start];
       const payrollRow = entries.find((e) => e.personKey === `staff:${hygienistId}` && e.payPeriodStart === p.start);
       nextRows[p.start] = {
-        patientCount: override?.patientCount ?? payrollRow?.hygienePatientCount ?? 0,
+        patientCount: override && override.patientCount > 0 ? override.patientCount : payrollRow?.hygienePatientCount ?? 0,
         amountPaid: override?.amountPaid ?? 0,
       };
     }
@@ -1717,7 +1717,7 @@ function HygieneBonusPanel() {
     const periods = getPayPeriodsInYear(year);
     await Promise.all(periods.map((p) => saveHygieneBonusEntry({
       employeeId: hygienistId, payPeriodStart: p.start, payPeriodEnd: p.end,
-      patientCount: rows[p.start]?.patientCount ?? 0, amountPaid: rows[p.start]?.amountPaid ?? 0,
+      patientCount: (() => { const typed = rows[p.start]?.patientCount ?? 0; const fromPayroll = payrollEntries.find((e) => e.personKey === `staff:${hygienistId}` && e.payPeriodStart === p.start)?.hygienePatientCount ?? 0; return typed === fromPayroll ? 0 : typed; })(), amountPaid: rows[p.start]?.amountPaid ?? 0,
     })));
     setSaving(false);
     setSavedMsg("Saved.");
