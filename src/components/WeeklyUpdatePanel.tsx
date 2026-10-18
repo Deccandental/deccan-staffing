@@ -45,8 +45,10 @@ function Field({ label, title, width, children }: { label: React.ReactNode; titl
 const BANK_GRID = "minmax(130px,1.2fr) 110px 196px 110px 56px";
 
 export default function WeeklyUpdatePanel({
-  cashAccounts, cards, latestBalances, refreshAll, debtMonthlyCollections, charges, allBills, allPayments, loans,
+  cashAccounts, cards, latestBalances, refreshAll, debtMonthlyCollections, charges, allBills, allPayments, loans, section,
 }: {
+  /** Show just one part (used by the windows on the Overview). Leave out to show everything. */
+  section?: "accounts" | "debt" | "charges" | "goal" | "backfill" | "record";
   loans: Debt[];
   cashAccounts: CashAccount[];
   charges: CardCharge[];
@@ -204,23 +206,26 @@ export default function WeeklyUpdatePanel({
     : health.status === "fair" ? { bg: "#ffedd5", color: "#92400e", ring: "#f59e0b", label: "Needs attention", icon: "⚠️" }
     : { bg: "#fee2e2", color: "#991b1b", ring: "#dc2626", label: "Poor", icon: "🚨" };
 
+  const show = (k: string) => !section || section === k;
   const hdr = "flex items-center justify-between gap-2 mb-2 flex-wrap";
 
   return (
     <div className="space-y-3">
-      {/* Setup and recurring numbers live here. Balances and statements are updated on the Overview cards
-          (or with Update Numbers Now), so there is one place for each. */}
+      {!section && (
       <div className="rounded-xl px-4 py-2.5 text-sm" style={{ background: "#e6f1f9", color: "#0c4a6e" }}>
         This tab is for setting up accounts and changing their recurring details: rates, payments, where each is paid from, original amounts. Update balances and statements on the <strong>Overview</strong> cards, or with <strong>Update Numbers Now</strong>.
       </div>
+      )}
 
       {/* ---------- Bank accounts and credit cards: add, edit, close ---------- */}
+      {show("accounts") && (
       <div className={card}>
         <h2 className="font-bold text-sm text-slate-700 mb-2">Accounts</h2>
         <AccountsPanel allBills={allBills} latestBalances={latestBalances} refreshAll={refreshAll} />
       </div>
+      )}
 
-      {/* ---------- Open Dental and A/R: entered on the Overview cards; this is the read-only record ---------- */}
+      {show("record") && (
       <div className={card}>
         <div className={hdr}>
           <h2 className="font-bold text-sm text-slate-700">Open Dental &amp; A/R record</h2>
@@ -290,8 +295,9 @@ export default function WeeklyUpdatePanel({
           </div>
         )}
       </div>
+      )}
 
-      {/* ---------- Production goal — one line, detail on demand ---------- */}
+      {show("goal") && (
       <div className={card}>
         <div className="flex items-center gap-2 flex-wrap">
           <h2 className="font-bold text-sm text-slate-700 whitespace-nowrap">{goalYear} Goal</h2>
@@ -349,23 +355,28 @@ export default function WeeklyUpdatePanel({
           </div>
         )}
       </div>
+      )}
 
       {/* ---------- Debt — credit cards live only here ---------- */}
       {/* Debt — summary, every card and loan, and card warnings in one card */}
-      <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={debtMonthlyCollections}
-        cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments} />
+      {show("debt") && <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={debtMonthlyCollections}
+        cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments} />}
 
       {/* Card charges — the recurring charges the near-limit warning is projected from */}
+      {show("charges") && (
       <div>
         <h2 className="font-bold text-sm text-slate-700 mb-1">Card Charges</h2>
         <CardChargesPanel cards={cards} charges={charges} refreshAll={refreshAll} />
       </div>
+      )}
 
       {/* Backfill — past statement balances and past net production */}
+      {show("backfill") && (
       <div className={card}>
         <h2 className="font-bold text-sm text-slate-700 mb-2">Backfill Past Months</h2>
         <BackfillPanel accounts={cashAccounts} cards={cards} loans={loans} refreshAll={refreshAll} />
       </div>
+      )}
     </div>
   );
 }
