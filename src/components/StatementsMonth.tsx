@@ -92,7 +92,13 @@ const inputBorder = { borderColor: "#CFC6AF", minHeight: 44 };
 const lbl = "block text-xs font-bold text-slate-600 mb-1";
 
 // ---------------- Component ----------------
-export default function StatementsMonth({ finance, onAuthLost, onChanged }: { finance: boolean; onAuthLost?: () => void; onChanged?: () => void }) {
+export default function StatementsMonth({ finance, onAuthLost, onChanged, section }: {
+  finance: boolean; onAuthLost?: () => void; onChanged?: () => void;
+  /** "statements": only the bank, card and loan account statements. "bills": only vendor bills and invoices. Left out: both (the CPA page). */
+  section?: "statements" | "bills";
+}) {
+  const showAccts = section !== "bills";
+  const showVendorRows = section !== "statements";
   const [month, setMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
   const [data, setData] = useState<MonthData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -196,7 +202,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       // The file goes into whichever window is open; with none open it starts a new statement.
       if (acctDlg) setSFile(f);
       else if (addOpen) setAFile(f);
-      else if (!payFor && !editInv && !editStmt && !mergeDlg) openAdd({ file: f });
+      else if (!payFor && !editInv && !editStmt && !mergeDlg && showVendorRows) openAdd({ file: f });
     };
     window.addEventListener("dragover", over); window.addEventListener("drop", drop);
     return () => { window.removeEventListener("dragover", over); window.removeEventListener("drop", drop); };
@@ -783,9 +789,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const ACCT_CAT: Record<string, string> = { bank: "Bank", card: "Credit card", loan: "Loan" };
   const acctSort = (x: Acct, y: Acct) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: "base" });
   const acctVisible = (x: Acct) => filter === "all" && dueFilter === "all" && (!catFilter || catFilter === ACCT_CAT[x.kind]) && x.name.toLowerCase().includes(search.trim().toLowerCase());
-  const bankAccts = data.accounts.filter((x) => x.kind === "bank" && acctVisible(x)).sort(acctSort);
-  const cardAccts = data.accounts.filter((x) => x.kind === "card" && acctVisible(x)).sort(acctSort);
-  const loanAccts = data.accounts.filter((x) => x.kind === "loan" && acctVisible(x)).sort(acctSort);
+  const bankAccts = !showAccts ? [] : data.accounts.filter((x) => x.kind === "bank" && acctVisible(x)).sort(acctSort);
+  const cardAccts = !showAccts ? [] : data.accounts.filter((x) => x.kind === "card" && acctVisible(x)).sort(acctSort);
+  const loanAccts = !showAccts ? [] : data.accounts.filter((x) => x.kind === "loan" && acctVisible(x)).sort(acctSort);
   const acctRow = (a: Acct) => {
     const fs = data.files.filter((f) => f.account_kind === a.kind && f.account_id === a.id && f.doc_type !== "invoice");
     const filed = fs.find((f) => !f.no_statement), none = fs.find((f) => f.no_statement);
@@ -868,11 +874,11 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
 
       {/* Title row */}
       <div className="flex flex-wrap items-center justify-between gap-4 no-print">
-        <h1 className="m-0" style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 500, fontSize: 36, lineHeight: 1.15 }}>Statements</h1>
+        <h1 className="m-0" style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 500, fontSize: 36, lineHeight: 1.15 }}>{section === "statements" ? "Account statements" : section === "bills" ? "Bills & invoices" : "Statements"}</h1>
         <div className="flex items-center gap-5">
           <button type="button" onClick={() => load()} className="inline-flex items-center gap-2 font-semibold" style={{ color: QLINK, fontSize: 17, height: 44 }}><Icon d={P.refresh} size={20} />Update</button>
-          {finance && (
-            <button type="button" onClick={() => openAdd()} className="rounded-lg font-bold" style={{ background: ORANGE, color: INK, fontSize: 17, height: 48, padding: "0 26px" }}>Add statement</button>
+          {finance && showVendorRows && (
+            <button type="button" onClick={() => openAdd()} className="rounded-lg font-bold" style={{ background: ORANGE, color: INK, fontSize: 17, height: 48, padding: "0 26px" }}>{section === "bills" ? "Add bill / invoice" : "Add statement"}</button>
           )}
         </div>
       </div>
@@ -897,29 +903,29 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       {msg && <p className="text-sm font-semibold text-slate-600">{msg}</p>}
 
       {/* Cards: they filter the list too */}
-      <div className="flex flex-wrap gap-4 no-print">
+      {showVendorRows && <div className="flex flex-wrap gap-4 no-print">
         {card("all", "All statements", money(all.t), `Paid: ${money(all.p)}${credits > 0.004 ? ` · ${money(credits)} in credits` : ""}`, nBills)}
         {card("unpaid", "Still owed", money(all.o), `${nOver} overdue (${money(overAmt)})`, nUnpaid, "#8E1F1A")}
         {card("autopay", "On autopay", money(autoAmt), `${nAutoUnpaid} scheduled · ${nAuto - nAutoUnpaid} paid so far`, nAuto)}
         {card("waiting", "Waiting on", `${waitUnique.length} vendor${waitUnique.length === 1 ? "" : "s"}`, waitUnique.length === 0 ? "Nothing outstanding" : waitUnique.length <= 2 ? waitUnique.join(", ") : `${waitUnique.slice(0, 2).join(", ")} +${waitUnique.length - 2} more`, view.counts.waiting)}
-      </div>
+      </div>}
 
       {/* Waiting bar */}
-      {(waitNames.length > 0 || data.prevMissing.length > 0) && (
+      {((showVendorRows && waitNames.length > 0) || (showAccts && data.prevMissing.length > 0)) && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl no-print" style={{ background: "#FDEBC8", color: "#5E3306", padding: "8px 8px 8px 16px" }}>
           <span className="inline-flex" style={{ color: "#7A4208" }}><Icon d={P.clock} size={20} /></span>
           <div className="leading-snug" style={{ flex: "1 1 420px", fontSize: 15 }}>
-            {waitUnique.length > 0 && <div><strong>Waiting on {waitUnique.length} vendor{waitUnique.length === 1 ? "" : "s"} for {monthWord}:</strong> {waitText}. Add each one when it arrives, or skip it if you don’t expect one this month.</div>}
-            {data.prevMissing.length > 0 && <div className={waitUnique.length > 0 ? "mt-1" : ""}><strong>{FULL[Number(data.prevMonth.slice(5)) - 1]} account statements still missing:</strong> {[...data.prevMissing].sort((x, y) => x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" })).join(", ")}.</div>}
+            {showVendorRows && waitUnique.length > 0 && <div><strong>Waiting on {waitUnique.length} vendor{waitUnique.length === 1 ? "" : "s"} for {monthWord}:</strong> {waitText}. Add each one when it arrives, or skip it if you don’t expect one this month.</div>}
+            {showAccts && data.prevMissing.length > 0 && <div className={showVendorRows && waitUnique.length > 0 ? "mt-1" : ""}><strong>{FULL[Number(data.prevMonth.slice(5)) - 1]} account statements still missing:</strong> {[...data.prevMissing].sort((x, y) => x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" })).join(", ")}.</div>}
           </div>
           <div className="flex gap-2">
-            {waitUnique.length > 0 && <button type="button" onClick={() => setFilter("waiting")} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Show only waiting</button>}
-            {data.prevMissing.length > 0 && <button type="button" onClick={() => setMonth(data.prevMonth)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Go to {FULL[Number(data.prevMonth.slice(5)) - 1]}</button>}
+            {showVendorRows && waitUnique.length > 0 && <button type="button" onClick={() => setFilter("waiting")} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Show only waiting</button>}
+            {showAccts && data.prevMissing.length > 0 && <button type="button" onClick={() => setMonth(data.prevMonth)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Go to {FULL[Number(data.prevMonth.slice(5)) - 1]}</button>}
           </div>
         </div>
       )}
 
-      {finance && view.dupPairs.length > 0 && (
+      {finance && showVendorRows && view.dupPairs.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl no-print" style={{ background: "#E4ECF8", color: "#1B3A6B", padding: "8px 8px 8px 16px" }}>
           <div className="leading-snug" style={{ flex: "1 1 420px", fontSize: 15 }}>
             <strong>These may be the same vendor:</strong> {view.dupPairs.slice(0, 3).map((d, i) => <span key={d.from.id + d.into.id}>{i > 0 && "; "}{d.from.name} / {d.into.name}</span>)}. Merge them so their statements sit under one title.
@@ -929,9 +935,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       )}
 
       {/* Tabs */}
-      <div className="inline-flex self-start rounded-lg no-print" style={{ background: "#E9EBEF", padding: 4, gap: 2, border: `1px solid ${QBORDER}` }}>
+      {showVendorRows && <div className="inline-flex self-start rounded-lg no-print" style={{ background: "#E9EBEF", padding: 4, gap: 2, border: `1px solid ${QBORDER}` }}>
         {tabBtn("all", "All")}{tabBtn("unpaid", "Unpaid")}{tabBtn("paid", "Paid")}{tabBtn("waiting", "Waiting")}{tabBtn("autopay", "Autopay")}{tabBtn("skipped", "Skipped")}
-      </div>
+      </div>}
 
       {/* Toolbar + table */}
       <div className="bg-white overflow-hidden" style={{ border: `1px solid ${QBORDER}`, borderRadius: 10 }}>
@@ -942,20 +948,20 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
               <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" className="w-full bg-transparent focus:outline-none" style={{ fontSize: 17, color: QINK }} />
               <Icon d={P.search} size={22} />
             </label>
-            <label className="flex items-center gap-2 rounded-lg" style={{ width: 220, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px", color: QMUTED }}>
+            {showVendorRows && <label className="flex items-center gap-2 rounded-lg" style={{ width: 220, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px", color: QMUTED }}>
               <span className="sr-only">Filter by due date</span>
               <select value={dueFilter} onChange={(e) => setDueFilter(e.target.value as typeof dueFilter)} className="w-full bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 17, color: QINK }}>
                 <option value="all">All due dates</option><option value="overdue">Overdue</option><option value="week">Due in 7 days</option>
               </select>
               <Icon d={P.cal} size={22} />
-            </label>
-            <label className="flex items-center gap-2 rounded-lg" style={{ width: 260, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px" }}>
+            </label>}
+            {showVendorRows && <label className="flex items-center gap-2 rounded-lg" style={{ width: 260, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px" }}>
               <span className="sr-only">Filter by category</span>
               <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-full bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 17, color: QINK }}>
                 <option value="">All categories</option>
                 {[...allCats.filter((c) => c !== "Other"), "Bank", "Credit card", "Other"].map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
-            </label>
+            </label>}
           </div>
           <div className="flex items-center gap-5" style={{ color: QMUTED, fontSize: 16 }}>
             <span>1-{view.shown.length} of {view.shown.length}</span>
@@ -973,15 +979,15 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
             <colgroup><col style={{ width: "18%" }} /><col style={{ width: "9%" }} /><col style={{ width: "11%" }} /><col style={{ width: "14%" }} /><col style={{ width: "10%" }} /><col style={{ width: "12%" }} /><col style={{ width: "14%" }} /><col style={{ width: "12%" }} /></colgroup>
             <thead>
               <tr>
-                <th scope="col" style={thS}>Vendor</th><th scope="col" style={thS}>Inv #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Stmt / Due</th>
+                <th scope="col" style={thS}>{section === "statements" ? "Account" : "Vendor"}</th><th scope="col" style={thS}>Inv #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Stmt / Due</th>
                 <th scope="col" style={{ ...thS, textAlign: "right" }}>Amount</th><th scope="col" style={thS}>Status</th><th scope="col" style={thS}>Paid from</th><th scope="col" style={thS}>Action</th>
               </tr>
             </thead>
             <tbody>
               {(() => {
                 const vendorCats = view.cats.filter((c) => c !== "Loan");
-                const vendorRows = view.shown.filter((r) => r.cat !== "Loan");
-                const loanVendorRows = view.shown.filter((r) => r.cat === "Loan");
+                const vendorRows = showVendorRows ? view.shown.filter((r) => r.cat !== "Loan") : [];
+                const loanVendorRows = showVendorRows ? view.shown.filter((r) => r.cat === "Loan") : [];
                 // Loans: loan payments to a lender and the loan accounts' own statements, mixed alphabetically
                 const entries: { name: string; nodes: React.ReactNode[] }[] = [];
                 const byVendor = new Map<string, Row[]>();
@@ -1003,7 +1009,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
                     {bankAccts.length > 0 && (<>{mainBand("Banks", "Banks", `${bankAccts.length} account${bankAccts.length === 1 ? "" : "s"}`)}{!collapsed["main:Banks"] && bankAccts.map(acctRow)}</>)}
                     {cardAccts.length > 0 && (<>{mainBand("Cards", "Credit Cards", `${cardAccts.length} account${cardAccts.length === 1 ? "" : "s"}`)}{!collapsed["main:Cards"] && cardAccts.map(acctRow)}</>)}
                     {entries.length > 0 && (<>{mainBand("Loans", "Loans", `${loanCount} statement${loanCount === 1 ? "" : "s"}`)}{!collapsed["main:Loans"] && entries.map((e, i) => <Fragment key={`${e.name}:${i}`}>{e.nodes}</Fragment>)}</>)}
-                    {view.shown.length > 0 && (
+                    {showVendorRows && view.shown.length > 0 && (
                       <tr className="grand" style={{ background: QINK, color: "#fff" }}>
                         <td style={{ padding: 16, fontWeight: 700, fontSize: 16 }} colSpan={3}>{monthWord} total <span style={{ fontWeight: 400, fontSize: 13, opacity: 0.8 }}>· statements with an amount due</span></td><td />
                         <td style={{ padding: "16px 12px", textAlign: "right", fontWeight: 700, fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{money(grand.t)}</td>
@@ -1023,12 +1029,12 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
         </div>
       </div>
 
-      {finance && notExpected.length > 0 && (
+      {finance && showVendorRows && notExpected.length > 0 && (
         <p className="text-sm no-print" style={{ color: QMUTED }}>
           Only expected when they bill: {notExpected.map((x, i) => (<span key={x.id}>{i > 0 && ", "}{x.name} <button type="button" className="underline font-semibold" style={{ color: DEEP }} onClick={() => setExpect(x.id, "monthly")}>expect every month</button></span>))}
         </p>
       )}
-      {finance && <div className="flex items-center gap-2.5 text-sm no-print" style={{ color: QMUTED }}><Icon d={P.upload} />Drop statement PDFs anywhere on this page to file them.</div>}
+      {finance && <div className="flex items-center gap-2.5 text-sm no-print" style={{ color: QMUTED }}><Icon d={P.upload} />{showVendorRows ? "Drop statement PDFs anywhere on this page to file them." : "Open an account's File statement window, then drop the PDF there."}</div>}
 
       {/* ---------------- Add statement ---------------- */}
       {addOpen && modal(
