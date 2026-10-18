@@ -23,10 +23,12 @@ const lbl = "block text-xs font-semibold text-slate-500 mb-1";
 
 type Mode = null | { kind: "bank"; id?: string } | { kind: "card"; id?: string };
 
-export default function AccountsPanel({ allBills, latestBalances, refreshAll, focus, onDone }: {
+export default function AccountsPanel({ allBills, latestBalances, refreshAll, focus, onDone, addKind }: {
   allBills: RecurringBill[]; latestBalances: Record<string, BalanceCheck>; refreshAll: () => void;
   /** Edit just this one account (opened from its card on the Overview): no list, no add buttons. */
   focus?: { kind: "bank" | "card"; id: string }; onDone?: () => void;
+  /** Open the add form for this kind straight away (opened from a category's + Add button): no lists. */
+  addKind?: "bank" | "card";
 }) {
   const [banks, setBanks] = useState<CashAccount[]>([]);
   const [cards, setCards] = useState<CreditCard[]>([]);
@@ -74,6 +76,12 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll, fo
     setMode({ kind, id });
   }
 
+  const single = !!focus || !!addKind;
+  const [addStarted, setAddStarted] = useState(false);
+  useEffect(() => {
+    if (!addKind || addStarted) return;
+    setAddStarted(true); startAdd(addKind);
+  }, [addKind, addStarted, banks, cards]); // eslint-disable-line react-hooks/exhaustive-deps
   const [focusStarted, setFocusStarted] = useState(false);
   useEffect(() => {
     if (!focus || focusStarted) return;
@@ -148,11 +156,11 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll, fo
 
   return (
     <div className="space-y-3">
-      {!focus && <p className="text-xs text-slate-500">
+      {!single && <p className="text-xs text-slate-500">
         Add a new bank account or card, change its details, or close one that's no longer used. Closing keeps all its history and filed statements.
       </p>}
 
-      {!focus && <div className="flex flex-wrap gap-2">
+      {!single && <div className="flex flex-wrap gap-2">
         <button onClick={() => startAdd("bank")} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add bank account</button>
         <button onClick={() => startAdd("card")} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>+ Add credit card</button>
       </div>}
@@ -225,7 +233,7 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll, fo
       )}
       {msg && <p className="text-xs font-semibold text-slate-600">{msg}</p>}
 
-      {!focus && <div>
+      {!single && <div>
         <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Bank accounts</p>
         {banks.length === 0 && <p className="text-xs text-slate-400">None yet.</p>}
         {banks.map((a) => (
@@ -241,7 +249,7 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll, fo
         ))}
       </div>}
 
-      {!focus && <div>
+      {!single && <div>
         <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Credit cards</p>
         {cards.length === 0 && <p className="text-xs text-slate-400">None yet.</p>}
         {cards.map((c) => (
