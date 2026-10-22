@@ -5,7 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate from "@/components/AppIdentityGate";
 import AccessDenied from "@/components/AccessDenied";
 import { LeaveRequest, LeaveReason } from "@/types/leave";
-import { loadLeaveRequests, updateLeaveStatus, deleteLeaveRequest, countBusinessDays, isPaidLeaveReason } from "@/lib/leaveStore";
+import { loadLeaveRequests, updateLeaveStatus, deleteLeaveRequest, countBusinessDays, countLeaveDays, isPaidLeaveReason } from "@/lib/leaveStore";
 import { setUnavailable, clearUnavailable } from "@/lib/overrides";
 import { adjustLeaveBalance } from "@/lib/staffStore";
 import { supabase } from "@/lib/supabase";
@@ -140,7 +140,9 @@ function LeaveManagePageBody() {
 
   async function handleSaveEdit(req: LeaveRequest) {
     setProcessing(req.id);
-    const totalDays = countBusinessDays(editForm.startDate, editForm.endDate);
+    // Keep whichever halves the request already had, so editing the dates
+    // doesn't quietly turn a 2.5 day request back into 3 days.
+    const totalDays = countLeaveDays(editForm.startDate, editForm.endDate, req.startsMidday, req.endsMidday);
     if (req.status === "approved") {
       await removeFromAvailability(req);
     }
@@ -277,7 +279,17 @@ function LeaveManagePageBody() {
                         </td>
                         <td className="px-4 py-3">
                           <div style={{ color: "#5a5a5a" }}>{REASON_LABELS[req.reason]}</div>
-                          {req.isPartialDay && <div className="text-xs text-gray-400">{req.partialHours || "Partial day"}</div>}
+                          {(req.startsMidday || req.endsMidday) && (
+                            <div className="text-xs text-gray-400">
+                              {req.startDate === req.endDate
+                                ? (req.endsMidday ? "Morning only" : "Afternoon only")
+                                : [req.startsMidday ? "from midday on the first day" : null,
+                                   req.endsMidday ? "back at midday on the last day" : null].filter(Boolean).join(", ")}
+                            </div>
+                          )}
+                          {!req.startsMidday && !req.endsMidday && req.isPartialDay && req.partialHours && (
+                            <div className="text-xs text-gray-400">{req.partialHours}</div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-500">{req.totalDays}</td>
                         <td className="px-4 py-3">
@@ -315,7 +327,7 @@ function LeaveManagePageBody() {
                                   </div>
                                 </div>
                                 {editForm.startDate && editForm.endDate && (
-                                  <p className="text-xs text-gray-500">📅 {countBusinessDays(editForm.startDate, editForm.endDate)} working days</p>
+                                  <p className="text-xs text-gray-500">📅 {countLeaveDays(editForm.startDate, editForm.endDate, req.startsMidday, req.endsMidday)} working days</p>
                                 )}
                                 <div className="flex gap-2">
                                   <button onClick={() => handleSaveEdit(req)} disabled={processing === req.id}

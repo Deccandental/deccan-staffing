@@ -9,7 +9,9 @@ function rowToLeave(row: any): LeaveRequest {
     employeeEmail: row.employee_email,
     startDate: row.start_date,
     endDate: row.end_date,
-    isPartialDay: row.is_partial_day ?? false,
+    startsMidday: row.starts_midday ?? false,
+    endsMidday: row.ends_midday ?? false,
+    isPartialDay: (row.starts_midday ?? false) || (row.ends_midday ?? false) || (row.is_partial_day ?? false),
     partialHours: row.partial_hours ?? "",
     reason: row.reason,
     notes: row.notes ?? "",
@@ -37,8 +39,10 @@ export async function addLeaveRequest(req: Omit<LeaveRequest, "id" | "submittedA
     employee_email: req.employeeEmail,
     start_date: req.startDate,
     end_date: req.endDate,
-    is_partial_day: req.isPartialDay,
-    partial_hours: req.partialHours,
+    starts_midday: req.startsMidday,
+    ends_midday: req.endsMidday,
+    is_partial_day: req.startsMidday || req.endsMidday,
+    partial_hours: req.partialHours ?? "",
     reason: req.reason,
     notes: req.notes,
     total_days: req.totalDays,
@@ -54,11 +58,51 @@ export function isPaidLeaveReason(reason: LeaveReason): boolean {
   return reason === "pto" || reason === "sick";
 }
 
-// Sensible default for the editable "hours to be paid" field: a full day is
-// 8 hours, a partial day defaults to 4 — staff can adjust from there to the
-// exact hours they want paid.
-export function computeDefaultPaidHours(totalDays: number, isPartialDay: boolean): number {
-  return totalDays * (isPartialDay ? 4 : 8);
+// Sensible default for the editable "hours to be paid" field. totalDays now
+// already carries any half days as .5, so a flat 8 hours a day gives the
+// right answer for both — 2.5 days is 20 hours. Staff can still adjust it.
+export function computeDefaultPaidHours(totalDays: number): number {
+  return totalDays * 8;
+}
+
+/**
+ * Working days in a request, counting a half day as 0.5.
+ *
+ * Previously a morning off still counted as a whole day, so a half day of
+ * PTO cost a full day of balance.
+ */
+export function countLeaveDays(start: string, end: string, startsMidday: boolean, endsMidday: boolean): number {
+  const full = countBusinessDays(start, end);
+  if (full <= 0) return 0;
+  let days = full;
+  if (startsMidday) days -= 0.5;
+  if (endsMidday) days -= 0.5;
+  // A single day can only lose one half, never both.
+  return Math.max(0.5, days);
+}
+
+/**
+ * Which half of a given date someone is away for, or null when they are
+ * away the whole day. Used by the schedule and the availability grid so a
+ * half day removes them from the right half only.
+ */
+export function leaveHalfOnDate(
+  req: { startDate: string; endDate: string; startsMidday?: boolean; endsMidday?: boolean },
+  date: string
+): "AM" | "PM" | null {
+  if (date < req.startDate || date > req.endDate) return null;
+  if (req.startsMidday && date === req.startDate) return "PM";
+  if (req.endsMidday && date === req.endDate) return "AM";
+  return null;
+}
+
+/** True when the person is away the entire day — the case that blocks scheduling. */
+export function isFullDayLeave(
+  req: { startDate: string; endDate: string; startsMidday?: boolean; endsMidday?: boolean },
+  date: string
+): boolean {
+  if (date < req.startDate || date > req.endDate) return false;
+  return leaveHalfOnDate(req, date) === null;
 }
 
 export async function updateLeaveStatus(id: string, status: LeaveStatus, reviewNote?: string): Promise<void> {
