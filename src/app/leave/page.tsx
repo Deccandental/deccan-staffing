@@ -245,6 +245,15 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
 
       setSubmitted(true);
       await refresh();
+    } catch (err: any) {
+      // Without this the save threw, the error vanished, and the button
+      // simply did nothing — which looks identical to the page hanging.
+      const msg = String(err?.message ?? err ?? "");
+      setError(
+        /starts_midday|ends_midday|column .* does not exist/i.test(msg)
+          ? "Couldn't save: the database is missing the half-day columns. Run the leave_half_days.sql migration in Supabase, then try again."
+          : `Couldn't save your request: ${msg || "unknown error"}. Please try again, or tell Dr. Nanjapa if it keeps happening.`
+      );
     } finally {
       setIsSubmitting(false);
     }
