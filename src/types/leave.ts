@@ -8,8 +8,14 @@ export interface LeaveRequest {
   employeeEmail: string;
   startDate: string;
   endDate: string;
-  isPartialDay: boolean;
-  partialHours?: string;
+  // Half days are only ever the first or last day of a request. Someone
+  // leaving at midday is away that afternoon; someone back at midday is away
+  // that morning. Days in between are always full, which keeps an extended
+  // break down to two choices instead of one per day.
+  startsMidday: boolean;  // away the AFTERNOON of startDate
+  endsMidday: boolean;    // away the MORNING of endDate
+  isPartialDay: boolean;  // derived: either half is set
+  partialHours?: string;  // legacy free text from before halves were structured
   reason: LeaveReason;
   notes: string;
   status: LeaveStatus;

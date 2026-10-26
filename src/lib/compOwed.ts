@@ -161,7 +161,7 @@ export async function hygieneYearDetail(employeeId: number, y: number): Promise<
   return getPayPeriodsInYear(y).map((p) => {
     const o = byStart.get(p.start);
     const row = payroll.find((r) => r.personKey === `staff:${employeeId}` && r.payPeriodStart === p.start);
-    const patients = o?.patientCount ?? row?.hygienePatientCount ?? 0;
+    const patients = o && o.patientCount > 0 ? o.patientCount : row?.hygienePatientCount ?? 0;
     return { start: p.start, label: p.label, payDate: p.payDate, patients, earned: patients * HYGIENE_BONUS_PER_PATIENT, paid: o?.amountPaid ?? 0 };
   });
 }

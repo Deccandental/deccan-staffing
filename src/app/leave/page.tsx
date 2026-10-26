@@ -5,7 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { loadStaff } from "@/lib/staffStore";
 import { Employee } from "@/types/employee";
 import { LeaveReason, LeaveRequest } from "@/types/leave";
-import { addLeaveRequest, loadLeaveRequests, cancelLeaveRequest, deleteLeaveRequest, countBusinessDays, validateNoticePeriod, isPaidLeaveReason, computeDefaultPaidHours } from "@/lib/leaveStore";
+import { addLeaveRequest, loadLeaveRequests, cancelLeaveRequest, deleteLeaveRequest, countBusinessDays, countLeaveDays, validateNoticePeriod, isPaidLeaveReason, computeDefaultPaidHours } from "@/lib/leaveStore";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { StaffEvent, loadUpcomingEvents } from "@/lib/eventsStore";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -62,7 +62,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
     employeeId: !isManager ? String(identity.employeeId ?? "") : "",
     employeeEmail: !isManager ? (identity.employeeEmail ?? "") : "",
     startDate: "", endDate: "",
-    isPartialDay: false, partialHours: "", reason: "pto" as LeaveReason, notes: "",
+    startsMidday: false, endsMidday: false, reason: "pto" as LeaveReason, notes: "",
     paidHours: 0,
   });
 
@@ -94,7 +94,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
   }
 
   const selectedEmployee = staff.find((e) => e.id === Number(form.employeeId));
-  const totalDays = form.startDate && form.endDate ? countBusinessDays(form.startDate, form.endDate) : 0;
+  const totalDays = form.startDate && form.endDate ? countLeaveDays(form.startDate, form.endDate, form.startsMidday, form.endsMidday) : 0;
 
   const balanceWarning = useMemo(() => {
     if (!selectedEmployee || !isPaidLeaveReason(form.reason) || !form.paidHours) return "";
@@ -192,16 +192,29 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
   function handleDateChange(field: "startDate" | "endDate", value: string) {
     const updated = { ...form, [field]: value };
     if (updated.startDate && updated.endDate) {
-      const days = countBusinessDays(updated.startDate, updated.endDate);
-      updated.paidHours = computeDefaultPaidHours(days, updated.isPartialDay);
+      const days = countLeaveDays(updated.startDate, updated.endDate, updated.startsMidday, updated.endsMidday);
+      updated.paidHours = computeDefaultPaidHours(days);
       setNoticeWarning(validateNoticePeriod(updated.startDate, days) ?? "");
     }
     setForm(updated);
   }
 
-  function handlePartialDayToggle(isPartialDay: boolean) {
-    const days = form.startDate && form.endDate ? countBusinessDays(form.startDate, form.endDate) : 0;
-    setForm((f) => ({ ...f, isPartialDay, paidHours: computeDefaultPaidHours(days, isPartialDay) }));
+  // Ticking a half changes the day count, so the paid hours default has to
+  // follow it rather than stay at the whole-day figure.
+  function handleHalfToggle(field: "startsMidday" | "endsMidday", value: boolean) {
+    setForm((f) => {
+      const updated = { ...f, [field]: value };
+      // A single-day request can only be one half or the other.
+      if (value && updated.startDate === updated.endDate) {
+        updated.startsMidday = field === "startsMidday";
+        updated.endsMidday = field === "endsMidday";
+      }
+      const days = updated.startDate && updated.endDate
+        ? countLeaveDays(updated.startDate, updated.endDate, updated.startsMidday, updated.endsMidday)
+        : 0;
+      updated.paidHours = computeDefaultPaidHours(days);
+      return updated;
+    });
   }
 
   async function handleSubmit() {
@@ -217,7 +230,8 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
       const req = await addLeaveRequest({
         employeeId: Number(form.employeeId), employeeName: selectedEmployee?.name ?? "",
         employeeEmail: form.employeeEmail, startDate: form.startDate, endDate: form.endDate,
-        isPartialDay: form.isPartialDay, partialHours: form.partialHours,
+        startsMidday: form.startsMidday, endsMidday: form.endsMidday,
+        isPartialDay: form.startsMidday || form.endsMidday,
         reason: form.reason, notes: form.notes, totalDays,
         paidHours: isPaidLeaveReason(form.reason) ? form.paidHours : undefined,
       });
@@ -231,6 +245,15 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
 
       setSubmitted(true);
       await refresh();
+    } catch (err: any) {
+      // Without this the save threw, the error vanished, and the button
+      // simply did nothing — which looks identical to the page hanging.
+      const msg = String(err?.message ?? err ?? "");
+      setError(
+        /starts_midday|ends_midday|column .* does not exist/i.test(msg)
+          ? "Couldn't save: the database is missing the half-day columns. Run the leave_half_days.sql migration in Supabase, then try again."
+          : `Couldn't save your request: ${msg || "unknown error"}. Please try again, or tell Dr. Nanjapa if it keeps happening.`
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -428,7 +451,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                 <h2 className="text-xl font-bold mb-2" style={{ color: "#5a5a5a" }}>Request Submitted!</h2>
                 <p className="text-gray-400 mb-6 text-sm">Your request has been sent to Dr. Nanjapa for approval.</p>
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                  <button onClick={() => { setSubmitted(false); setForm({ ...form, startDate: "", endDate: "", notes: "", isPartialDay: false, partialHours: "", paidHours: 0 }); }}
+                  <button onClick={() => { setSubmitted(false); setForm({ ...form, startDate: "", endDate: "", notes: "", startsMidday: false, endsMidday: false, paidHours: 0 }); }}
                     className="rounded-xl px-6 py-2.5 text-sm font-semibold text-white" style={{ backgroundColor: "#e8622a" }}>Submit Another</button>
                   <button onClick={() => setView("my")} className="rounded-xl border border-gray-200 px-6 py-2.5 text-sm font-semibold text-gray-500 hover:bg-gray-50">View My Requests</button>
                 </div>
@@ -479,16 +502,64 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                   </ul>
                   {noticeWarning && <p className="text-xs text-amber-600 mt-2 font-medium">⚠️ {noticeWarning}</p>}
                 </div>
-                <div>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input type="checkbox" checked={form.isPartialDay} onChange={(e) => handlePartialDayToggle(e.target.checked)} className="h-5 w-5 rounded" />
-                    <span className="text-sm font-medium text-gray-500">Partial day(s)</span>
-                  </label>
-                  {form.isPartialDay && (
-                    <input type="text" value={form.partialHours} onChange={(e) => setForm((f) => ({ ...f, partialHours: e.target.value }))}
-                      placeholder="e.g. Morning only, or 8:30am – 1pm" className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
-                  )}
-                </div>
+                {/* Half days are offered only on the first and last day. A
+                    single date gets a straight morning-or-afternoon choice;
+                    a range gets at most two ticks, so a long break never
+                    turns into a decision per day. */}
+                {form.startDate && form.endDate && (
+                  form.startDate === form.endDate ? (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500 mb-2">How much of the day?</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          { key: "full", label: "All day" },
+                          { key: "AM", label: "Morning only" },
+                          { key: "PM", label: "Afternoon only" },
+                        ] as const).map((opt) => {
+                          const active = opt.key === "full" ? (!form.startsMidday && !form.endsMidday)
+                            : opt.key === "AM" ? form.endsMidday : form.startsMidday;
+                          return (
+                            <button key={opt.key}
+                              onClick={() => {
+                                if (opt.key === "full") { handleHalfToggle("startsMidday", false); handleHalfToggle("endsMidday", false); }
+                                else if (opt.key === "AM") handleHalfToggle("endsMidday", true);
+                                else handleHalfToggle("startsMidday", true);
+                              }}
+                              className="rounded-xl border px-3 py-3 text-sm font-medium transition"
+                              style={active ? { backgroundColor: "#e8622a", borderColor: "#e8622a", color: "white" } : { borderColor: "#e5e7eb", color: "#6b7280" }}>
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500 mb-2">Half days (optional)</label>
+                      <div className="space-y-2">
+                        <label className="flex items-center gap-3 cursor-pointer rounded-xl border border-gray-200 px-4 py-3">
+                          <input type="checkbox" checked={form.startsMidday} onChange={(e) => handleHalfToggle("startsMidday", e.target.checked)} className="h-5 w-5 rounded" />
+                          <span className="text-sm text-gray-600">
+                            Leaving at midday on the first day
+                            <span className="block text-xs text-gray-400">
+                              Away the afternoon of {new Date(form.startDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                            </span>
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-3 cursor-pointer rounded-xl border border-gray-200 px-4 py-3">
+                          <input type="checkbox" checked={form.endsMidday} onChange={(e) => handleHalfToggle("endsMidday", e.target.checked)} className="h-5 w-5 rounded" />
+                          <span className="text-sm text-gray-600">
+                            Back at midday on the last day
+                            <span className="block text-xs text-gray-400">
+                              Away the morning of {new Date(form.endDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-2">Days in between are always full days.</p>
+                    </div>
+                  )
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-2">Reason</label>
                   <div className="grid grid-cols-2 gap-2">
@@ -506,7 +577,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
                     <label className="block text-sm font-medium text-gray-500 mb-1">Hours to be paid</label>
                     <input type="number" onFocus={(e) => e.target.select()} value={form.paidHours} onChange={(e) => setForm((f) => ({ ...f, paidHours: Number(e.target.value) }))}
                       className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none" style={{ fontSize: 16 }} />
-                    <p className="text-xs text-gray-400 mt-1">Defaults to {form.isPartialDay ? "4" : "8"} hours per day — adjust to the exact hours you want paid.</p>
+                    <p className="text-xs text-gray-400 mt-1">Defaults to 8 hours per full day and 4 for a half day ({totalDays} day{totalDays === 1 ? "" : "s"} here) — adjust to the exact hours you want paid.</p>
                     {selectedEmployee && (
                       <p className="text-xs text-gray-400 mt-1">
                         Current {form.reason === "pto" ? "PTO" : "sick"} balance: {form.reason === "pto" ? (selectedEmployee.ptoBalanceHours ?? 0) : (selectedEmployee.sickBalanceHours ?? 0)} hours

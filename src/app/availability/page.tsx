@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { loadLeaveRequests } from "@/lib/leaveStore";
+import { leaveHalfOnDate, loadLeaveRequests } from "@/lib/leaveStore";
 import { LeaveRequest } from "@/types/leave";
 import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate from "@/components/AppIdentityGate";
@@ -207,7 +207,10 @@ function AvailabilityPageBody() {
                               const isFullDay = override && !override.halfDay && !isRemote;
                               const isHalfAM = override?.halfDay === "AM";
                               const isHalfPM = override?.halfDay === "PM";
-                              const isHalfFromLeave = !!approvedReqForDate?.isPartialDay && !override;
+                              // Which half the request actually covers, so the cell
+                              // shades the correct side instead of a generic half.
+                              const leaveHalf = approvedReqForDate ? leaveHalfOnDate(approvedReqForDate, d.date) : null;
+                              const isHalfFromLeave = !!leaveHalf && !override;
                               // A full-day override that lines up with an approved request (of
                               // either kind) is treated as request-backed too, so a manual click
                               // here can't silently desync from the actual approved request —
@@ -222,7 +225,7 @@ function AvailabilityPageBody() {
                                 : isFullDay ? `${override?.reason} — full day out. Click to clear.`
                                 : isHalfAM ? `AM off (${override?.reason}). Click for PM off.`
                                 : isHalfPM ? `PM off (${override?.reason}). Click for full day.`
-                                : isHalfFromLeave ? "Half day from an approved leave request. Change it in Manage Leave."
+                                : isHalfFromLeave ? `Away the ${leaveHalf === "AM" ? "morning" : "afternoon"} — from an approved leave request. Change it in Manage Leave.`
                                 : "Click: AM off → PM off → Full day → Clear";
 
                               return (
@@ -265,9 +268,11 @@ function AvailabilityPageBody() {
                                     <div title={tooltip}
                                       className="mx-auto h-8 w-8 rounded border flex items-center justify-center relative overflow-hidden cursor-default"
                                       style={{ border: "1px solid #93c5fd" }}>
-                                      <div style={{ position: "absolute", top: 0, left: 0, width: "50%", height: "100%", background: "#dbeafe" }} />
-                                      <div style={{ position: "absolute", top: 0, right: 0, width: "50%", height: "100%", background: "#bbf7d0" }} />
-                                      <span style={{ position: "relative", zIndex: 1, fontSize: 9, color: "#1e40af", fontWeight: 700 }}>½</span>
+                                      {/* Shade the half they're away; the other half stays
+                                          green to show they're in. */}
+                                      <div style={{ position: "absolute", top: 0, left: 0, width: "50%", height: "100%", background: leaveHalf === "AM" ? "#dbeafe" : "#bbf7d0" }} />
+                                      <div style={{ position: "absolute", top: 0, right: 0, width: "50%", height: "100%", background: leaveHalf === "PM" ? "#dbeafe" : "#bbf7d0" }} />
+                                      <span style={{ position: "relative", zIndex: 1, fontSize: 8, color: "#1e40af", fontWeight: 700 }}>{leaveHalf}</span>
                                       <span className="absolute -top-1 -right-1 text-[9px] leading-none" style={{ zIndex: 2 }}>🔒</span>
                                     </div>
                                   ) : (

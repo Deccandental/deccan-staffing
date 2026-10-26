@@ -41,7 +41,6 @@ export async function POST(req: NextRequest) {
     const known = new Set(vendorsAll.map((v: any) => String(v.name).trim().toLowerCase()));
     const usedNames = [...new Set((typed ?? []).map((r: any) => String(r.account_name).trim()))].filter((n) => n && !known.has(n.toLowerCase())).sort();
     // A partly paid statement counts only for what is still owed, so Cash Flow doesn't count the paid part twice.
-<<<<<<< HEAD
     // Cash Flow also needs the account each vendor's statements are usually paid from (a remembered setting).
     const usual: Record<string, { kind: string; id: string; name: string }> = {};
     if (body.unpaid) {
@@ -54,11 +53,6 @@ export async function POST(req: NextRequest) {
       if (!body.unpaid) return out;
       const u = usual[`vendor:${rest.account_id}`];
       return { ...out, usual_from_kind: u?.kind ?? null, usual_from_id: u?.id ?? null, usual_from_name: u?.name ?? "" };
-=======
-    const filesOut = ((inv.data ?? []) as any[]).map((r) => {
-      const { file_path, ...rest } = r; void file_path;
-      return body.unpaid && Number(rest.paid_amount ?? 0) > 0 ? { ...rest, amount: Math.max(0, Number(rest.amount ?? 0) - Number(rest.paid_amount)) } : rest;
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     });
     return NextResponse.json({ role: acc.role, month, files: filesOut, vendors, vendorsAll, usedNames, categories });
   }

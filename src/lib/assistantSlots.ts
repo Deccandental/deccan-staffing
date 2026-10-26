@@ -1,5 +1,6 @@
 import { Employee } from "@/types/employee";
 import { AssistantOverrideValue, AssistantOverrides } from "./scheduleStore";
+import { isFullDayLeave } from "./leaveStore";
 
 /**
  * Resolves the final list of assistants for one dentist on one day, combining:
@@ -97,10 +98,11 @@ export function resolveFloater(
 export function isOnApprovedLeave(
   employeeId: number,
   date: string,
-  leaveRequests: { employeeId: number; status: string; isPartialDay?: boolean; startDate: string; endDate: string }[]
+  leaveRequests: { employeeId: number; status: string; startsMidday?: boolean; endsMidday?: boolean; startDate: string; endDate: string }[]
 ): boolean {
+  // Judged per date: a request whose first day is a half still has full days
+  // after it, and those must count as away.
   return leaveRequests.some((r) =>
-    r.employeeId === employeeId && r.status === "approved" && !r.isPartialDay &&
-    r.startDate <= date && r.endDate >= date
+    r.employeeId === employeeId && r.status === "approved" && isFullDayLeave(r, date)
   );
 }

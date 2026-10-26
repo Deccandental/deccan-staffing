@@ -92,7 +92,13 @@ const inputBorder = { borderColor: "#CFC6AF", minHeight: 44 };
 const lbl = "block text-xs font-bold text-slate-600 mb-1";
 
 // ---------------- Component ----------------
-export default function StatementsMonth({ finance, onAuthLost, onChanged }: { finance: boolean; onAuthLost?: () => void; onChanged?: () => void }) {
+export default function StatementsMonth({ finance, onAuthLost, onChanged, section }: {
+  finance: boolean; onAuthLost?: () => void; onChanged?: () => void;
+  /** "statements": only the bank, card and loan account statements. "bills": only vendor bills and invoices. Left out: both (the CPA page). */
+  section?: "statements" | "bills";
+}) {
+  const showAccts = section !== "bills";
+  const showVendorRows = section !== "statements";
   const [month, setMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
   const [data, setData] = useState<MonthData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -145,18 +151,13 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const [eNumber, setENumber] = useState("");
   const [eAmount, setEAmount] = useState("");
   const [eCat, setECat] = useState("");
-<<<<<<< HEAD
   const [eFrom, setEFrom] = useState("");   // "usually paid from" for this vendor, e.g. bank:12
-=======
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   const [eErr, setEErr] = useState("");
 
   // Merge two vendors that are really one
   const [mergeDlg, setMergeDlg] = useState<{ fromId: string; intoId: string } | null>(null);
   const [mErr, setMErr] = useState("");
 
-<<<<<<< HEAD
-=======
   // Edit a filed statement (date / month and amount)
   const [editStmt, setEditStmt] = useState<FileRow | null>(null);
   const [stDate, setStDate] = useState("");
@@ -164,7 +165,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const [stErr, setStErr] = useState("");
   const [boxOver, setBoxOver] = useState(false);
 
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   // Account statement (bank / card / loan)
   const [acctDlg, setAcctDlg] = useState<Acct | null>(null);
   const [sAmount, setSAmount] = useState("");
@@ -199,14 +199,10 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       const f: File | undefined = e.dataTransfer?.files?.[0];
       if (!f) return;
       if (!/\.pdf$/i.test(f.name)) { setMsg("Only PDF files can be dropped here."); return; }
-<<<<<<< HEAD
-      if (!addOpen) openAdd({ file: f }); else setAFile(f);
-=======
       // The file goes into whichever window is open; with none open it starts a new statement.
       if (acctDlg) setSFile(f);
       else if (addOpen) setAFile(f);
-      else if (!payFor && !editInv && !editStmt && !mergeDlg) openAdd({ file: f });
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
+      else if (!payFor && !editInv && !editStmt && !mergeDlg && showVendorRows) openAdd({ file: f });
     };
     window.addEventListener("dragover", over); window.addEventListener("drop", drop);
     return () => { window.removeEventListener("dragover", over); window.removeEventListener("drop", drop); };
@@ -370,11 +366,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     const p = view.prefMap[`vendor:${s.id}`];
     setACat(view.catFor(s.id));
     setAAuto(!!p?.autopay);
-<<<<<<< HEAD
     setAAutoFrom(p?.autopayFromId ? `${p.autopayFromKind}:${p.autopayFromId}` : "");
-=======
-    setAAutoFrom(p?.autopay && p.autopayFromId ? `${p.autopayFromKind}:${p.autopayFromId}` : "");
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   }
   function openAdd(opts?: { vendor?: string; file?: File }) {
     setAFile(opts?.file ?? null); setAVendor(""); setACat(""); setAInv(""); setADate(defaultDate()); setADue(""); setAAmount("");
@@ -420,11 +412,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       action: "confirm", docType: "invoice", path: slot.json.path, accountKind: "vendor", accountId: vendor.id, accountName: vendor.name,
       invoiceDate: aDate, invoiceNumber: aInv, amount: num(aAmount), fileName: aFile.name, size: aFile.size, dupIgnored: ignoreDup,
       matchedBillId: aMatch?.billId, matchedDueDate: aMatch?.dueDate, category: aCat, dueDate: aDue || undefined,
-<<<<<<< HEAD
-      autopay: aAuto, paidFromKind: autoAcct?.kind, paidFromId: autoAcct?.id, paidFromName: autoAcct?.name,   // also remembered as the account this vendor is usually paid from
-=======
       autopay: aAuto, paidFromKind: autoAcct?.kind, paidFromId: autoAcct?.id, paidFromName: autoAcct?.name,
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     });
     setBusy(false);
     if (!rec.ok) { setAErr(rec.json.error ?? "Couldn't record the statement."); return; }
@@ -520,10 +508,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   function openEdit(f: FileRow) {
     setEErr(""); setEVendor(f.account_id); setEDate(f.invoice_date ?? `${f.month}-01`); setEDue(f.due_date ?? ""); setENumber(f.invoice_number ?? "");
     setEAmount(f.amount != null ? String(f.amount) : ""); setECat(view?.catFor(f.account_id, f.category) ?? ""); setEditInv(f);
-<<<<<<< HEAD
     const pf = view?.prefMap[`vendor:${f.account_id}`]; setEFrom(pf?.autopayFromId ? `${pf.autopayFromKind}:${pf.autopayFromId}` : "");
-=======
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   }
   async function saveEdit(ignoreDup = false) {
     if (!editInv) return;
@@ -531,13 +516,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (!eNumber.trim()) { setEErr("Enter the invoice number."); return; }
     if (!isNum(eAmount)) { setEErr("Enter the amount."); return; }
     setBusy(true); setEErr("");
-<<<<<<< HEAD
     const eFromAcct = eFrom && data && !editInv.paid && !editInv.autopay ? data.payAccounts.find((a) => `${a.kind}:${a.id}` === eFrom) : undefined;
     const r = await api("/api/statements/manage", { action: "editInvoice", id: editInv.id, accountId: eVendor, invoiceDate: eDate, dueDate: eDue, invoiceNumber: eNumber, amount: num(eAmount), category: eCat, ignoreDup,
       ...(eFromAcct ? { usualFromKind: eFromAcct.kind, usualFromId: eFromAcct.id, usualFromName: eFromAcct.name } : {}) });
-=======
-    const r = await api("/api/statements/manage", { action: "editInvoice", id: editInv.id, accountId: eVendor, invoiceDate: eDate, dueDate: eDue, invoiceNumber: eNumber, amount: num(eAmount), category: eCat, ignoreDup });
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     setBusy(false);
     if (r.status === 409 && r.json.error === "duplicate") {
       const m = (r.json.matches ?? [])[0];
@@ -550,8 +531,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (nm !== month) setMonth(nm); else changed();
   }
 
-<<<<<<< HEAD
-=======
   // ---------------- Edit a filed statement ----------------
   const isAcctKind = (f: FileRow) => f.account_kind === "bank" || f.account_kind === "card" || f.account_kind === "loan";
   function openEditStmt(f: FileRow) {
@@ -575,7 +554,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (nm !== month) setMonth(nm); else changed();
   }
 
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   // ---------------- Account statements (bank / card / loan) ----------------
   function openAcct(a: Acct) { setAcctDlg(a); setSFile(null); setSErr(""); setSAmount(data?.cfBalances[`${a.kind}:${a.id}`] != null ? String(data.cfBalances[`${a.kind}:${a.id}`]) : ""); }
   async function fileAcct(ignoreDup = false) {
@@ -640,13 +618,8 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
 
   // ---- the table look: flat grid, pale blue-grey header, thin lines between columns and rows ----
   const QINK = "#393A3D", QMUTED = "#6B6C72", QBORDER = "#D4D7DC", QROW = "#E3E5E8", QHEAD = "#E6ECF3", QLINK = "#0A5EB0";
-<<<<<<< HEAD
-  const cell: React.CSSProperties = { height: 52, padding: "6px 12px", verticalAlign: "middle", borderTop: `1px solid ${QROW}`, borderRight: `1px solid ${QBORDER}` };
-  const thS: React.CSSProperties = { padding: "14px 12px", fontSize: 15, fontWeight: 700, color: QINK, background: QHEAD, borderRight: "1px solid #fff", textAlign: "left" };
-=======
   const cell: React.CSSProperties = { height: 48, padding: "6px 8px", verticalAlign: "middle", borderTop: `1px solid ${QROW}`, borderRight: `1px solid ${QBORDER}` };
   const thS: React.CSSProperties = { padding: "12px 8px", fontSize: 14, fontWeight: 700, color: QINK, background: QHEAD, borderRight: "1px solid #fff", textAlign: "left" };
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
   const dash = <span style={{ color: "#8a8b90" }}>—</span>;
   const tabBtn = (fl: Filter, label: string) => (
     <button key={fl} type="button" onClick={() => setFilter(fl)} aria-pressed={filter === fl}
@@ -694,15 +667,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
     if (Number(f.paid_amount ?? 0) > 0) return <div style={{ ...clip, color: "#9A5B00", fontWeight: 600 }}>Partial · {money(owedOf(f)).replace(/\.00$/, "")} left</div>;
     if (f.due_date) {
       const n = daysBetween(f.due_date, today);
-<<<<<<< HEAD
-      if (n < 0) return <Pill text={`Overdue ${-n} days`} bg="#FADBD8" fg="#8E1F1A" />;
-      if (n === 0) return <Pill text="Due today" bg="#FDEBC8" fg="#7A4208" />;
-      if (n <= 7) return <Pill text={`Due in ${n} days`} bg="#FDEBC8" fg="#7A4208" />;
-=======
       if (n < 0) return <Pill text={`${-n}d overdue`} bg="#FADBD8" fg="#8E1F1A" />;
       if (n === 0) return <Pill text="Due today" bg="#FDEBC8" fg="#7A4208" />;
       if (n <= 7) return <Pill text={`Due in ${n}d`} bg="#FDEBC8" fg="#7A4208" />;
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     }
     return <span style={{ color: QMUTED }}>Unpaid</span>;
   };
@@ -760,17 +727,10 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       return (
         <tr key={`w:${r.vendorId}`}>
           {vendorCell(r, showName)}<td style={cell}>{dash}</td>{categoryCell(r)}
-<<<<<<< HEAD
-          <td style={{ ...cell, color: QMUTED, fontStyle: "italic" }} colSpan={2}><div style={clip}>{MON[Number(month.slice(5)) - 1]} stmt hasn’t come in yet</div></td>
-          <td style={cell}><Pill text="Waiting" bg="#E8EAED" fg="#3d3e42" /></td>
-          <td style={cell}>{dash}</td>
-          <td style={cell}>{finance && actionCell(`w:${r.vendorId}`, "Add stmt", () => openAdd({ vendor: r.vendor }), [
-=======
           <td style={{ ...cell, color: QMUTED, fontStyle: "italic" }} colSpan={2}><div style={clip}>{monthWord} statement hasn’t come in yet</div></td>
           <td style={cell}><Pill text="Waiting" bg="#E8EAED" fg="#3d3e42" /></td>
           <td style={cell}>{dash}</td>
           <td style={cell}>{finance && actionCell(`w:${r.vendorId}`, "Add statement", () => openAdd({ vendor: r.vendor }), [
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
             { label: "Skip this month", onClick: () => skipVendor(r.vendorId, r.vendor) },
             { label: "Only expect when they bill", onClick: () => setExpect(r.vendorId, "never") },
             ...vendorItems(r.vendorId, r.vendor),
@@ -796,11 +756,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
           <td style={cell}><div style={clip}>{dlabel(f.invoice_date ?? `${f.month}-01`)}</div></td>
           <td style={{ ...cell, textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(f.amount)}</td>
           <td style={cell}>{dash}</td><td style={cell}>{dash}</td>
-<<<<<<< HEAD
-          <td style={cell}>{f.file_name ? actionCell(`d:${f.id}`, "View PDF", () => download(f), finance ? [{ label: "Delete", onClick: () => removeFile(f), danger: true }] : []) : null}</td>
-=======
           <td style={cell}>{f.file_name ? actionCell(`d:${f.id}`, "View PDF", () => download(f), finance ? [{ label: "Edit date / amount", onClick: () => openEditStmt(f) }, { label: "Delete", onClick: () => removeFile(f), danger: true }] : []) : finance ? actionCell(`d:${f.id}`, "Edit", () => openEditStmt(f), [{ label: "Delete", onClick: () => removeFile(f), danger: true }]) : null}</td>
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
         </tr>
       );
     }
@@ -833,24 +789,18 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   const ACCT_CAT: Record<string, string> = { bank: "Bank", card: "Credit card", loan: "Loan" };
   const acctSort = (x: Acct, y: Acct) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: "base" });
   const acctVisible = (x: Acct) => filter === "all" && dueFilter === "all" && (!catFilter || catFilter === ACCT_CAT[x.kind]) && x.name.toLowerCase().includes(search.trim().toLowerCase());
-  const bankAccts = data.accounts.filter((x) => x.kind === "bank" && acctVisible(x)).sort(acctSort);
-  const cardAccts = data.accounts.filter((x) => x.kind === "card" && acctVisible(x)).sort(acctSort);
-  const loanAccts = data.accounts.filter((x) => x.kind === "loan" && acctVisible(x)).sort(acctSort);
+  const bankAccts = !showAccts ? [] : data.accounts.filter((x) => x.kind === "bank" && acctVisible(x)).sort(acctSort);
+  const cardAccts = !showAccts ? [] : data.accounts.filter((x) => x.kind === "card" && acctVisible(x)).sort(acctSort);
+  const loanAccts = !showAccts ? [] : data.accounts.filter((x) => x.kind === "loan" && acctVisible(x)).sort(acctSort);
   const acctRow = (a: Acct) => {
     const fs = data.files.filter((f) => f.account_kind === a.kind && f.account_id === a.id && f.doc_type !== "invoice");
     const filed = fs.find((f) => !f.no_statement), none = fs.find((f) => f.no_statement);
     const late = month < data.currentMonth;
     const status = filed ? <Pill text="Filed" bg="#E3F3E9" fg="#14532D" /> : none ? <Pill text="No statement" bg="#E8EAED" fg="#4a4b50" /> : late ? <Pill text="Waiting" bg="#FDEBC8" fg="#7A4208" /> : <Pill text="Not out yet" bg="#E8EAED" fg="#4a4b50" />;
     let action: React.ReactNode = null;
-<<<<<<< HEAD
-    if (filed) action = actionCell(`a:${a.kind}:${a.id}`, "View PDF", () => download(filed), finance ? [{ label: "Remove", onClick: () => removeFile(filed), danger: true }] : []);
-    else if (none) action = finance ? actionCell(`a:${a.kind}:${a.id}`, "Undo", () => undoSkip(none)) : null;
-    else if (finance) action = actionCell(`a:${a.kind}:${a.id}`, "File stmt", () => openAcct(a), [{ label: "No statement this month", onClick: () => skipAcct(a) }]);
-=======
     if (filed) action = actionCell(`a:${a.kind}:${a.id}`, "View PDF", () => download(filed), finance ? [{ label: "Edit amount / month", onClick: () => openEditStmt(filed) }, { label: "Remove", onClick: () => removeFile(filed), danger: true }] : []);
     else if (none) action = finance ? actionCell(`a:${a.kind}:${a.id}`, "Undo", () => undoSkip(none)) : null;
     else if (finance) action = actionCell(`a:${a.kind}:${a.id}`, "File statement", () => openAcct(a), [{ label: "No statement this month", onClick: () => skipAcct(a) }]);
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
     return (
       <tr key={`${a.kind}:${a.id}`}>
         <td style={cell}><div style={{ ...clip, fontWeight: 700, fontSize: 15 }} title={a.name}>{a.name}</div></td>
@@ -889,15 +839,11 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
   );
   const closeX = (onClick: () => void) => <button type="button" aria-label="Close" onClick={onClick} className="inline-flex items-center justify-center rounded-lg" style={{ width: 44, height: 44, color: "#4a4a4a" }}><Icon d={P.x} size={20} /></button>;
   const fileBox = (file: File | null, setFile: (f: File | null) => void, id: string) => (
-<<<<<<< HEAD
-    <div className="rounded-xl flex items-center gap-3" style={{ border: `2px dashed #E2B48C`, background: "#FFF8F0", padding: "14px 16px" }}>
-=======
     <div className="rounded-xl flex items-center gap-3"
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setBoxOver(true); }}
       onDragLeave={() => setBoxOver(false)}
       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setBoxOver(false); const f = e.dataTransfer.files?.[0]; if (!f) return; if (!/\.pdf$/i.test(f.name)) { setMsg("Only PDF files can be dropped here."); return; } setFile(f); }}
       style={{ border: `2px dashed ${boxOver ? "#e8622a" : "#E2B48C"}`, background: boxOver ? "#FFEBD9" : "#FFF8F0", padding: "14px 16px" }}>
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
       <span className="inline-flex items-center justify-center rounded-lg" style={{ width: 44, height: 44, background: "#FDEBD8", color: DEEP }}><Icon d={file ? P.doc : P.upload} size={22} /></span>
       <div className="flex-1 min-w-0">
         {file ? <><div className="font-bold text-sm truncate">{file.name}</div><div className="text-xs" style={{ color: "#5f5f5f" }}>{(file.size / 1024 / 1024).toFixed(1)} MB · attached</div></>
@@ -928,11 +874,11 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
 
       {/* Title row */}
       <div className="flex flex-wrap items-center justify-between gap-4 no-print">
-        <h1 className="m-0" style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 500, fontSize: 36, lineHeight: 1.15 }}>Statements</h1>
+        <h1 className="m-0" style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 500, fontSize: 36, lineHeight: 1.15 }}>{section === "statements" ? "Account statements" : section === "bills" ? "Bills & invoices" : "Statements"}</h1>
         <div className="flex items-center gap-5">
           <button type="button" onClick={() => load()} className="inline-flex items-center gap-2 font-semibold" style={{ color: QLINK, fontSize: 17, height: 44 }}><Icon d={P.refresh} size={20} />Update</button>
-          {finance && (
-            <button type="button" onClick={() => openAdd()} className="rounded-lg font-bold" style={{ background: ORANGE, color: INK, fontSize: 17, height: 48, padding: "0 26px" }}>Add statement</button>
+          {finance && showVendorRows && (
+            <button type="button" onClick={() => openAdd()} className="rounded-lg font-bold" style={{ background: ORANGE, color: INK, fontSize: 17, height: 48, padding: "0 26px" }}>{section === "bills" ? "Add bill / invoice" : "Add statement"}</button>
           )}
         </div>
       </div>
@@ -957,29 +903,29 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       {msg && <p className="text-sm font-semibold text-slate-600">{msg}</p>}
 
       {/* Cards: they filter the list too */}
-      <div className="flex flex-wrap gap-4 no-print">
+      {showVendorRows && <div className="flex flex-wrap gap-4 no-print">
         {card("all", "All statements", money(all.t), `Paid: ${money(all.p)}${credits > 0.004 ? ` · ${money(credits)} in credits` : ""}`, nBills)}
         {card("unpaid", "Still owed", money(all.o), `${nOver} overdue (${money(overAmt)})`, nUnpaid, "#8E1F1A")}
         {card("autopay", "On autopay", money(autoAmt), `${nAutoUnpaid} scheduled · ${nAuto - nAutoUnpaid} paid so far`, nAuto)}
         {card("waiting", "Waiting on", `${waitUnique.length} vendor${waitUnique.length === 1 ? "" : "s"}`, waitUnique.length === 0 ? "Nothing outstanding" : waitUnique.length <= 2 ? waitUnique.join(", ") : `${waitUnique.slice(0, 2).join(", ")} +${waitUnique.length - 2} more`, view.counts.waiting)}
-      </div>
+      </div>}
 
       {/* Waiting bar */}
-      {(waitNames.length > 0 || data.prevMissing.length > 0) && (
+      {((showVendorRows && waitNames.length > 0) || (showAccts && data.prevMissing.length > 0)) && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl no-print" style={{ background: "#FDEBC8", color: "#5E3306", padding: "8px 8px 8px 16px" }}>
           <span className="inline-flex" style={{ color: "#7A4208" }}><Icon d={P.clock} size={20} /></span>
           <div className="leading-snug" style={{ flex: "1 1 420px", fontSize: 15 }}>
-            {waitUnique.length > 0 && <div><strong>Waiting on {waitUnique.length} vendor{waitUnique.length === 1 ? "" : "s"} for {monthWord}:</strong> {waitText}. Add each one when it arrives, or skip it if you don’t expect one this month.</div>}
-            {data.prevMissing.length > 0 && <div className={waitUnique.length > 0 ? "mt-1" : ""}><strong>{FULL[Number(data.prevMonth.slice(5)) - 1]} account statements still missing:</strong> {[...data.prevMissing].sort((x, y) => x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" })).join(", ")}.</div>}
+            {showVendorRows && waitUnique.length > 0 && <div><strong>Waiting on {waitUnique.length} vendor{waitUnique.length === 1 ? "" : "s"} for {monthWord}:</strong> {waitText}. Add each one when it arrives, or skip it if you don’t expect one this month.</div>}
+            {showAccts && data.prevMissing.length > 0 && <div className={showVendorRows && waitUnique.length > 0 ? "mt-1" : ""}><strong>{FULL[Number(data.prevMonth.slice(5)) - 1]} account statements still missing:</strong> {[...data.prevMissing].sort((x, y) => x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" })).join(", ")}.</div>}
           </div>
           <div className="flex gap-2">
-            {waitUnique.length > 0 && <button type="button" onClick={() => setFilter("waiting")} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Show only waiting</button>}
-            {data.prevMissing.length > 0 && <button type="button" onClick={() => setMonth(data.prevMonth)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Go to {FULL[Number(data.prevMonth.slice(5)) - 1]}</button>}
+            {showVendorRows && waitUnique.length > 0 && <button type="button" onClick={() => setFilter("waiting")} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Show only waiting</button>}
+            {showAccts && data.prevMissing.length > 0 && <button type="button" onClick={() => setMonth(data.prevMonth)} className={btnBase} style={{ height: 40, padding: "0 14px", fontSize: 14, background: "#fff", color: INK, border: "1px solid #CFC6AF" }}>Go to {FULL[Number(data.prevMonth.slice(5)) - 1]}</button>}
           </div>
         </div>
       )}
 
-      {finance && view.dupPairs.length > 0 && (
+      {finance && showVendorRows && view.dupPairs.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl no-print" style={{ background: "#E4ECF8", color: "#1B3A6B", padding: "8px 8px 8px 16px" }}>
           <div className="leading-snug" style={{ flex: "1 1 420px", fontSize: 15 }}>
             <strong>These may be the same vendor:</strong> {view.dupPairs.slice(0, 3).map((d, i) => <span key={d.from.id + d.into.id}>{i > 0 && "; "}{d.from.name} / {d.into.name}</span>)}. Merge them so their statements sit under one title.
@@ -989,9 +935,9 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
       )}
 
       {/* Tabs */}
-      <div className="inline-flex self-start rounded-lg no-print" style={{ background: "#E9EBEF", padding: 4, gap: 2, border: `1px solid ${QBORDER}` }}>
+      {showVendorRows && <div className="inline-flex self-start rounded-lg no-print" style={{ background: "#E9EBEF", padding: 4, gap: 2, border: `1px solid ${QBORDER}` }}>
         {tabBtn("all", "All")}{tabBtn("unpaid", "Unpaid")}{tabBtn("paid", "Paid")}{tabBtn("waiting", "Waiting")}{tabBtn("autopay", "Autopay")}{tabBtn("skipped", "Skipped")}
-      </div>
+      </div>}
 
       {/* Toolbar + table */}
       <div className="bg-white overflow-hidden" style={{ border: `1px solid ${QBORDER}`, borderRadius: 10 }}>
@@ -1002,20 +948,20 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
               <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" className="w-full bg-transparent focus:outline-none" style={{ fontSize: 17, color: QINK }} />
               <Icon d={P.search} size={22} />
             </label>
-            <label className="flex items-center gap-2 rounded-lg" style={{ width: 220, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px", color: QMUTED }}>
+            {showVendorRows && <label className="flex items-center gap-2 rounded-lg" style={{ width: 220, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px", color: QMUTED }}>
               <span className="sr-only">Filter by due date</span>
               <select value={dueFilter} onChange={(e) => setDueFilter(e.target.value as typeof dueFilter)} className="w-full bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 17, color: QINK }}>
                 <option value="all">All due dates</option><option value="overdue">Overdue</option><option value="week">Due in 7 days</option>
               </select>
               <Icon d={P.cal} size={22} />
-            </label>
-            <label className="flex items-center gap-2 rounded-lg" style={{ width: 260, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px" }}>
+            </label>}
+            {showVendorRows && <label className="flex items-center gap-2 rounded-lg" style={{ width: 260, height: 52, border: `1px solid ${QBORDER}`, padding: "0 12px" }}>
               <span className="sr-only">Filter by category</span>
               <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-full bg-transparent focus:outline-none cursor-pointer" style={{ fontSize: 17, color: QINK }}>
                 <option value="">All categories</option>
                 {[...allCats.filter((c) => c !== "Other"), "Bank", "Credit card", "Other"].map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
-            </label>
+            </label>}
           </div>
           <div className="flex items-center gap-5" style={{ color: QMUTED, fontSize: 16 }}>
             <span>1-{view.shown.length} of {view.shown.length}</span>
@@ -1028,29 +974,20 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
         </div>
 
         <div className="overflow-x-auto">
-<<<<<<< HEAD
-          <table className="stm w-full" style={{ minWidth: 1090, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
-            <caption className="sr-only">Statements for {mlabel(month)}, sorted by category and then by vendor</caption>
-            <colgroup><col /><col style={{ width: 110 }} /><col style={{ width: 120 }} /><col style={{ width: 130 }} /><col style={{ width: 100 }} /><col style={{ width: 130 }} /><col style={{ width: 220 }} /><col style={{ width: 130 }} /></colgroup>
-            <thead>
-              <tr>
-                <th scope="col" style={thS}>Vendor</th><th scope="col" style={thS}>Invoice #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Stmt / Due</th>
-=======
           <table className="stm w-full" style={{ minWidth: 860, borderCollapse: "collapse", tableLayout: "fixed", fontSize: 15, color: QINK }}>
             <caption className="sr-only">Statements for {mlabel(month)}, sorted by category and then by vendor</caption>
             <colgroup><col style={{ width: "18%" }} /><col style={{ width: "9%" }} /><col style={{ width: "11%" }} /><col style={{ width: "14%" }} /><col style={{ width: "10%" }} /><col style={{ width: "12%" }} /><col style={{ width: "14%" }} /><col style={{ width: "12%" }} /></colgroup>
             <thead>
               <tr>
-                <th scope="col" style={thS}>Vendor</th><th scope="col" style={thS}>Inv #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Stmt / Due</th>
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
+                <th scope="col" style={thS}>{section === "statements" ? "Account" : "Vendor"}</th><th scope="col" style={thS}>Inv #</th><th scope="col" style={thS}>Category</th><th scope="col" style={thS}>Stmt / Due</th>
                 <th scope="col" style={{ ...thS, textAlign: "right" }}>Amount</th><th scope="col" style={thS}>Status</th><th scope="col" style={thS}>Paid from</th><th scope="col" style={thS}>Action</th>
               </tr>
             </thead>
             <tbody>
               {(() => {
                 const vendorCats = view.cats.filter((c) => c !== "Loan");
-                const vendorRows = view.shown.filter((r) => r.cat !== "Loan");
-                const loanVendorRows = view.shown.filter((r) => r.cat === "Loan");
+                const vendorRows = showVendorRows ? view.shown.filter((r) => r.cat !== "Loan") : [];
+                const loanVendorRows = showVendorRows ? view.shown.filter((r) => r.cat === "Loan") : [];
                 // Loans: loan payments to a lender and the loan accounts' own statements, mixed alphabetically
                 const entries: { name: string; nodes: React.ReactNode[] }[] = [];
                 const byVendor = new Map<string, Row[]>();
@@ -1072,7 +1009,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
                     {bankAccts.length > 0 && (<>{mainBand("Banks", "Banks", `${bankAccts.length} account${bankAccts.length === 1 ? "" : "s"}`)}{!collapsed["main:Banks"] && bankAccts.map(acctRow)}</>)}
                     {cardAccts.length > 0 && (<>{mainBand("Cards", "Credit Cards", `${cardAccts.length} account${cardAccts.length === 1 ? "" : "s"}`)}{!collapsed["main:Cards"] && cardAccts.map(acctRow)}</>)}
                     {entries.length > 0 && (<>{mainBand("Loans", "Loans", `${loanCount} statement${loanCount === 1 ? "" : "s"}`)}{!collapsed["main:Loans"] && entries.map((e, i) => <Fragment key={`${e.name}:${i}`}>{e.nodes}</Fragment>)}</>)}
-                    {view.shown.length > 0 && (
+                    {showVendorRows && view.shown.length > 0 && (
                       <tr className="grand" style={{ background: QINK, color: "#fff" }}>
                         <td style={{ padding: 16, fontWeight: 700, fontSize: 16 }} colSpan={3}>{monthWord} total <span style={{ fontWeight: 400, fontSize: 13, opacity: 0.8 }}>· statements with an amount due</span></td><td />
                         <td style={{ padding: "16px 12px", textAlign: "right", fontWeight: 700, fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{money(grand.t)}</td>
@@ -1092,12 +1029,12 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
         </div>
       </div>
 
-      {finance && notExpected.length > 0 && (
+      {finance && showVendorRows && notExpected.length > 0 && (
         <p className="text-sm no-print" style={{ color: QMUTED }}>
           Only expected when they bill: {notExpected.map((x, i) => (<span key={x.id}>{i > 0 && ", "}{x.name} <button type="button" className="underline font-semibold" style={{ color: DEEP }} onClick={() => setExpect(x.id, "monthly")}>expect every month</button></span>))}
         </p>
       )}
-      {finance && <div className="flex items-center gap-2.5 text-sm no-print" style={{ color: QMUTED }}><Icon d={P.upload} />Drop statement PDFs anywhere on this page to file them.</div>}
+      {finance && <div className="flex items-center gap-2.5 text-sm no-print" style={{ color: QMUTED }}><Icon d={P.upload} />{showVendorRows ? "Drop statement PDFs anywhere on this page to file them." : "Open an account's File statement window, then drop the PDF there."}</div>}
 
       {/* ---------------- Add statement ---------------- */}
       {addOpen && modal(
@@ -1156,7 +1093,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
             <input id="add-auto" type="checkbox" checked={aAuto} onChange={(e) => { setAAuto(e.target.checked); if (e.target.checked) setAPaidNow(false); }} style={{ width: 20, height: 20, marginTop: 2, accentColor: DEEP }} />
             <label htmlFor="add-auto" className="text-sm leading-snug">On autopay<br /><span className="text-xs" style={{ color: "#5f5f5f" }}>Marked paid on the due date from the account you choose. Remembered for this vendor, so next month’s statement is already set up.</span></label>
           </div>
-<<<<<<< HEAD
           {!aPaidNow && (
             <div>
               <label htmlFor="add-autofrom" className={lbl}>{aAuto ? "Autopay is paid from" : "Usually paid from"}</label>
@@ -1166,16 +1102,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
                 <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
               </select>
               {!aAuto && <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Cash Flow counts this statement as money going out of this account on its due date. Remembered for this vendor.</p>}
-=======
-          {aAuto && (
-            <div>
-              <label htmlFor="add-autofrom" className={lbl}>Autopay is paid from</label>
-              <select id="add-autofrom" value={aAutoFrom} onChange={(e) => setAAutoFrom(e.target.value)} className={inputCls} style={inputBorder}>
-                <option value="">Choose an account…</option>
-                <optgroup label="Bank accounts">{data.payAccounts.filter((a) => a.kind === "bank").map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}</optgroup>
-                <optgroup label="Credit cards">{data.payAccounts.filter((a) => a.kind === "card").map((a) => <option key={a.id} value={`card:${a.id}`}>{a.name}</option>)}</optgroup>
-              </select>
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
             </div>
           )}
           {aErr && <p className="text-sm font-semibold text-red-600">{aErr}</p>}
@@ -1275,7 +1201,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
               {[...new Set([...allCats, ...(eCat ? [eCat] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-<<<<<<< HEAD
           {!editInv.paid && !editInv.autopay && (
             <div>
               <label htmlFor="ed-from" className={lbl}>Usually paid from</label>
@@ -1287,8 +1212,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
               <p className="text-xs mt-1" style={{ color: "#5f5f5f" }}>Cash Flow counts this statement as money going out of this account on its due date. Remembered for this vendor.</p>
             </div>
           )}
-=======
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
           {eErr && <p className="text-sm font-semibold text-red-600">{eErr}</p>}
           <div className="flex items-center gap-3 pt-1">
             <button type="button" onClick={() => saveEdit()} disabled={busy} className={btnBase} style={{ height: 44, padding: "0 18px", fontSize: 14, background: ORANGE, color: INK, border: `1px solid ${ORANGE}` }}>{busy ? "Saving…" : "Save changes"}</button>
@@ -1321,8 +1244,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
           </>);
       })()}
 
-<<<<<<< HEAD
-=======
       {/* ---------------- Edit statement ---------------- */}
       {editStmt && modal(
         <>
@@ -1345,7 +1266,6 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged }: { fi
           </div>
         </>)}
 
->>>>>>> b24cb5860e4dfd936bcb259afd0ede0203964f17
       {/* ---------------- Account statement ---------------- */}
       {acctDlg && modal(
         <>

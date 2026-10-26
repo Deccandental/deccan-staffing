@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
                 <p><strong>${request.employeeName}</strong> has submitted a leave request:</p>
                 <table style="width:100%;border-collapse:collapse;margin:16px 0">
                   <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Dates</td><td style="padding:8px;border-bottom:1px solid #eee;font-weight:bold">${dateRange}</td></tr>
-                  <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Duration</td><td style="padding:8px;border-bottom:1px solid #eee">${request.totalDays} working day${request.totalDays !== 1 ? "s" : ""}${request.isPartialDay ? ` (${request.partialHours || "partial day"})` : ""}</td></tr>
+                  <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Duration</td><td style="padding:8px;border-bottom:1px solid #eee">${request.totalDays} working day${request.totalDays !== 1 ? "s" : ""}${request.startsMidday || request.endsMidday ? ` (${request.startDate === request.endDate ? (request.endsMidday ? "morning only" : "afternoon only") : [request.startsMidday ? "from midday on the first day" : null, request.endsMidday ? "back at midday on the last day" : null].filter(Boolean).join(", ")})` : (request.isPartialDay && request.partialHours ? ` (${request.partialHours})` : "")}</td></tr>
                   <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Reason</td><td style="padding:8px;border-bottom:1px solid #eee">${reasonLabels[request.reason]}</td></tr>
                   ${request.notes ? `<tr><td style="padding:8px;color:#888">Notes</td><td style="padding:8px;font-style:italic">"${request.notes}"</td></tr>` : ""}
                 </table>

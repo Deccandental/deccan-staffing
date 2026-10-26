@@ -45,8 +45,10 @@ function Field({ label, title, width, children }: { label: React.ReactNode; titl
 const BANK_GRID = "minmax(130px,1.2fr) 110px 196px 110px 56px";
 
 export default function WeeklyUpdatePanel({
-  cashAccounts, cards, latestBalances, refreshAll, debtMonthlyCollections, charges, allBills, allPayments, loans,
+  cashAccounts, cards, latestBalances, refreshAll, debtMonthlyCollections, charges, allBills, allPayments, loans, section,
 }: {
+  /** Show just one part (used by the windows on the Overview). Leave out to show everything. */
+  section?: "accounts" | "debt" | "charges" | "goal" | "backfill" | "record";
   loans: Debt[];
   cashAccounts: CashAccount[];
   charges: CardCharge[];
@@ -119,7 +121,6 @@ export default function WeeklyUpdatePanel({
   const [currentIncome, setCurrentIncome] = useState("");
   const [currentPatientIncome, setCurrentPatientIncome] = useState("");
   const [notes, setNotes] = useState("");
-  const [saved, setSaved] = useState(false);
   const [openOdHist, setOpenOdHist] = useState(false);
 
   // ---------------- A/R aging ----------------
@@ -131,8 +132,6 @@ export default function WeeklyUpdatePanel({
   const [arInsuranceEstimate, setArInsuranceEstimate] = useState("");
   const [latestArAging, setLatestArAging] = useState<ArAgingEntry | null>(null);
   const [avgMonthlyProduction, setAvgMonthlyProduction] = useState<number | null>(null);
-  const [arSaved, setArSaved] = useState(false);
-  const [arError, setArError] = useState<string | null>(null);
   const [openArHist, setOpenArHist] = useState(false);
   const [showArWhy, setShowArWhy] = useState(false);
 
@@ -193,41 +192,10 @@ export default function WeeklyUpdatePanel({
   const incomeNum = currentIncome ? Number(currentIncome) : null;
   const patientIncomeNum = currentPatientIncome ? Number(currentPatientIncome) : null;
   const insuranceIncome = incomeNum != null && patientIncomeNum != null ? incomeNum - patientIncomeNum : null;
-  const hasUnsavedIncomeChanges =
-    (projectedProduction !== (latestReview?.projectedTotalProduction != null ? String(latestReview.projectedTotalProduction) : "")) ||
-    (currentIncome !== (latestReview?.currentIncome != null ? String(latestReview.currentIncome) : "")) ||
-    (currentPatientIncome !== (latestReview?.currentPatientIncome != null ? String(latestReview.currentPatientIncome) : ""));
-
-  async function handleSave() {
-    const result = await saveWeeklyReview({
-      reviewDate: today, projectedTotalProduction: productionNum, currentIncome: incomeNum,
-      currentPatientIncome: patientIncomeNum, notes,
-    });
-    if (!result.ok) { alert(`Failed to save: ${result.error ?? "unknown error"}`); return; }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
-    setLatestReview(await loadLatestWeeklyReview());
-    refreshAll();
-  }
-
   const n = (s: string) => (s ? Number(s) : 0);
   const arRaw = n(ar0to30) + n(ar31to60) + n(ar61to90) + n(ar90plus);
   const arTrue = Math.max(0, arRaw - n(arWoEstimate));
   const arPatient = arTrue - n(arInsuranceEstimate);
-
-  async function handleSaveAr() {
-    const result = await saveArAgingEntry({
-      entryDate: today,
-      ar0to30: n(ar0to30), ar31to60: n(ar31to60), ar61to90: n(ar61to90), ar90plus: n(ar90plus),
-      woEstimate: n(arWoEstimate), insuranceEstimate: n(arInsuranceEstimate),
-    });
-    if (!result.ok) { setArError(result.error ?? "Failed to save."); return; }
-    setArError(null);
-    setArSaved(true);
-    setTimeout(() => setArSaved(false), 3000);
-    setLatestArAging(await loadLatestArAging());
-    refreshAll();
-  }
 
   const health = computeArHealth(
     { ar0to30: n(ar0to30), ar31to60: n(ar31to60), ar61to90: n(ar61to90), ar90plus: n(ar90plus), woEstimate: n(arWoEstimate) },
@@ -238,101 +206,35 @@ export default function WeeklyUpdatePanel({
     : health.status === "fair" ? { bg: "#ffedd5", color: "#92400e", ring: "#f59e0b", label: "Needs attention", icon: "⚠️" }
     : { bg: "#fee2e2", color: "#991b1b", ring: "#dc2626", label: "Poor", icon: "🚨" };
 
+  const show = (k: string) => !section || section === k;
   const hdr = "flex items-center justify-between gap-2 mb-2 flex-wrap";
-  const saveBtn = (dirty: boolean) => ({ backgroundColor: dirty ? "#dc2626" : "#e8622a" });
 
   return (
     <div className="space-y-3">
-      {/* Setup and recurring numbers live here. Balances and statements are updated on the Overview cards
-          (or with Update Numbers Now), so there is one place for each. */}
+      {!section && (
       <div className="rounded-xl px-4 py-2.5 text-sm" style={{ background: "#e6f1f9", color: "#0c4a6e" }}>
         This tab is for setting up accounts and changing their recurring details: rates, payments, where each is paid from, original amounts. Update balances and statements on the <strong>Overview</strong> cards, or with <strong>Update Numbers Now</strong>.
       </div>
+      )}
 
       {/* ---------- Bank accounts and credit cards: add, edit, close ---------- */}
+      {show("accounts") && (
       <div className={card}>
         <h2 className="font-bold text-sm text-slate-700 mb-2">Accounts</h2>
         <AccountsPanel allBills={allBills} latestBalances={latestBalances} refreshAll={refreshAll} />
       </div>
+      )}
 
-      {/* ---------- Open Dental numbers — one row ---------- */}
+      {show("record") && (
       <div className={card}>
         <div className={hdr}>
-          <h2 className="font-bold text-sm text-slate-700">Open Dental Numbers</h2>
-          <div className="flex items-center gap-3 text-xs">
-            <UpdatedStamp when={latestReview?.reviewDate} />
-            <HistoryButton open={openOdHist} onClick={() => setOpenOdHist((o) => !o)} />
-          </div>
+          <h2 className="font-bold text-sm text-slate-700">Open Dental &amp; A/R record</h2>
+          <span className="text-xs text-slate-400">Enter these on the Overview cards (Update). Past entries can be reviewed or deleted here.</span>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <Field label="Projected production" title="Month-end estimate" width={124}>
-            <NumInput onFocus={(e) => e.target.select()} value={projectedProduction} onChange={(e) => setProjectedProduction(e.target.value)} className={inp} />
-          </Field>
-          <Field label="Income to date" title="Patient + insurance, so far this month" width={112}>
-            <NumInput onFocus={(e) => e.target.select()} value={currentIncome} onChange={(e) => setCurrentIncome(e.target.value)} className={inp} />
-          </Field>
-          <Field label="Patient income" title="So far this month" width={112}>
-            <NumInput onFocus={(e) => e.target.select()} value={currentPatientIncome} onChange={(e) => setCurrentPatientIncome(e.target.value)} className={inp} />
-          </Field>
-          <Field label="Insurance (calc)" width={112}>
-            <div className={calc}>{insuranceIncome != null ? m0(insuranceIncome) : "—"}</div>
-          </Field>
-          <Field label="Notes">
-            <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className={inp} />
-          </Field>
-          <div className="flex items-center gap-2 pb-0.5">
-            <button onClick={handleSave} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90 whitespace-nowrap" style={saveBtn(hasUnsavedIncomeChanges)}>
-              {hasUnsavedIncomeChanges ? "Save — unsaved" : "Save"}
-            </button>
-            {saved && <span className="text-xs text-emerald-600 font-semibold">✓</span>}
-          </div>
-        </div>
-        {openOdHist && (
-          <div className="mt-2">
-            <HistoryBlock
-              columns={[{
-                title: "Weekly entries",
-                load: async () => (await loadWeeklyReviewHistory(52)).map((r): HistRow => ({
-                  id: r.id, label: ymdLabel(r.reviewDate, true),
-                  value: `Prod ${m0(r.projectedTotalProduction)} · Income ${m0(r.currentIncome)} · Patient ${m0(r.currentPatientIncome)} · Ins ${r.currentIncome != null && r.currentPatientIncome != null ? m0(r.currentIncome - r.currentPatientIncome) : "—"}${r.notes ? ` · ${r.notes}` : ""}`,
-                  onDelete: () => deleteWeeklyReview(r.id),
-                })),
-              }]}
-              onChanged={async () => setLatestReview(await loadLatestWeeklyReview())}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* ---------- A/R — one row ---------- */}
-      <div className={card}>
-        <div className={hdr}>
-          <h2 className="font-bold text-sm text-slate-700">A/R Aging</h2>
-          <div className="flex items-center gap-3 text-xs">
-            <UpdatedStamp when={latestArAging?.entryDate} />
-            <HistoryButton open={openArHist} onClick={() => setOpenArHist((o) => !o)} />
-          </div>
-        </div>
-        <div className="flex flex-wrap items-end gap-1.5">
-          <Field label="0–30" width={82}><NumInput onFocus={(e) => e.target.select()} value={ar0to30} onChange={(e) => setAr0to30(e.target.value)} className={inp} /></Field>
-          <Field label="31–60" width={82}><NumInput onFocus={(e) => e.target.select()} value={ar31to60} onChange={(e) => setAr31to60(e.target.value)} className={inp} /></Field>
-          <Field label="61–90" width={82}><NumInput onFocus={(e) => e.target.select()} value={ar61to90} onChange={(e) => setAr61to90(e.target.value)} className={inp} /></Field>
-          <Field label="90+" width={82}><NumInput onFocus={(e) => e.target.select()} value={ar90plus} onChange={(e) => setAr90plus(e.target.value)} className={inp} /></Field>
-          <Field label="Total" title="The four buckets added up" width={88}><div className={`${calc} font-semibold`}>{arRaw > 0 ? m0(arRaw) : "—"}</div></Field>
-          <Field label="W/O est." width={82}><NumInput onFocus={(e) => e.target.select()} value={arWoEstimate} onChange={(e) => setArWoEstimate(e.target.value)} className={inp} /></Field>
-          <Field label="True A/R" title="Total less write-offs" width={88}><div className={`${calc} font-semibold`}>{arRaw > 0 ? m0(arTrue) : "—"}</div></Field>
-          <Field label="Ins. est." width={82}><NumInput onFocus={(e) => e.target.select()} value={arInsuranceEstimate} onChange={(e) => setArInsuranceEstimate(e.target.value)} className={inp} /></Field>
-          <Field label="Patient est." title="True A/R less insurance estimate" width={88}><div className={calc}>{arRaw > 0 ? m0(arPatient) : "—"}</div></Field>
-          <div className="flex items-center gap-2 pb-0.5">
-            <button onClick={handleSaveAr} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Save</button>
-            {arSaved && <span className="text-xs text-emerald-600 font-semibold">✓</span>}
-          </div>
-        </div>
-        {arError && <p className="text-xs text-red-600 font-semibold mt-1">⚠️ {arError}</p>}
 
         {healthVisible && (
           <>
-            <div className="mt-2 flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs font-medium"
+            <div className="flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs font-medium"
               style={{ background: hs.bg, color: hs.color, border: `1px solid ${hs.ring}` }}>
               <span className="whitespace-nowrap font-bold">{hs.icon} {hs.label}</span>
               <span className="truncate flex-1" title={health.reasons.join(" • ")}>
@@ -355,6 +257,25 @@ export default function WeeklyUpdatePanel({
           </>
         )}
 
+        <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
+          <span className="flex items-center gap-2"><UpdatedStamp when={latestReview?.reviewDate} /> Open Dental <HistoryButton open={openOdHist} onClick={() => setOpenOdHist((o) => !o)} /></span>
+          <span className="flex items-center gap-2"><UpdatedStamp when={latestArAging?.entryDate} /> A/R aging <HistoryButton open={openArHist} onClick={() => setOpenArHist((o) => !o)} /></span>
+        </div>
+        {openOdHist && (
+          <div className="mt-2">
+            <HistoryBlock
+              columns={[{
+                title: "Weekly entries",
+                load: async () => (await loadWeeklyReviewHistory(52)).map((r): HistRow => ({
+                  id: r.id, label: ymdLabel(r.reviewDate, true),
+                  value: `Prod ${m0(r.projectedTotalProduction)} · Income ${m0(r.currentIncome)} · Patient ${m0(r.currentPatientIncome)} · Ins ${r.currentIncome != null && r.currentPatientIncome != null ? m0(r.currentIncome - r.currentPatientIncome) : "—"}${r.notes ? ` · ${r.notes}` : ""}`,
+                  onDelete: () => deleteWeeklyReview(r.id),
+                })),
+              }]}
+              onChanged={async () => { setLatestReview(await loadLatestWeeklyReview()); refreshAll(); }}
+            />
+          </div>
+        )}
         {openArHist && (
           <div className="mt-2">
             <HistoryBlock
@@ -369,13 +290,14 @@ export default function WeeklyUpdatePanel({
                   };
                 }),
               }]}
-              onChanged={async () => setLatestArAging(await loadLatestArAging())}
+              onChanged={async () => { setLatestArAging(await loadLatestArAging()); refreshAll(); }}
             />
           </div>
         )}
       </div>
+      )}
 
-      {/* ---------- Production goal — one line, detail on demand ---------- */}
+      {show("goal") && (
       <div className={card}>
         <div className="flex items-center gap-2 flex-wrap">
           <h2 className="font-bold text-sm text-slate-700 whitespace-nowrap">{goalYear} Goal</h2>
@@ -433,23 +355,28 @@ export default function WeeklyUpdatePanel({
           </div>
         )}
       </div>
+      )}
 
       {/* ---------- Debt — credit cards live only here ---------- */}
       {/* Debt — summary, every card and loan, and card warnings in one card */}
-      <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={debtMonthlyCollections}
-        cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments} />
+      {show("debt") && <DebtPanel creditCards={cards} latestBalances={latestBalances} refreshAll={refreshAll} monthlyCollections={debtMonthlyCollections}
+        cashAccounts={cashAccounts} charges={charges} allBills={allBills} allPayments={allPayments} />}
 
       {/* Card charges — the recurring charges the near-limit warning is projected from */}
+      {show("charges") && (
       <div>
         <h2 className="font-bold text-sm text-slate-700 mb-1">Card Charges</h2>
         <CardChargesPanel cards={cards} charges={charges} refreshAll={refreshAll} />
       </div>
+      )}
 
       {/* Backfill — past statement balances and past net production */}
+      {show("backfill") && (
       <div className={card}>
         <h2 className="font-bold text-sm text-slate-700 mb-2">Backfill Past Months</h2>
         <BackfillPanel accounts={cashAccounts} cards={cards} loans={loans} refreshAll={refreshAll} />
       </div>
+      )}
     </div>
   );
 }

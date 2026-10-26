@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { sendStaffWeeklyDigest } from "@/lib/staffDigestEmail";
 import { loadAllSlots, computeCheckinStatus } from "@/lib/checkinsStore";
+import { computeRequiredCertStatuses, type RequiredCertRole, type RequiredCertType, type CeCourseEntry } from "@/lib/requiredCertsStore";
 
 function daysUntil(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -15,6 +16,22 @@ function addMonthsStr(dateStr: string, months: number): string {
   const d = new Date(dateStr + "T00:00:00");
   d.setMonth(d.getMonth() + months);
   return d.toISOString().slice(0, 10);
+}
+
+
+function mapTypeRow(row: any): RequiredCertType {
+  return {
+    id: row.id, title: row.title, appliesToRole: row.applies_to_role,
+    kind: row.kind, frequencyMonths: row.frequency_months, sortOrder: row.sort_order ?? 0,
+    targetHours: row.target_hours ?? null, dateMode: row.date_mode ?? "expiration",
+  };
+}
+
+function mapCeRow(row: any): CeCourseEntry {
+  return {
+    id: row.id, employeeId: row.employee_id, requiredCertTypeId: row.required_cert_type_id,
+    courseName: row.course_name, hours: row.hours, dateCompleted: row.date_completed,
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -105,26 +122,40 @@ export async function GET(req: NextRequest) {
       if (isCertKind) {
         const onFile = myCerts.some((c) => c.title === req.title);
         if (!onFile) items.push(`<strong>Certificate missing:</strong> ${req.title} — nothing on file yet`);
-        continue;
       }
+    }
 
-      // CE requirements only get raised once the renewal is close enough to
-      // matter. Flagging them a year or more out would be noise every week.
-      if (daysToRenewal == null || daysToRenewal > 183 || daysToRenewal < 0) continue;
-
-      const windowStart = addMonthsStr(licenseExpiration!, -(req.frequency_months || 24));
-      const loggedHours = (ceEntryRows ?? [])
-        .filter((e) => e.employee_id === emp.id && e.required_cert_type_id === req.id)
-        .filter((e) => e.date_completed >= windowStart && e.date_completed <= licenseExpiration!)
-        .reduce((sum, e) => sum + (e.hours ?? 0), 0);
-
-      if (req.kind === "total_ce_hours") {
-        const target = req.target_hours ?? 0;
-        if (target > 0 && loggedHours < target) {
-          items.push(`<strong>CE hours outstanding:</strong> ${Math.round((target - loggedHours) * 100) / 100} of ${target} hrs still needed before your licence renews on ${new Date(licenseExpiration! + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`);
+    // CE requirements only get raised once the renewal is close enough to
+    // matter. Flagging them a year or more out would be noise every week.
+    // The numbers come from the same function the Staff Dashboard uses, so
+    // the email and the dashboard always agree. All CE items are gathered
+    // under one heading rather than one bullet each.
+    if (daysToRenewal != null && daysToRenewal >= 0 && daysToRenewal <= 183) {
+      const statuses = computeRequiredCertStatuses(
+        myRoles as RequiredCertRole[],
+        (requiredTypeRows ?? []).map(mapTypeRow),
+        myCerts.map((c) => ({ title: c.title, expirationDate: c.expiration_date ?? null, ceHours: c.ce_hours ?? null, createdAt: c.created_at ?? "" })),
+        (ceEntryRows ?? []).filter((e) => e.employee_id === emp.id).map(mapCeRow),
+        today
+      );
+      const renews = new Date(licenseExpiration! + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      const ceLines: string[] = [];
+      for (const st of statuses) {
+        const k = st.type.kind;
+        if (k !== "total_ce_hours" && k !== "ce_hours" && k !== "one_time_ce") continue;
+        if (st.satisfied || st.missingLicense) continue;
+        if (k === "total_ce_hours") {
+          const target = st.targetHours ?? 0;
+          const left = Math.round((target - st.totalHoursInWindow) * 100) / 100;
+          ceLines.push(`<strong>${st.type.title}:</strong> ${left} of ${target} hrs still needed (${Math.round(st.totalHoursInWindow * 100) / 100} logged)`);
+        } else if (k === "one_time_ce") {
+          ceLines.push(`<strong>${st.type.title}:</strong> not yet completed`);
+        } else {
+          ceLines.push(`<strong>${st.type.title}:</strong> none logged for this renewal period`);
         }
-      } else if (loggedHours <= 0) {
-        items.push(`<strong>CE course needed:</strong> ${req.title} — none logged for this renewal period (licence renews in ${daysToRenewal} day${daysToRenewal === 1 ? "" : "s"})`);
+      }
+      if (ceLines.length > 0) {
+        items.push(`<strong>Continuing education (CE) — your licence renews on ${renews} (${daysToRenewal} day${daysToRenewal === 1 ? "" : "s"}):</strong><ul style="margin: 6px 0 0 0; padding-left: 20px;">${ceLines.map((l) => `<li style="margin-bottom: 4px;">${l}</li>`).join("")}</ul>`);
       }
     }
 
