@@ -30,6 +30,7 @@ import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, 
 import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredCertsSection";
 import CeLogPanel from "@/components/CeLogPanel";
 import { WishlistItem, loadWishlistItems } from "@/lib/wishlist";
+import { StaffNote, NOTE_KIND_LABELS, loadSharedStaffNotes } from "@/lib/staffNotes";
 import { formatMoney } from "@/lib/format";
 import { loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
 import { hygieneYear, hygieneYearDetail, HygienePeriodRow } from "@/lib/compOwed";
@@ -158,6 +159,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [expandedPvQuarter, setExpandedPvQuarter] = useState<string | null>(null);
   const [rsvps, setRsvps] = useState<EventRsvp[]>([]);
   const [wishlistItems, setWishlistItems] = useState<WishlistItem[]>([]);
+  const [myNotes, setMyNotes] = useState<StaffNote[]>([]);
   const [showOtherDocs, setShowOtherDocs] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({ name: "", email: "" });
@@ -181,6 +183,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
   useEffect(() => { loadStaff().then(setStaff); }, []);
   useEffect(() => { loadWishlistItems(selectedId).then(setWishlistItems); }, [selectedId]);
+  useEffect(() => {
+    if (selectedId == null) { setMyNotes([]); return; }
+    loadSharedStaffNotes(selectedId).then(setMyNotes);
+  }, [selectedId]);
   useEffect(() => { if (selectedId == null) { setHoPaymentList([]); return; } loadHoBonusPayments(selectedId).then(setHoPaymentList); }, [selectedId]);
 
   useEffect(() => {
@@ -1144,6 +1150,31 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
             </div>
+
+            {/* Notes from check-ins and reviews. Only the shared half of each
+                entry is ever loaded here — the private note is for managers
+                and never reaches this page. */}
+            {myNotes.length > 0 && (
+              <div className="lg:col-span-3 rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(24,95,165,0.14)", borderTop: "4px solid #185FA5" }}>
+                <h2 className="font-bold mb-3" style={{ color: "#185FA5" }}>🗒️ Notes from your check-ins and reviews</h2>
+                <div className="space-y-2">
+                  {myNotes.map((n) => (
+                    <div key={n.id} className="rounded-xl px-3 py-2.5" style={{ background: "#F4F8FC" }}>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ background: "#E6F1FB", color: "#185FA5" }}>
+                          {NOTE_KIND_LABELS[n.kind]}
+                        </span>
+                        <span className="text-xs" style={{ color: "rgba(74,66,56,0.55)" }}>
+                          {new Date(n.noteDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          {n.recordedBy ? ` · ${n.recordedBy}` : ""}
+                        </span>
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap" style={{ color: "#4A4238" }}>{n.sharedNote}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* The wishlist lives on its own page and was easy to forget
                 about. Surfacing the leaders here keeps it visible, and the

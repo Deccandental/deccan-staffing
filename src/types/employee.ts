@@ -39,6 +39,9 @@ export interface Employee {
   canManageEvents?: boolean;
   canManageCerts?: boolean;
   canManagePayroll?: boolean;
+  // Reading staff notes is more sensitive than managing a schedule, so it is
+  // granted separately rather than riding on canAdmin.
+  canManageStaffNotes?: boolean;
   // Hours-based leave balances. Whole days are counted as 8 hours; partial
   // days can deduct any amount, since staff can request fewer hours than a
   // full day off.

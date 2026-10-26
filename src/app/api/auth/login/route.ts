@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   if (!isSuper && cpaCode && cpaCode.length >= 8 && code === cpaCode) {
     const cpaToken = createSessionToken({
       mode: "cpa", employeeName: "CPA",
-      canAdmin: false, canManageLeave: false, canManageEvents: false, canManageCerts: false, canManagePayroll: false,
+      canAdmin: false, canManageLeave: false, canManageEvents: false, canManageCerts: false, canManagePayroll: false, canManageStaffNotes: false,
     });
     return NextResponse.json({ ok: true, cpa: true, isSuper: false, employee: null, token: cpaToken });
   }
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabaseAdmin
     .from("staff")
     .select(
-      "id, name, email, can_admin, can_manage_leave, can_manage_events, can_manage_certs, can_manage_payroll, exempt_from_policy_signing, exempt_from_checkin, archived, pin"
+      "id, name, email, can_admin, can_manage_leave, can_manage_events, can_manage_certs, can_manage_payroll, can_manage_staff_notes, exempt_from_policy_signing, exempt_from_checkin, archived, pin"
     )
     .eq("pin", code)
     .eq("archived", false)
@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
         canManageEvents: !!data.can_manage_events,
         canManageCerts: !!data.can_manage_certs,
         canManagePayroll: !!data.can_manage_payroll,
+        canManageStaffNotes: !!data.can_manage_staff_notes,
         exemptFromPolicySigning: !!data.exempt_from_policy_signing,
         exemptFromCheckin: !!data.exempt_from_checkin,
       }
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
       ? {
           mode: "super",
           canAdmin: true, canManageLeave: true, canManageEvents: true,
-          canManageCerts: true, canManagePayroll: true,
+          canManageCerts: true, canManagePayroll: true, canManageStaffNotes: true,
         }
       : {
           mode: "staff",
@@ -82,6 +83,7 @@ export async function POST(req: NextRequest) {
           canManageEvents: employee!.canManageEvents,
           canManageCerts: employee!.canManageCerts,
           canManagePayroll: employee!.canManagePayroll,
+          canManageStaffNotes: employee!.canManageStaffNotes,
         }
   );
 

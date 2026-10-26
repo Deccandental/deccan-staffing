@@ -19,7 +19,8 @@ type PermissionLevel =
   | "canAdmin"
   | "canManageLeave"
   | "canManageEvents"
-  | "canManagePayroll";
+  | "canManagePayroll"
+  | "canManageStaffNotes";
 
 interface StoredIdentity {
   mode?: "super" | "staff";
@@ -31,6 +32,7 @@ interface StoredIdentity {
   canManageEvents?: boolean;
   canManageCerts?: boolean;
   canManagePayroll?: boolean;
+  canManageStaffNotes?: boolean;
 }
 
 const navItems: { label: string; href: string; icon: string; permission: PermissionLevel; group?: string }[] = [
@@ -40,12 +42,14 @@ const navItems: { label: string; href: string; icon: string; permission: Permiss
   { label: "Certifications", href: "/certifications", icon: "📄", permission: "any" },
   { label: "Wishlist", href: "/wishlist", icon: "⭐", permission: "any" },
   { label: "Handbook", href: "/handbook", icon: "📘", permission: "any" },
+  { label: "Set-ups", href: "/setups", icon: "📸", permission: "any" },
   { label: "To Review", href: "/review", icon: "✅", permission: "any" },
   { label: "Check-Ins", href: "/checkins", icon: "🤝", permission: "any" },
   { label: "Events Calendar", href: "/events-calendar", icon: "🗓️", permission: "any" },
   { label: "Schedule Builder", href: "/schedule-builder", icon: "✏️", permission: "canAdmin", group: "Admin" },
   { label: "Availability", href: "/availability", icon: "🏥", permission: "canAdmin", group: "Admin" },
   { label: "Staff", href: "/staff", icon: "👥", permission: "canAdmin", group: "Admin" },
+  { label: "Staff Notes", href: "/staff-notes", icon: "🗒️", permission: "canManageStaffNotes", group: "Admin" },
   { label: "Temp Staff", href: "/temps", icon: "🔄", permission: "canAdmin", group: "Admin" },
   { label: "Holidays & Closures", href: "/holidays", icon: "🏖️", permission: "canAdmin", group: "Admin" },
   { label: "Manage Leave", href: "/leave/manage", icon: "🔐", permission: "canManageLeave", group: "Admin" },

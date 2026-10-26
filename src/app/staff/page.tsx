@@ -34,6 +34,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   canManageEvents: false,
   canManageCerts: false,
   canManagePayroll: false,
+  canManageStaffNotes: false,
   ptoBalanceHours: 0,
   sickBalanceHours: 0,
   excludeFromPayroll: false,
@@ -103,7 +104,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin ?? "",
       canAdmin: emp.canAdmin ?? false, canManageLeave: emp.canManageLeave ?? false, canManageEvents: emp.canManageEvents ?? false,
       canManageCerts: emp.canManageCerts ?? false, archived: emp.archived ?? false,
-      canManagePayroll: emp.canManagePayroll ?? false, ptoBalanceHours: emp.ptoBalanceHours ?? 0,
+      canManagePayroll: emp.canManagePayroll ?? false, canManageStaffNotes: emp.canManageStaffNotes ?? false, ptoBalanceHours: emp.ptoBalanceHours ?? 0,
       sickBalanceHours: emp.sickBalanceHours ?? 0, excludeFromPayroll: emp.excludeFromPayroll ?? false,
       remoteDays: emp.remoteDays ? { ...emp.remoteDays } : undefined,
       hireDate: emp.hireDate ?? "", growthBonusEligible: emp.growthBonusEligible ?? false,
@@ -322,6 +323,10 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                       <label className="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" checked={form.canManagePayroll ?? false} onChange={(e) => setForm((f) => ({ ...f, canManagePayroll: e.target.checked }))} />
                         <span className="text-sm text-gray-600">Payroll Dashboard</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={form.canManageStaffNotes ?? false} onChange={(e) => setForm((f) => ({ ...f, canManageStaffNotes: e.target.checked }))} />
+                        <span className="text-sm text-gray-600">Staff Notes <span className="text-gray-400">(private notes on every employee)</span></span>
                       </label>
                     </div>
                     <p className="text-xs text-gray-400 mt-1">Their PIN unlocks these areas, in addition to the shared super passcode.</p>

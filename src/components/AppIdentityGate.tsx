@@ -18,6 +18,7 @@ export interface AppIdentity {
   canManageEvents: boolean;
   canManageCerts: boolean;
   canManagePayroll: boolean;
+  canManageStaffNotes: boolean;
 }
 
 export const IDENTITY_SESSION_KEY = "dd_identity";
@@ -62,6 +63,7 @@ export default function AppIdentityGate({ children }: Props) {
       employeeId: match.id, employeeName: match.name, employeeEmail: match.email ?? "", exemptFromPolicySigning: !!match.exemptFromPolicySigning, exemptFromCheckin: !!match.exemptFromCheckin,
       canAdmin: !!match.canAdmin, canManageLeave: !!match.canManageLeave, canManageEvents: !!match.canManageEvents,
       canManageCerts: !!match.canManageCerts, canManagePayroll: !!match.canManagePayroll,
+      canManageStaffNotes: !!match.canManageStaffNotes,
     };
     if (JSON.stringify(fresh) !== JSON.stringify(identity)) persist(fresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -86,7 +88,7 @@ export default function AppIdentityGate({ children }: Props) {
     if (result.isSuper) {
       persist({
         mode: "super",
-        canAdmin: true, canManageLeave: true, canManageEvents: true, canManageCerts: true, canManagePayroll: true,
+        canAdmin: true, canManageLeave: true, canManageEvents: true, canManageCerts: true, canManagePayroll: true, canManageStaffNotes: true,
       });
       return;
     }
@@ -97,6 +99,7 @@ export default function AppIdentityGate({ children }: Props) {
         employeeId: match.id, employeeName: match.name, employeeEmail: match.email ?? "", exemptFromPolicySigning: !!match.exemptFromPolicySigning, exemptFromCheckin: !!match.exemptFromCheckin,
         canAdmin: !!match.canAdmin, canManageLeave: !!match.canManageLeave, canManageEvents: !!match.canManageEvents,
         canManageCerts: !!match.canManageCerts, canManagePayroll: !!match.canManagePayroll,
+      canManageStaffNotes: !!match.canManageStaffNotes,
       });
     } else {
       setError(true);

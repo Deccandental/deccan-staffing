@@ -26,6 +26,7 @@ export interface SessionPayload {
   canManageEvents: boolean;
   canManageCerts: boolean;
   canManagePayroll: boolean;
+  canManageStaffNotes?: boolean;
   issuedAt: number;
 }
 
