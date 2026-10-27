@@ -357,7 +357,7 @@ function CertForm({
 function ManageRequiredTypesPanel({
   requiredTypes, allCerts, refreshAll,
 }: { requiredTypes: RequiredCertType[]; allCerts: Certification[]; refreshAll: () => void }) {
-  const ALL_ROLES: RequiredCertRole[] = ["Dentist", "RDA", "Hygienist", "Specialist", "Assistant"];
+  const ALL_ROLES: RequiredCertRole[] = ["Dentist", "RDA", "Hygienist", "Specialist", "Assistant", "Front Desk"];
   const [newTitle, setNewTitle] = useState("");
   const [newRoles, setNewRoles] = useState<RequiredCertRole[]>([]);
   const [newKind, setNewKind] = useState<"license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours">("standalone");

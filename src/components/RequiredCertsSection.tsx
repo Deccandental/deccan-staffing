@@ -21,6 +21,10 @@ export function getApplicableRoles(emp: Employee): RequiredCertRole[] {
   if (emp.role === "RDA") roles.push("RDA");
   if (emp.role === "Hygienist") roles.push("Hygienist");
   if (emp.role === "Assistant") roles.push("Assistant");
+  // Front desk carries no clinical license, but practice-wide trainings —
+  // HIPAA above all — apply to the whole workforce, so the role needs its
+  // own requirement list.
+  if (emp.role === "Front Desk") roles.push("Front Desk");
   return roles;
 }
 

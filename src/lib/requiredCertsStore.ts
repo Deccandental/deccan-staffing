@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 
-export type RequiredCertRole = "Dentist" | "RDA" | "Hygienist" | "Specialist" | "Assistant";
+export type RequiredCertRole = "Dentist" | "RDA" | "Hygienist" | "Specialist" | "Assistant" | "Front Desk";
 export type RequiredCertKind = "license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours";
 export type RequiredCertDateMode = "expiration" | "completion" | "none";
 
