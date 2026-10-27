@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Employee } from "@/types/employee";
 import { Certification, NewCertInput, createCertification, updateCertification, uploadCertFile } from "@/lib/certsStore";
 import {
-  RequiredCertType, RequiredCertRole, CeCourseEntry,
+  RequiredCertType, RequiredCertRole, CeCourseEntry, RequiredCertStatus,
   addCeCourseEntry, deleteCeCourseEntry, updateCeCourseEntry, computeRequiredCertStatuses, addMonths,
 } from "@/lib/requiredCertsStore";
 
@@ -57,6 +57,8 @@ export function RequiredCertsSection({
   const [ceEditExistingFile, setCeEditExistingFile] = useState<string | null>(null);
   const [ceEditError, setCeEditError] = useState<string | null>(null);
   const [ceEditSaving, setCeEditSaving] = useState(false);
+  const [openRequired, setOpenRequired] = useState(true);
+  const [openAdditional, setOpenAdditional] = useState(true);
 
   const roles = getApplicableRoles(employee);
   if (roles.length === 0) return null;
@@ -68,6 +70,15 @@ export function RequiredCertsSection({
     : filter === "certificates" ? allStatuses.filter((s) => !CE_KINDS.has(s.type.kind))
     : allStatuses;
   if (statuses.length === 0) return null;
+
+  // The CE card reads top-down: the running total, then the named
+  // requirements, then everything logged as general or elective credit.
+  // Elective is matched on the title because nothing on the requirement
+  // itself marks it as the catch-all bucket.
+  const isElectiveType = (t: RequiredCertType) => /general|elective/i.test(t.title);
+  const totalStatus = statuses.find((s) => s.type.kind === "total_ce_hours");
+  const requiredCeStatuses = statuses.filter((s) => s.type.kind !== "total_ce_hours" && !isElectiveType(s.type));
+  const additionalCeStatuses = statuses.filter((s) => s.type.kind !== "total_ce_hours" && isElectiveType(s.type));
 
   async function handleLogCe(typeId: string) {
     const hours = Number(ceHours);
@@ -148,16 +159,9 @@ export function RequiredCertsSection({
     await refreshAll();
   }
 
-  const content = (
-    <>
-      {!bare && (
-        <div className="flex items-center gap-2 mb-3">
-          <span style={{ fontSize: 18 }}>📋</span>
-          <h3 className="font-bold" style={{ color: "#4A4238" }}>Certifications & CE — {employee.name}</h3>
-        </div>
-      )}
-      <div className="space-y-2">
-        {statuses.map((status) => {
+  // One requirement, rendered the same way wherever it appears, so the
+  // grouped CE view and the certificates view stay identical in behaviour.
+  const renderStatus = (status: RequiredCertStatus) => {
           const type = status.type;
           const existingCert = certs.find((c) => c.title === type.title);
           if (type.kind === "ce_hours") {
@@ -421,7 +425,45 @@ export function RequiredCertsSection({
               </button>
             </div>
           );
-        })}
+  };
+
+  const content = (
+    <>
+      {!bare && (
+        <div className="flex items-center gap-2 mb-3">
+          <span style={{ fontSize: 18 }}>📋</span>
+          <h3 className="font-bold" style={{ color: "#4A4238" }}>Certifications & CE — {employee.name}</h3>
+        </div>
+      )}
+      <div className="space-y-2">
+        {filter === "ce" ? (
+          <>
+            {/* Total first: it is the number that answers "am I done?". */}
+            {totalStatus && renderStatus(totalStatus)}
+            {requiredCeStatuses.length > 0 && (
+              <div className="rounded-xl border border-slate-100 bg-white">
+                <button onClick={() => setOpenRequired((o) => !o)}
+                  className="w-full flex items-center gap-1.5 px-3 py-2 text-sm font-semibold hover:underline"
+                  style={{ color: "#4A4238" }}>
+                  <span style={{ fontSize: 10 }}>{openRequired ? "\u25bc" : "\u25b6"}</span>
+                  Required courses ({requiredCeStatuses.length})
+                </button>
+                {openRequired && <div className="space-y-2 px-2 pb-2">{requiredCeStatuses.map(renderStatus)}</div>}
+              </div>
+            )}
+            {additionalCeStatuses.length > 0 && (
+              <div className="rounded-xl border border-slate-100 bg-white">
+                <button onClick={() => setOpenAdditional((o) => !o)}
+                  className="w-full flex items-center gap-1.5 px-3 py-2 text-sm font-semibold hover:underline"
+                  style={{ color: "#4A4238" }}>
+                  <span style={{ fontSize: 10 }}>{openAdditional ? "\u25bc" : "\u25b6"}</span>
+                  Additional courses ({additionalCeStatuses.length})
+                </button>
+                {openAdditional && <div className="space-y-2 px-2 pb-2">{additionalCeStatuses.map(renderStatus)}</div>}
+              </div>
+            )}
+          </>
+        ) : statuses.map(renderStatus)}
       </div>
     </>
   );

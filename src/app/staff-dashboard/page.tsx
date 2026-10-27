@@ -1047,6 +1047,38 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       )}
                     </div>
                   )}
+                  {/* Matches each typed word anywhere in an existing name, not
+                      just at the start, so "violence" finds "Workplace Violence
+                      Prevention". A new name that is really an existing
+                      requirement spelled differently files the document under
+                      nothing, which is hard to notice afterwards. */}
+                  {useCustomTitle && !titleIsFixed && (() => {
+                    const q = certForm.title.trim().toLowerCase();
+                    if (q.length < 2) return null;
+                    const words = q.split(/\s+/).filter(Boolean);
+                    const matches = titleOptions
+                      .filter((t) => {
+                        const lt = t.toLowerCase();
+                        return lt !== q && words.every((w) => lt.includes(w));
+                      })
+                      .slice(0, 5);
+                    if (matches.length === 0) return null;
+                    return (
+                      <div className="mt-1.5">
+                        <p className="text-xs mb-1" style={{ color: "rgba(74,66,56,0.5)" }}>Did you mean one of these?</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {matches.map((t) => (
+                            <button key={t} type="button"
+                              onClick={() => { setCertForm((f) => ({ ...f, title: t })); setUseCustomTitle(false); }}
+                              className="rounded-full px-2.5 py-1 text-xs font-semibold hover:opacity-80"
+                              style={{ background: "#E6F1FB", color: "#185FA5" }}>
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {(() => {
                     const matchingType = requiredTypesForCerts.find((t) => t.title === certForm.title.trim());
                     const isCompletionMode = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "completion";

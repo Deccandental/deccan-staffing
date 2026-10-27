@@ -311,8 +311,23 @@ export function computeRequiredCertStatuses(
       }
       const windowStart = addMonths(licenseExpiration, -type.frequencyMonths);
       const entries = ceEntries.filter((e) => e.requiredCertTypeId === type.id && e.dateCompleted >= windowStart && e.dateCompleted <= licenseExpiration);
-      const totalHours = entries.reduce((sum, e) => sum + e.hours, 0);
-      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration, satisfied: entries.length > 0, missingLicense: false, targetHours: type.targetHours };
+      const loggedHours = entries.reduce((sum, e) => sum + e.hours, 0);
+      // A requirement can equally be met by uploading the completion
+      // certificate instead of typing the course in — Workplace Violence
+      // Prevention is usually handled that way. Those hours already counted
+      // toward the overall total and showed in the CE log as counting toward
+      // this requirement, so ignoring them here left a requirement reading
+      // "needed" while its own evidence sat in the log underneath it.
+      const matchingCerts = allCerts.filter((c) => {
+        if (c.title !== type.title || c.ceHours == null) return false;
+        const effectiveDate = type.dateMode === "completion" && c.expirationDate
+          ? addMonths(c.expirationDate, -type.frequencyMonths)
+          : c.expirationDate ?? c.createdAt.slice(0, 10);
+        return effectiveDate >= windowStart && effectiveDate <= licenseExpiration;
+      });
+      const certHours = matchingCerts.reduce((sum, c) => sum + (c.ceHours ?? 0), 0);
+      const totalHours = loggedHours + certHours;
+      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration, satisfied: entries.length > 0 || matchingCerts.length > 0, missingLicense: false, targetHours: type.targetHours };
     }
     if (type.kind === "total_ce_hours") {
       if (!licenseExpiration) {
