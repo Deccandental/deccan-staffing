@@ -54,6 +54,12 @@ export function RequiredCertsSection({
   const [completingTypeId, setCompletingTypeId] = useState<string | null>(null);
   const [completionDate, setCompletionDate] = useState(new Date().toISOString().slice(0, 10));
   const [completionError, setCompletionError] = useState<string | null>(null);
+  // CE details on the quick completion form. BLS is the certificate where CE
+  // credit matters most, and it is updated almost exclusively through this
+  // form rather than the full one.
+  const [completionCeHours, setCompletionCeHours] = useState("");
+  const [completionDelivery, setCompletionDelivery] = useState<"live" | "home_study">("live");
+  const [completionInPerson, setCompletionInPerson] = useState(false);
   const [completionSaving, setCompletionSaving] = useState(false);
   // Editing one already-logged course, in place, from inside its requirement.
   const [editingCeId, setEditingCeId] = useState<string | null>(null);
@@ -172,7 +178,15 @@ export function RequiredCertsSection({
     if (!completionDate) { setCompletionError("Please enter a completion date."); return; }
     setCompletionSaving(true);
     const expirationDate = addMonths(completionDate, type.frequencyMonths);
-    const input: NewCertInput = { ownerType: "personnel", employeeId: employee.id, title: type.title, expirationDate, fileUrl: existing?.fileUrl ?? "", fileName: existing?.fileName ?? "" };
+    const ceHours = completionCeHours ? Number(completionCeHours) : null;
+    if (completionCeHours && (!Number.isFinite(ceHours!) || ceHours! < 0)) { setCompletionSaving(false); setCompletionError("CE credits must be a number."); return; }
+    const input: NewCertInput = {
+      ownerType: "personnel", employeeId: employee.id, title: type.title, expirationDate,
+      // Carried through on every save: omitting these here rebuilt the record
+      // without them, so pressing Save used to wipe hours recorded earlier.
+      ceHours, ceDelivery: completionDelivery, inPersonExam: completionInPerson,
+      fileUrl: existing?.fileUrl ?? "", fileName: existing?.fileName ?? "",
+    };
     const saved = existing ? await updateCertification(existing.id, input) : await createCertification(input);
     setCompletionSaving(false);
     if (!saved) { setCompletionError("Failed to save — please try again."); return; }
@@ -439,7 +453,18 @@ export function RequiredCertsSection({
                       <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ background: "#FCEBEB", color: "#A32D2D" }}>Not on file</span>
                     )}
                   </div>
-                  <button onClick={() => { setCompletingTypeId(completingTypeId === type.id ? null : type.id); setCompletionError(null); }} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
+                  <button onClick={() => {
+                    const opening = completingTypeId !== type.id;
+                    setCompletingTypeId(opening ? type.id : null);
+                    setCompletionError(null);
+                    if (opening) {
+                      // Seed from what's already on the certificate, so saving
+                      // the form never silently clears hours recorded earlier.
+                      setCompletionCeHours(existingCert?.ceHours != null ? String(existingCert.ceHours) : "");
+                      setCompletionDelivery(existingCert?.ceDelivery ?? "live");
+                      setCompletionInPerson(existingCert?.inPersonExam ?? false);
+                    }
+                  }} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
                     {completingTypeId === type.id ? "Cancel" : existingCert ? "Update" : "+ Add"}
                   </button>
                 </div>
@@ -448,9 +473,31 @@ export function RequiredCertsSection({
                     <label className="text-xs" style={{ color: "rgba(74,66,56,0.6)" }}>Date completed:</label>
                     <input type="date" value={completionDate} onChange={(e) => setCompletionDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
                     <span className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>→ expires {new Date(addMonths(completionDate, type.frequencyMonths) + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                    <label className="text-xs" style={{ color: "rgba(74,66,56,0.6)" }}>CE credits:</label>
+                    <input type="number" step="0.25" onFocus={(e) => e.target.select()} value={completionCeHours}
+                      onChange={(e) => setCompletionCeHours(e.target.value)} placeholder="0"
+                      className="w-16 rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                    {Number(completionCeHours) > 0 && (
+                      <select value={completionDelivery} onChange={(e) => setCompletionDelivery(e.target.value as "live" | "home_study")}
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none">
+                        <option value="live">Live / in person</option>
+                        <option value="home_study">Home study</option>
+                      </select>
+                    )}
+                    {type.requiresInPersonExam && (
+                      <label className="flex items-center gap-1.5 text-xs" style={{ color: "rgba(74,66,56,0.7)" }}>
+                        <input type="checkbox" checked={completionInPerson} onChange={(e) => setCompletionInPerson(e.target.checked)} />
+                        In-person skills exam included
+                      </label>
+                    )}
                     <button onClick={() => handleSaveCompletion(type, existingCert)} disabled={completionSaving} className="rounded-lg px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
                       {completionSaving ? "Saving…" : "Save"}
                     </button>
+                    {type.maxCountableHours != null && (
+                      <span className="text-xs w-full" style={{ color: "rgba(74,66,56,0.45)" }}>
+                        Counts up to {type.maxCountableHours} units toward the renewal.
+                      </span>
+                    )}
                   </div>
                 )}
                 {completionError && <p className="text-xs text-red-600 mt-1">{completionError}</p>}
