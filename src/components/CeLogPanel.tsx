@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Employee } from "@/types/employee";
 import { Certification } from "@/lib/certsStore";
-import { CeCourseEntry, RequiredCertType, addMonths } from "@/lib/requiredCertsStore";
+import { CeCourseEntry, RequiredCertType, addMonths, updateCeCourseEntry } from "@/lib/requiredCertsStore";
 import { getApplicableRoles } from "@/components/RequiredCertsSection";
 
 /**
@@ -22,7 +22,12 @@ import { getApplicableRoles } from "@/components/RequiredCertsSection";
  */
 
 interface CeLogRow {
-  entryId?: string; // set for logged courses, which can be deleted here
+  entryId?: string; // set for logged courses, which can be edited and deleted here
+  // Set for rows generated from a certificate. Those are edited in the
+  // Certificates card, where the uploaded file and expiration live, rather
+  // than here — an hours log is the wrong place to delete a document.
+  certId?: string;
+  requiredCertTypeId?: string;
   date: string;
   title: string;
   courseName: string;
@@ -34,16 +39,22 @@ interface CeLogRow {
 }
 
 export default function CeLogPanel({
-  employee, certs, ceEntries, requiredTypes, onDeleteEntry,
+  employee, certs, ceEntries, requiredTypes, onDeleteEntry, onEditCert, onChanged,
 }: {
   employee: Employee;
   certs: Certification[];
   ceEntries: CeCourseEntry[];
   requiredTypes: RequiredCertType[];
   onDeleteEntry?: (id: string) => void;
+  onEditCert?: (certId: string) => void;
+  onChanged?: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ courseName: "", hours: "", dateCompleted: "", requiredCertTypeId: "" });
+  const [editError, setEditError] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const roles = getApplicableRoles(employee);
   const typeById = new Map(requiredTypes.map((t) => [t.id, t]));
@@ -64,6 +75,7 @@ export default function CeLogPanel({
     const type = typeById.get(e.requiredCertTypeId);
     rows.push({
       entryId: e.id,
+      requiredCertTypeId: e.requiredCertTypeId,
       date: e.dateCompleted,
       title: type?.title ?? "CE course",
       courseName: e.courseName,
@@ -89,6 +101,7 @@ export default function CeLogPanel({
       approximate = false;
     }
     rows.push({
+      certId: cert.id,
       date,
       title: cert.title,
       courseName: cert.title,
@@ -105,6 +118,43 @@ export default function CeLogPanel({
   const totalHours = visible.reduce((sum, r) => sum + r.hours, 0);
 
   const fmt = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+  // What a logged course can be reassigned to: the requirements that apply
+  // to this person. Reassigning matters when hours were filed against the
+  // wrong requirement and the totals came out short in one place and over
+  // in another.
+  const assignableTypes = requiredTypes.filter((t) => roles.includes(t.appliesToRole));
+
+  function startEditRow(r: CeLogRow) {
+    if (!r.entryId) return;
+    setEditForm({
+      courseName: r.courseName,
+      hours: String(r.hours),
+      dateCompleted: r.date,
+      requiredCertTypeId: r.requiredCertTypeId ?? "",
+    });
+    setEditError("");
+    setEditingId(r.entryId);
+  }
+
+  async function saveEditRow() {
+    if (!editingId) return;
+    const hours = Number(editForm.hours);
+    if (!editForm.courseName.trim()) { setEditError("Give the course a name."); return; }
+    if (!Number.isFinite(hours) || hours <= 0) { setEditError("Hours must be a number greater than zero."); return; }
+    if (!editForm.dateCompleted) { setEditError("Pick the date it was completed."); return; }
+    setSavingEdit(true);
+    const result = await updateCeCourseEntry(editingId, {
+      courseName: editForm.courseName.trim(),
+      hours,
+      dateCompleted: editForm.dateCompleted,
+      requiredCertTypeId: editForm.requiredCertTypeId,
+    });
+    setSavingEdit(false);
+    if (!result.ok) { setEditError(result.error ?? "Couldn't save."); return; }
+    setEditingId(null);
+    await onChanged?.();
+  }
 
   return (
     <div className="mt-3">
@@ -150,7 +200,8 @@ export default function CeLogPanel({
               </thead>
               <tbody>
                 {visible.map((r, i) => (
-                  <tr key={i} className="border-b border-slate-100" style={{ opacity: r.inWindow ? 1 : 0.55 }}>
+                  <Fragment key={i}>
+                  <tr className="border-b border-slate-100" style={{ opacity: r.inWindow ? 1 : 0.55 }}>
                     <td className="py-1.5 pr-2 whitespace-nowrap">
                       {fmt(r.date)}
                       {r.dateIsApproximate && <span className="text-xs" style={{ color: "rgba(74,66,56,0.45)" }}> (approx.)</span>}
@@ -167,12 +218,60 @@ export default function CeLogPanel({
                         {r.fileUrl && (
                           <a href={r.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold hover:underline" style={{ color: "#185FA5" }}>View →</a>
                         )}
+                        {r.entryId && (
+                          <button onClick={() => startEditRow(r)} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>Edit</button>
+                        )}
+                        {/* A certificate row is a view of a document. Editing it opens
+                            that certificate's own form, where the file and expiration
+                            are, instead of editing a copy of the hours here. */}
+                        {r.certId && onEditCert && (
+                          <button onClick={() => onEditCert(r.certId!)} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>Edit</button>
+                        )}
                         {r.entryId && onDeleteEntry && (
                           <button onClick={() => onDeleteEntry(r.entryId!)} className="text-xs text-red-400 hover:underline">Delete</button>
                         )}
                       </span>
                     </td>
                   </tr>
+                  {r.entryId && editingId === r.entryId && (
+                    <tr className="border-b border-slate-100 print:hidden" style={{ background: "#FBF7F1" }}>
+                      <td colSpan={5} className="py-3 px-2">
+                        <div className="grid gap-2 sm:grid-cols-4">
+                          <input type="text" value={editForm.courseName}
+                            onChange={(e) => setEditForm((f) => ({ ...f, courseName: e.target.value }))}
+                            placeholder="Course name"
+                            className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
+                          <input type="number" step="0.5" onFocus={(e) => e.target.select()} value={editForm.hours}
+                            onChange={(e) => setEditForm((f) => ({ ...f, hours: e.target.value }))}
+                            placeholder="Hours"
+                            className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                          <input type="date" value={editForm.dateCompleted}
+                            onChange={(e) => setEditForm((f) => ({ ...f, dateCompleted: e.target.value }))}
+                            className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                          <label className="text-xs sm:col-span-4" style={{ color: "rgba(74,66,56,0.6)" }}>
+                            Counts toward
+                            <select value={editForm.requiredCertTypeId}
+                              onChange={(e) => setEditForm((f) => ({ ...f, requiredCertTypeId: e.target.value }))}
+                              className="ml-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none">
+                              {assignableTypes.map((t) => (
+                                <option key={t.id} value={t.id}>{t.title}</option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        {editError && <p className="text-xs font-semibold text-red-600 mt-2">⚠️ {editError}</p>}
+                        <div className="flex items-center gap-3 mt-2">
+                          <button onClick={saveEditRow} disabled={savingEdit}
+                            className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                            style={{ backgroundColor: "#e8622a" }}>
+                            {savingEdit ? "Saving…" : "Save changes"}
+                          </button>
+                          <button onClick={() => { setEditingId(null); setEditError(""); }} className="text-xs text-slate-400 hover:underline">Cancel</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
               <tfoot>

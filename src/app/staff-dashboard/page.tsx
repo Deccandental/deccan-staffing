@@ -1146,6 +1146,16 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                     if (!confirm("Delete this CE course entry?")) return;
                     await deleteCeCourseEntry(id);
                     await refreshCertsData();
+                  }}
+                  onChanged={refreshCertsData}
+                  onEditCert={(certId) => {
+                    // Certificate rows are edited where the document lives, so the
+                    // file and expiration stay together. Open that form and scroll
+                    // to it, since it sits in the card above this log.
+                    const cert = certs.find((c) => c.id === certId);
+                    if (!cert) return;
+                    startEditCert(cert);
+                    document.getElementById("certifications-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
                   }} />
               </div>
             )}

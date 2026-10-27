@@ -204,6 +204,27 @@ export async function addCeCourseEntry(input: Omit<CeCourseEntry, "id">): Promis
   return { ok: true };
 }
 
+/**
+ * Correct a logged course after the fact.
+ *
+ * The CE log is the record produced for a licence renewal or an audit, so a
+ * typo in the hours or a wrong date needs fixing in place rather than being
+ * deleted and retyped — deleting loses the attached certificate file.
+ */
+export async function updateCeCourseEntry(
+  id: string,
+  updates: { courseName: string; hours: number; dateCompleted: string; requiredCertTypeId: string }
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("ce_course_entries").update({
+    course_name: updates.courseName,
+    hours: updates.hours,
+    date_completed: updates.dateCompleted,
+    required_cert_type_id: updates.requiredCertTypeId,
+  }).eq("id", id);
+  if (error) { console.error("updateCeCourseEntry error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
+}
+
 export async function deleteCeCourseEntry(id: string): Promise<void> {
   const { error } = await supabase.from("ce_course_entries").delete().eq("id", id);
   if (error) console.error("deleteCeCourseEntry error:", error);
