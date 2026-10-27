@@ -5,7 +5,7 @@ import { Employee } from "@/types/employee";
 import { Certification, NewCertInput, createCertification, updateCertification, uploadCertFile } from "@/lib/certsStore";
 import {
   RequiredCertType, RequiredCertRole, CeCourseEntry,
-  addCeCourseEntry, deleteCeCourseEntry, computeRequiredCertStatuses, addMonths,
+  addCeCourseEntry, deleteCeCourseEntry, updateCeCourseEntry, computeRequiredCertStatuses, addMonths,
 } from "@/lib/requiredCertsStore";
 
 // Which required-cert roles apply to this employee — a specialty dentist
@@ -50,6 +50,13 @@ export function RequiredCertsSection({
   const [completionDate, setCompletionDate] = useState(new Date().toISOString().slice(0, 10));
   const [completionError, setCompletionError] = useState<string | null>(null);
   const [completionSaving, setCompletionSaving] = useState(false);
+  // Editing one already-logged course, in place, from inside its requirement.
+  const [editingCeId, setEditingCeId] = useState<string | null>(null);
+  const [ceEdit, setCeEdit] = useState({ courseName: "", hours: "", dateCompleted: "" });
+  const [ceEditFile, setCeEditFile] = useState<File | null>(null);
+  const [ceEditExistingFile, setCeEditExistingFile] = useState<string | null>(null);
+  const [ceEditError, setCeEditError] = useState<string | null>(null);
+  const [ceEditSaving, setCeEditSaving] = useState(false);
 
   const roles = getApplicableRoles(employee);
   if (roles.length === 0) return null;
@@ -90,6 +97,41 @@ export function RequiredCertsSection({
   async function handleDeleteCe(id: string) {
     if (!confirm("Delete this CE course entry?")) return;
     await deleteCeCourseEntry(id);
+    await refreshAll();
+  }
+
+  function startEditCe(e: CeCourseEntry) {
+    setCeEdit({ courseName: e.courseName, hours: String(e.hours), dateCompleted: e.dateCompleted });
+    setCeEditFile(null);
+    setCeEditExistingFile(e.fileName ?? (e.fileUrl ? "Attached file" : null));
+    setCeEditError(null);
+    setEditingCeId(e.id);
+  }
+
+  async function handleSaveCeEdit(typeId: string) {
+    if (!editingCeId) return;
+    const hours = Number(ceEdit.hours);
+    if (!ceEdit.courseName.trim()) { setCeEditError("Give the course a name."); return; }
+    if (!Number.isFinite(hours) || hours <= 0) { setCeEditError("Hours must be greater than zero."); return; }
+    if (!ceEdit.dateCompleted) { setCeEditError("Pick the date it was completed."); return; }
+    setCeEditSaving(true);
+    // Only touched when a new file is chosen, so editing hours never drops
+    // the certificate already attached.
+    let fileUrl: string | undefined;
+    let fileName: string | undefined;
+    if (ceEditFile) {
+      const upload = await uploadCertFile(ceEditFile);
+      if ("error" in upload) { setCeEditSaving(false); setCeEditError(upload.error); return; }
+      fileUrl = upload.url;
+      fileName = upload.name;
+    }
+    const result = await updateCeCourseEntry(editingCeId, {
+      courseName: ceEdit.courseName.trim(), hours, dateCompleted: ceEdit.dateCompleted,
+      requiredCertTypeId: typeId, fileUrl, fileName,
+    });
+    setCeEditSaving(false);
+    if (!result.ok) { setCeEditError(result.error ?? "Couldn't save."); return; }
+    setEditingCeId(null);
     await refreshAll();
   }
 
@@ -149,14 +191,26 @@ export function RequiredCertsSection({
                       </span>
                     )}
                   </div>
+                  {/* Once a requirement is met, the useful action is reviewing
+                      or correcting what satisfied it, not adding another course.
+                      Logging more stays available, just no longer the default. */}
                   <div className="flex items-center gap-3 flex-shrink-0">
+                    {status.satisfied && myEntries.length > 0 && (
+                      <button onClick={() => {
+                        setExpandedTypeId(expandedTypeId === type.id ? null : type.id);
+                        setEditingCeId(null);
+                      }} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
+                        {expandedTypeId === type.id ? "Done" : "Edit"}
+                      </button>
+                    )}
                     <button onClick={() => {
                       const opening = loggingTypeId !== type.id;
                       setLoggingTypeId(opening ? type.id : null);
                       if (opening) setCeCourseName(type.title);
                       setCeError(null);
-                    }} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
-                      {loggingTypeId === type.id ? "Cancel" : "+ Log a course"}
+                    }} className="text-xs font-semibold hover:underline"
+                      style={{ color: status.satisfied ? "rgba(74,66,56,0.5)" : "#e8622a" }}>
+                      {loggingTypeId === type.id ? "Cancel" : status.satisfied ? "+ Add another" : "+ Log a course"}
                     </button>
                   </div>
                 </div>
@@ -179,14 +233,54 @@ export function RequiredCertsSection({
                 {expandedTypeId === type.id && (
                   <div className="mt-2 space-y-1">
                     {myEntries.map((e) => (
-                      <div key={e.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-3 py-1.5">
-                        <span style={{ color: "rgba(74,66,56,0.7)" }}>
-                          {e.courseName} — {e.hours} hrs — {new Date(e.dateCompleted + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                          {e.fileUrl && (
-                            <a href={e.fileUrl} target="_blank" rel="noopener noreferrer" className="ml-2 text-xs font-semibold hover:underline" style={{ color: "#185FA5" }}>View file →</a>
-                          )}
-                        </span>
-                        <button onClick={() => handleDeleteCe(e.id)} className="text-red-400 hover:underline">Delete</button>
+                      <div key={e.id} className="text-xs bg-white rounded-lg px-3 py-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span style={{ color: "rgba(74,66,56,0.7)" }}>
+                            {e.courseName} — {e.hours} hrs — {new Date(e.dateCompleted + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                            {e.fileUrl && (
+                              <a href={e.fileUrl} target="_blank" rel="noopener noreferrer" className="ml-2 text-xs font-semibold hover:underline" style={{ color: "#185FA5" }}>View file →</a>
+                            )}
+                          </span>
+                          <span className="flex items-center gap-2 flex-shrink-0">
+                            <button onClick={() => (editingCeId === e.id ? setEditingCeId(null) : startEditCe(e))}
+                              className="font-semibold hover:underline" style={{ color: "#e8622a" }}>
+                              {editingCeId === e.id ? "Cancel" : "Edit"}
+                            </button>
+                            <button onClick={() => handleDeleteCe(e.id)} className="text-red-400 hover:underline">Delete</button>
+                          </span>
+                        </div>
+                        {editingCeId === e.id && (
+                          <div className="mt-2 grid gap-2 sm:grid-cols-4 border-t border-slate-100 pt-2">
+                            <input type="text" value={ceEdit.courseName}
+                              onChange={(ev) => setCeEdit((f) => ({ ...f, courseName: ev.target.value }))}
+                              placeholder="Course name"
+                              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
+                            <input type="number" step="0.5" onFocus={(ev) => ev.target.select()} value={ceEdit.hours}
+                              onChange={(ev) => setCeEdit((f) => ({ ...f, hours: ev.target.value }))}
+                              placeholder="Hours"
+                              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                            <input type="date" value={ceEdit.dateCompleted}
+                              onChange={(ev) => setCeEdit((f) => ({ ...f, dateCompleted: ev.target.value }))}
+                              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                            <div className="sm:col-span-4">
+                              <label className="block text-xs font-medium text-slate-500 mb-1">
+                                {ceEditExistingFile ? "Replace certificate" : "Attach certificate"}
+                              </label>
+                              <input type="file" accept="image/*,application/pdf"
+                                onChange={(ev) => setCeEditFile(ev.target.files?.[0] ?? null)}
+                                className="w-full text-xs text-slate-500 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-slate-600" />
+                              {ceEditExistingFile && !ceEditFile && (
+                                <p className="mt-1" style={{ color: "rgba(74,66,56,0.45)" }}>On file: {ceEditExistingFile}. Leave empty to keep it.</p>
+                              )}
+                            </div>
+                            {ceEditError && <p className="text-xs text-red-600 sm:col-span-4">⚠️ {ceEditError}</p>}
+                            <button onClick={() => handleSaveCeEdit(type.id)} disabled={ceEditSaving}
+                              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white sm:col-span-4 justify-self-start disabled:opacity-50"
+                              style={{ backgroundColor: "#e8622a" }}>
+                              {ceEditSaving ? "Saving…" : "Save changes"}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
