@@ -213,14 +213,22 @@ export async function addCeCourseEntry(input: Omit<CeCourseEntry, "id">): Promis
  */
 export async function updateCeCourseEntry(
   id: string,
-  updates: { courseName: string; hours: number; dateCompleted: string; requiredCertTypeId: string }
+  updates: {
+    courseName: string; hours: number; dateCompleted: string; requiredCertTypeId: string;
+    // Left undefined when the attachment isn't changing, so editing the
+    // hours on a course never silently drops the certificate already on it.
+    fileUrl?: string | null; fileName?: string | null;
+  }
 ): Promise<{ ok: boolean; error?: string }> {
-  const { error } = await supabase.from("ce_course_entries").update({
+  const payload: Record<string, unknown> = {
     course_name: updates.courseName,
     hours: updates.hours,
     date_completed: updates.dateCompleted,
     required_cert_type_id: updates.requiredCertTypeId,
-  }).eq("id", id);
+  };
+  if (updates.fileUrl !== undefined) payload.file_url = updates.fileUrl;
+  if (updates.fileName !== undefined) payload.file_name = updates.fileName;
+  const { error } = await supabase.from("ce_course_entries").update(payload).eq("id", id);
   if (error) { console.error("updateCeCourseEntry error:", error); return { ok: false, error: error.message }; }
   return { ok: true };
 }

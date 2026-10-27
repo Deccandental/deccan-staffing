@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { Employee } from "@/types/employee";
-import { Certification } from "@/lib/certsStore";
+import { Certification, uploadCertFile } from "@/lib/certsStore";
 import { CeCourseEntry, RequiredCertType, addMonths, updateCeCourseEntry } from "@/lib/requiredCertsStore";
 import { getApplicableRoles } from "@/components/RequiredCertsSection";
 
@@ -34,6 +34,7 @@ interface CeLogRow {
   hours: number;
   source: "Course" | "Certificate";
   fileUrl?: string | null;
+  fileName?: string | null;
   inWindow: boolean;
   dateIsApproximate: boolean;
 }
@@ -55,6 +56,10 @@ export default function CeLogPanel({
   const [editForm, setEditForm] = useState({ courseName: "", hours: "", dateCompleted: "", requiredCertTypeId: "" });
   const [editError, setEditError] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [editFile, setEditFile] = useState<File | null>(null);
+  // The attachment already on the entry, so the form can say whether one
+  // exists and offer to replace rather than silently overwrite.
+  const [editExistingFileName, setEditExistingFileName] = useState<string | null>(null);
 
   const roles = getApplicableRoles(employee);
   const typeById = new Map(requiredTypes.map((t) => [t.id, t]));
@@ -82,6 +87,7 @@ export default function CeLogPanel({
       hours: e.hours,
       source: "Course",
       fileUrl: e.fileUrl,
+      fileName: e.fileName,
       inWindow: inWindow(e.dateCompleted),
       dateIsApproximate: false,
     });
@@ -134,6 +140,8 @@ export default function CeLogPanel({
       requiredCertTypeId: r.requiredCertTypeId ?? "",
     });
     setEditError("");
+    setEditFile(null);
+    setEditExistingFileName(r.fileName ?? (r.fileUrl ? "Attached file" : null));
     setEditingId(r.entryId);
   }
 
@@ -144,11 +152,25 @@ export default function CeLogPanel({
     if (!Number.isFinite(hours) || hours <= 0) { setEditError("Hours must be a number greater than zero."); return; }
     if (!editForm.dateCompleted) { setEditError("Pick the date it was completed."); return; }
     setSavingEdit(true);
+
+    // Only touch the attachment when a new file was chosen; otherwise the
+    // existing one is left exactly as it is.
+    let fileUrl: string | undefined;
+    let fileName: string | undefined;
+    if (editFile) {
+      const upload = await uploadCertFile(editFile);
+      if ("error" in upload) { setSavingEdit(false); setEditError(upload.error); return; }
+      fileUrl = upload.url;
+      fileName = upload.name;
+    }
+
     const result = await updateCeCourseEntry(editingId, {
       courseName: editForm.courseName.trim(),
       hours,
       dateCompleted: editForm.dateCompleted,
       requiredCertTypeId: editForm.requiredCertTypeId,
+      fileUrl,
+      fileName,
     });
     setSavingEdit(false);
     if (!result.ok) { setEditError(result.error ?? "Couldn't save."); return; }
@@ -257,6 +279,17 @@ export default function CeLogPanel({
                                 <option key={t.id} value={t.id}>{t.title}</option>
                               ))}
                             </select>
+                          </label>
+                          <label className="text-xs sm:col-span-4" style={{ color: "rgba(74,66,56,0.6)" }}>
+                            {editExistingFileName ? "Replace certificate" : "Attach certificate"}
+                            <input type="file" accept="image/*,application/pdf"
+                              onChange={(e) => setEditFile(e.target.files?.[0] ?? null)}
+                              className="ml-2 text-xs" />
+                            {editExistingFileName && !editFile && (
+                              <span className="block mt-1" style={{ color: "rgba(74,66,56,0.45)" }}>
+                                On file: {editExistingFileName}. Leave empty to keep it.
+                              </span>
+                            )}
                           </label>
                         </div>
                         {editError && <p className="text-xs font-semibold text-red-600 mt-2">⚠️ {editError}</p>}
