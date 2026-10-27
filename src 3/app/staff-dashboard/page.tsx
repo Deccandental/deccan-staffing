@@ -1,0 +1,1320 @@
+"use client";
+
+import { useState, useEffect, Fragment } from "react";
+import { Sidebar } from "@/components/Sidebar";
+import { Employee } from "@/types/employee";
+import { loadStaff, updateOwnProfile } from "@/lib/staffStore";
+import { LeaveRequest } from "@/types/leave";
+import { loadLeaveRequests } from "@/lib/leaveStore";
+import {
+  Certification, NewCertInput, loadCertificationsForEmployee,
+  createCertification, updateCertification, deleteCertification, uploadCertFile,
+} from "@/lib/certsStore";
+import { StaffEvent, loadUpcomingEvents, EventRsvp, loadRsvpsForEvents, setRsvp } from "@/lib/eventsStore";
+import { UpcomingShift, loadUpcomingShiftsForEmployee } from "@/lib/staffSchedule";
+import { PayrollEntry, loadPayrollEntriesInRange } from "@/lib/payrollStore";
+import {
+  getCurrentQuarter, computeQuarterCalc, loadGrowthBonusQuarter, loadGrowthBonusPayments,
+  isEligibleForQuarter, computeHoursWorkedInQuarter, hoursToDays, splitBonusPool, getQuarterDateRange,
+  loadGrowthBonusHoursOverrides, GrowthBonusQuarter,
+} from "@/lib/growthBonus";
+import {
+  PvBonusQuarter, loadAllPvBonusQuarters, PvBonusPayrollEntry, loadPvBonusPayrollEntries,
+  PvBonusPayment, loadPvBonusPayments, computePvQuarterCalcs, getPvQuarterDateRange,
+} from "@/lib/pvBonus";
+import { HoBonusMonth, loadHoBonusPayoutYear, HoBonusPayment, loadHoBonusPayments } from "@/lib/hoBonus";
+import { HygieneBonusEntry, loadHygieneBonusEntries, HYGIENE_BONUS_PER_PATIENT, formatPayDate, isHygieneBonusEligible } from "@/lib/hygieneBonus";
+import { PolicyDocument, loadPolicyDocuments, loadLatestRequirement, loadMySignature } from "@/lib/policyDocs";
+import { loadAllSlots, computeCheckinStatus, CheckinSlot } from "@/lib/checkinsStore";
+import { loadRequiredCertTypes, RequiredCertType, addMonths as addMonthsToDate, loadCeCourseEntriesForEmployee, CeCourseEntry, computeRequiredCertStatuses, deleteCeCourseEntry } from "@/lib/requiredCertsStore";
+import { RequiredCertsSection, getApplicableRoles } from "@/components/RequiredCertsSection";
+import CeLogPanel from "@/components/CeLogPanel";
+import { WishlistItem, loadWishlistItems } from "@/lib/wishlist";
+import { StaffNote, NOTE_KIND_LABELS, loadSharedStaffNotes } from "@/lib/staffNotes";
+import { formatMoney } from "@/lib/format";
+import { loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
+import { hygieneYear, hygieneYearDetail, HygienePeriodRow } from "@/lib/compOwed";
+import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
+import { getSessionToken } from "@/lib/secureData";
+
+const REASON_LABELS: Record<string, string> = {
+  sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other",
+};
+
+const LEAVE_STATUS_STYLES: Record<string, string> = {
+  pending: "bg-amber-100 text-amber-700",
+  approved: "bg-green-100 text-green-700",
+  denied: "bg-red-100 text-red-700",
+  cancelled: "bg-slate-100 text-slate-400",
+};
+
+const ROLE_ICONS: Record<UpcomingShift["role"], string> = {
+  Dentist: "🦷", Assistant: "🤝", "Front Desk": "🖥️", Hygienist: "✨", Floater: "🔄",
+};
+
+const QUARTER_LABELS: Record<1 | 2 | 3 | 4, string> = { 1: "Q1 (Jan–Mar)", 2: "Q2 (Apr–Jun)", 3: "Q3 (Jul–Sep)", 4: "Q4 (Oct–Dec)" };
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function daysUntil(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const target = new Date(y, m - 1, d).getTime();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target - today.getTime()) / 86400000);
+}
+
+function addMonths(dateStr: string, months: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(y, m - 1 + months, d);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function certBadge(cert: Certification): { label: string; className: string } {
+  if (!cert.expirationDate) return { label: "No expiration", className: "bg-slate-100 text-slate-500" };
+  const days = daysUntil(cert.expirationDate);
+  if (days < 0) return { label: "Expired", className: "bg-red-100 text-red-700" };
+  if (days <= 7) return { label: `Expires in ${days}d`, className: "bg-red-100 text-red-700" };
+  if (days <= 30) return { label: `Expires in ${days}d`, className: "bg-amber-100 text-amber-700" };
+  if (days <= 60) return { label: `Expires in ${days}d`, className: "bg-yellow-100 text-yellow-700" };
+  return { label: "Current", className: "bg-green-100 text-green-700" };
+}
+
+interface CertFormState {
+  title: string;
+  expirationDate: string;
+  ceHours: string;
+}
+
+const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "", ceHours: "" };
+
+function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
+  const isManager = identity.canAdmin;
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(identity.mode === "staff" ? (identity.employeeId ?? null) : null);
+  // Documents this person has been asked to review and hasn't yet (shown as a chip with the other warnings).
+  const [reviewCounts, setReviewCounts] = useState<{ pending: number; overdue: number }>({ pending: 0, overdue: 0 });
+  useEffect(() => {
+    setReviewCounts({ pending: 0, overdue: 0 });
+    if (selectedId == null) return;
+    const own = identity.mode === "staff" && identity.employeeId === selectedId;
+    let cancelled = false;
+    fetch(own ? "/api/reviews/mine" : "/api/reviews/admin", {
+      method: "POST", headers: { "Content-Type": "application/json", "x-session-token": getSessionToken() },
+      body: JSON.stringify(own ? { action: "count" } : { action: "countFor", employeeId: selectedId }),
+    }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (!cancelled && j && typeof j.pending === "number") setReviewCounts({ pending: j.pending, overdue: j.overdue ?? 0 }); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedId, identity]);
+  // Compensation is visible on your OWN dashboard always, but on someone
+  // else's only to people with payroll permission. Plain canAdmin lets a
+  // manager view other dashboards (schedules, certs, leave) without that
+  // also exposing everyone's bonus figures.
+  const canSeeThisPersonsPay =
+    identity.mode === "super" ||
+    identity.canManagePayroll ||
+    (identity.employeeId != null && identity.employeeId === selectedId);
+  const [shifts, setShifts] = useState<UpcomingShift[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [certs, setCerts] = useState<Certification[]>([]);
+  const [pendingPolicies, setPendingPolicies] = useState<{ title: string; cycleLabel: string }[]>([]);
+  const [checkinDue, setCheckinDue] = useState(false);
+  const [checkinUpcoming, setCheckinUpcoming] = useState<CheckinSlot | null>(null);
+  const [titleOptions, setTitleOptions] = useState<string[]>([]);
+  const [requiredTypesForCerts, setRequiredTypesForCerts] = useState<RequiredCertType[]>([]);
+  const [ceEntriesForCerts, setCeEntriesForCerts] = useState<CeCourseEntry[]>([]);
+  const [events, setEvents] = useState<StaffEvent[]>([]);
+  const [bonusYear] = useState(new Date().getFullYear());
+  // Unpaid hygiene bonus carried in from earlier years (typed on the Hygiene Bonus
+  // sheet), plus any full years since, so this card agrees with that sheet.
+  const [hygieneStart, setHygieneStart] = useState(0);
+  const [hygieneRows, setHygieneRows] = useState<HygienePeriodRow[]>([]);
+  const [showHygieneCalc, setShowHygieneCalc] = useState(false);
+  useEffect(() => {
+    if (selectedId == null) { setHygieneStart(0); setHygieneRows([]); return; }
+    let cancelled = false;
+    (async () => {
+      const c = (await loadBonusCarryovers()).get(carryKey("hygiene", selectedId));
+      let start = 0;
+      if (c && bonusYear >= c.asOfYear) {
+        start = c.amount;
+        for (let y = c.asOfYear; y < bonusYear; y++) {
+          const yr = await hygieneYear(selectedId, y, `${y}-12-31`);
+          start += yr.earned - yr.paid;
+        }
+      }
+      const rows = await hygieneYearDetail(selectedId, bonusYear);
+      if (!cancelled) { setHygieneStart(start); setHygieneRows(rows); }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId, bonusYear]);
+  const [yearQuartersData, setYearQuartersData] = useState<Record<number, GrowthBonusQuarter>>({});
+  const [yearDaysOverrides, setYearDaysOverrides] = useState<Record<number, Record<number, number>>>({});
+  const [yearPayrollEntries, setYearPayrollEntries] = useState<PayrollEntry[]>([]);
+  const [bonusReceivedThisYear, setBonusReceivedThisYear] = useState(0);
+  const [pvAllQuarters, setPvAllQuarters] = useState<PvBonusQuarter[]>([]);
+  const [pvPayrollEntries, setPvPayrollEntries] = useState<PvBonusPayrollEntry[]>([]);
+  const [pvPayments, setPvPayments] = useState<PvBonusPayment[]>([]);
+  const [expandedPvQuarter, setExpandedPvQuarter] = useState<string | null>(null);
+  const [rsvps, setRsvps] = useState<EventRsvp[]>([]);
+  const [wishlistItems, setWishlistItems] = useState<WishlistItem[]>([]);
+  const [myNotes, setMyNotes] = useState<StaffNote[]>([]);
+  const [showOtherDocs, setShowOtherDocs] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState({ name: "", email: "" });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [hygieneEntries, setHygieneEntries] = useState<HygieneBonusEntry[]>([]);
+  const [hoMonths, setHoMonths] = useState<HoBonusMonth[]>([]);
+  // Dated payments are the source of truth for what has been paid (the month rows' own
+  // "paid" column is an older single figure that can be out of date).
+  const [hoPaymentList, setHoPaymentList] = useState<HoBonusPayment[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const [showCertForm, setShowCertForm] = useState(false);
+  const [editingCertId, setEditingCertId] = useState<string | null>(null);
+  const [certForm, setCertForm] = useState<CertFormState>(EMPTY_CERT_FORM);
+  const [useCustomTitle, setUseCustomTitle] = useState(false);
+  const [titleIsFixed, setTitleIsFixed] = useState(false);
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const [certError, setCertError] = useState("");
+  const [certSaving, setCertSaving] = useState(false);
+
+  useEffect(() => { loadStaff().then(setStaff); }, []);
+  useEffect(() => { loadWishlistItems(selectedId).then(setWishlistItems); }, [selectedId]);
+  useEffect(() => {
+    if (selectedId == null) { setMyNotes([]); return; }
+    loadSharedStaffNotes(selectedId).then(setMyNotes);
+  }, [selectedId]);
+  useEffect(() => { if (selectedId == null) { setHoPaymentList([]); return; } loadHoBonusPayments(selectedId).then(setHoPaymentList); }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedId == null) return;
+    let cancelled = false;
+    setLoading(true);
+    const todayStr = new Date().toISOString().split("T")[0];
+    const yearStart = `${bonusYear}-01-01`;
+    const yearEnd = `${bonusYear}-12-31`;
+    Promise.all([
+      loadUpcomingShiftsForEmployee(selectedId),
+      loadLeaveRequests(),
+      loadCertificationsForEmployee(selectedId),
+      loadUpcomingEvents(todayStr),
+      loadRequiredCertTypes(),
+      loadCeCourseEntriesForEmployee(selectedId),
+      loadGrowthBonusQuarter(bonusYear, 1), loadGrowthBonusQuarter(bonusYear, 2),
+      loadGrowthBonusQuarter(bonusYear, 3), loadGrowthBonusQuarter(bonusYear, 4),
+      loadGrowthBonusHoursOverrides(bonusYear, 1), loadGrowthBonusHoursOverrides(bonusYear, 2),
+      loadGrowthBonusHoursOverrides(bonusYear, 3), loadGrowthBonusHoursOverrides(bonusYear, 4),
+      loadPayrollEntriesInRange(yearStart, yearEnd),
+      loadGrowthBonusPayments(selectedId),
+      loadAllPvBonusQuarters(selectedId),
+      loadPvBonusPayrollEntries(selectedId),
+      loadPvBonusPayments(selectedId),
+      loadHygieneBonusEntries(selectedId, yearStart, yearEnd),
+      loadHoBonusPayoutYear(selectedId, bonusYear),
+    ]).then(([
+      shiftData, leaveData, certData, eventData, requiredTypes, ceEntries,
+      q1, q2, q3, q4, d1, d2, d3, d4, entries, payments, pvAllQuarters, pvPayrollEntries, pvPayments, hygieneYear, hoYear,
+    ]) => {
+      if (cancelled) return;
+      setShifts(shiftData);
+      setLeaveRequests(leaveData.filter((r) => r.employeeId === selectedId));
+      setCerts(certData);
+      const myEvents = eventData.filter((ev) => ev.inviteAll || ev.invitedStaffIds.includes(selectedId));
+      setEvents(myEvents);
+      loadRsvpsForEvents(myEvents.filter((ev) => ev.rsvpEnabled).map((ev) => ev.id)).then((r) => { if (!cancelled) setRsvps(r); });
+      setRequiredTypesForCerts(requiredTypes);
+      setCeEntriesForCerts(ceEntries);
+      setTitleOptions(Array.from(new Set(requiredTypes.map((t: any) => t.title))).sort((a: any, b: any) => a.localeCompare(b)) as string[]);
+      setYearQuartersData({ 1: q1, 2: q2, 3: q3, 4: q4 });
+      setYearDaysOverrides({ 1: d1, 2: d2, 3: d3, 4: d4 });
+      setYearPayrollEntries(entries);
+      setPvAllQuarters(pvAllQuarters);
+      setPvPayrollEntries(pvPayrollEntries);
+      setPvPayments(pvPayments);
+      setHygieneEntries(hygieneYear);
+      setHoMonths(hoYear);
+      setBonusReceivedThisYear(payments.filter((p) => p.date.startsWith(String(bonusYear))).reduce((sum, p) => sum + p.amount, 0));
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedId == null) return;
+    const emp = staff.find((e) => e.id === selectedId);
+    if (emp?.exemptFromPolicySigning) { setPendingPolicies([]); return; }
+    let cancelled = false;
+    (async () => {
+      const docs = await loadPolicyDocuments();
+      const pending: { title: string; cycleLabel: string }[] = [];
+      for (const doc of docs) {
+        if (doc.restrictedToEmployeeId != null && doc.restrictedToEmployeeId !== selectedId) continue;
+        const req = await loadLatestRequirement(doc.id);
+        if (!req) continue;
+        const sig = await loadMySignature(req.id, selectedId);
+        if (!sig) pending.push({ title: doc.title, cycleLabel: req.cycleLabel });
+      }
+      if (!cancelled) setPendingPolicies(pending);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId, staff]);
+
+  useEffect(() => {
+    if (selectedId == null) return;
+    const emp = staff.find((e) => e.id === selectedId);
+    if (emp?.exemptFromCheckin) { setCheckinDue(false); setCheckinUpcoming(null); return; }
+    let cancelled = false;
+    (async () => {
+      const slots = await loadAllSlots();
+      const today = new Date().toISOString().slice(0, 10);
+      const status = computeCheckinStatus(selectedId, slots, today);
+      if (!cancelled) {
+        setCheckinDue(status.isDue && !status.upcomingSlot);
+        setCheckinUpcoming(status.upcomingSlot);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId, staff]);
+
+  const selectedEmployee = staff.find((e) => e.id === selectedId);
+
+  // Events asking for an RSVP that this person hasn't answered yet. Only
+  // counted when viewing your own dashboard — a manager looking at someone
+  // else's shouldn't be prompted to answer on their behalf.
+  const pendingRsvpCount = selectedId == null ? 0
+    : events.filter((ev) => ev.rsvpEnabled && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId)).length;
+  const viewingOwnDashboard = identity.employeeId != null && identity.employeeId === selectedId;
+
+  // Titles already covered by the requirement lists above, so they aren't
+  // repeated in the documents list below.
+  const requiredTitles = new Set(
+    selectedEmployee
+      ? requiredTypesForCerts
+          .filter((t) => getApplicableRoles(selectedEmployee).includes(t.appliesToRole))
+          .map((t) => t.title)
+      : []
+  );
+  const otherCerts = certs.filter((c) => !requiredTitles.has(c.title));
+
+  const missingOrExpiredCertCount = selectedEmployee ? (() => {
+    const roles = getApplicableRoles(selectedEmployee);
+    if (roles.length === 0) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const statuses = computeRequiredCertStatuses(roles, requiredTypesForCerts, certs, ceEntriesForCerts, today);
+    return statuses.filter((s) => !s.satisfied).length;
+  })() : 0;
+
+  // Computes what this specific employee earned for a given quarter, by
+  // splitting that quarter's pool across every eligible employee — mirrors
+  // the same logic used in the Payroll Dashboard's Growth Bonus tab.
+  const isHygienist = !!selectedEmployee && isHygieneBonusEligible(selectedEmployee);
+
+  const isFullTime = (selectedEmployee?.employmentType ?? "full_time") === "full_time";
+  const ptoEligibilityDate = selectedEmployee?.hireDate ? addMonths(selectedEmployee.hireDate, 4) : null;
+  const ptoDaysLeft = ptoEligibilityDate ? daysUntil(ptoEligibilityDate) : null;
+  const showPtoCountdown = isFullTime && ptoDaysLeft != null && ptoDaysLeft > 0;
+
+  const bonusEligibilityDate = selectedEmployee?.hireDate ? addMonths(selectedEmployee.hireDate, 5) : null;
+  const bonusDaysLeft = bonusEligibilityDate ? daysUntil(bonusEligibilityDate) : null;
+  const showBonusCountdown = !!selectedEmployee?.growthBonusEligible && bonusDaysLeft != null && bonusDaysLeft > 0;
+  const hygieneEarned = hygieneRows.reduce((sum, r) => sum + r.earned, 0);
+  const hygienePaid = hygieneRows.reduce((sum, r) => sum + r.paid, 0);
+  const hygieneBalance = hygieneStart + hygieneEarned - hygienePaid;
+
+  function bonusForQuarter(q: 1 | 2 | 3 | 4): { calc: ReturnType<typeof computeQuarterCalc>; myBonus: number } | null {
+    const qData = yearQuartersData[q];
+    if (!qData || !selectedEmployee) return null;
+    const calc = computeQuarterCalc(qData);
+    const { start, end } = getQuarterDateRange(bonusYear, q);
+    const eligible = staff.filter((e) => isEligibleForQuarter(e, end));
+    const overridesForQ = yearDaysOverrides[q] ?? {};
+    const rows = eligible.map((e) => {
+      const hours = overridesForQ[e.id] ?? computeHoursWorkedInQuarter(e.id, start, end, yearPayrollEntries);
+      return { employee: e, days: hoursToDays(hours) };
+    });
+    const split = calc.eligible ? splitBonusPool(calc.bonusPool, rows) : [];
+    const mine = split.find((r) => r.employee.id === selectedEmployee.id);
+    return { calc, myBonus: mine?.bonus ?? 0 };
+  }
+
+  const currentQuarter = getCurrentQuarter().quarter;
+  const currentQuarterData = yearQuartersData[currentQuarter];
+  const currentCalc = currentQuarterData ? computeQuarterCalc(currentQuarterData) : null;
+  const requiredProduction = currentQuarterData ? Math.max(currentQuarterData.bamThreshold, currentQuarterData.netProductionPriorYear * 1.2) : 0;
+  const bonusProgressPct = currentQuarterData && requiredProduction > 0
+    ? Math.min(100, Math.round((currentQuarterData.netProductionCurrent / requiredProduction) * 100)) : 0;
+  const bonusUnlocked = !!currentCalc?.eligible;
+  const totalEarnedThisYear = ([1, 2, 3, 4] as const)
+    .filter((q) => q <= currentQuarter)
+    .reduce((sum, q) => sum + (bonusForQuarter(q)?.myBonus ?? 0), 0);
+  const bonusBeingPaced = totalEarnedThisYear > bonusReceivedThisYear;
+
+  function openNewCert() {
+    setCertForm(EMPTY_CERT_FORM);
+    setEditingCertId(null);
+    setCertFile(null);
+    setCertError("");
+    setUseCustomTitle(titleOptions.length === 0);
+    setTitleIsFixed(false);
+    setShowCertForm(true);
+  }
+
+  function startEditCert(cert: Certification) {
+    // Only the expiration date is stored. For a requirement whose form asks
+    // for the COMPLETION date, loading the stored expiration into that
+    // field shows the wrong date AND adds another full cycle on save —
+    // pushing the expiry further out with every edit. Convert back to the
+    // completion date the expiration was derived from.
+    const editType = requiredTypesForCerts.find((t) => t.title === cert.title);
+    const editIsCompletionMode = editType != null && editType.kind !== "ce_hours" && editType.dateMode === "completion";
+    const dateForForm = editIsCompletionMode && cert.expirationDate
+      ? addMonthsToDate(cert.expirationDate, -editType.frequencyMonths)
+      : cert.expirationDate ?? "";
+    setCertForm({ title: cert.title, expirationDate: dateForForm, ceHours: cert.ceHours != null ? String(cert.ceHours) : "" });
+    setEditingCertId(cert.id);
+    setCertFile(null);
+    setCertError("");
+    setUseCustomTitle(!titleOptions.includes(cert.title));
+    setTitleIsFixed(false);
+    setShowCertForm(true);
+  }
+
+  function openForRequiredTitle(title: string, existing?: Certification) {
+    if (existing) { startEditCert(existing); return; }
+    setCertForm({ title, expirationDate: "", ceHours: "" });
+    setEditingCertId(null);
+    setCertFile(null);
+    setCertError("");
+    setUseCustomTitle(false);
+    setTitleIsFixed(true);
+    setShowCertForm(true);
+  }
+
+  function closeCertForm() {
+    setShowCertForm(false);
+    setEditingCertId(null);
+    setCertForm(EMPTY_CERT_FORM);
+    setCertFile(null);
+    setCertError("");
+    setTitleIsFixed(false);
+  }
+
+  async function handleRsvp(eventId: string, attending: boolean) {
+    if (selectedId == null) return;
+    const result = await setRsvp(eventId, selectedId, attending);
+    if (!result.ok) return;
+    setRsvps(await loadRsvpsForEvents(events.filter((e) => e.rsvpEnabled).map((e) => e.id)));
+  }
+
+  async function handleSaveProfile() {
+    if (selectedEmployee == null) return;
+    setProfileSaving(true);
+    const result = await updateOwnProfile(selectedEmployee.id, profileForm);
+    setProfileSaving(false);
+    if (!result.ok) { setProfileError(result.error ?? "Couldn't save. Please try again."); return; }
+    setProfileError(null);
+    setEditingProfile(false);
+    setStaff(await loadStaff());
+  }
+
+  async function refreshCertsData() {
+    if (selectedId == null) return;
+    const [freshCerts, freshTypes, freshCe] = await Promise.all([
+      loadCertificationsForEmployee(selectedId), loadRequiredCertTypes(), loadCeCourseEntriesForEmployee(selectedId),
+    ]);
+    setCerts(freshCerts);
+    setRequiredTypesForCerts(freshTypes);
+    setCeEntriesForCerts(freshCe);
+    setTitleOptions(Array.from(new Set(freshTypes.map((t) => t.title))).sort((a, b) => a.localeCompare(b)));
+  }
+
+  async function handleSaveCert() {
+    if (selectedId == null) return;
+    setCertError("");
+    if (!certForm.title.trim()) { setCertError("Please enter a document name."); return; }
+    if (!editingCertId && !certFile) { setCertError("Please choose a file to upload."); return; }
+
+    setCertSaving(true);
+    try {
+      let fileUrl = "";
+      let fileName = "";
+      if (certFile) {
+        const uploaded = await uploadCertFile(certFile);
+        if ("error" in uploaded) { setCertError(uploaded.error); setCertSaving(false); return; }
+        fileUrl = uploaded.url;
+        fileName = uploaded.name;
+      } else if (editingCertId) {
+        const existing = certs.find((c) => c.id === editingCertId);
+        fileUrl = existing?.fileUrl ?? "";
+        fileName = existing?.fileName ?? "";
+      }
+
+      const matchingType = (requiredTypesForCerts ?? []).find((t) => t.title === certForm.title.trim());
+      const isCompletionMode = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "completion";
+      const isNeverExpires = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "none";
+      const resolvedExpiration = isNeverExpires
+        ? null
+        : isCompletionMode && certForm.expirationDate
+          ? addMonthsToDate(certForm.expirationDate, matchingType!.frequencyMonths)
+          : certForm.expirationDate || null;
+
+      const input: NewCertInput = {
+        ownerType: "personnel",
+        employeeId: selectedId,
+        title: certForm.title.trim(),
+        expirationDate: resolvedExpiration,
+        ceHours: certForm.ceHours ? Number(certForm.ceHours) : null,
+        fileUrl, fileName,
+      };
+
+      const saved = editingCertId ? await updateCertification(editingCertId, input) : await createCertification(input);
+      setCertSaving(false);
+      if (!saved) { setCertError("Something went wrong — not saved. Try again."); return; }
+
+      closeCertForm();
+      await refreshCertsData();
+    } catch (err) {
+      console.error("handleSaveCert error:", err);
+      setCertError(err instanceof Error ? `Save failed: ${err.message}` : "Something went wrong — not saved. Try again.");
+      setCertSaving(false);
+    }
+  }
+
+  async function handleDeleteCert(id: string) {
+    if (!confirm("Delete this certification/document? This can't be undone.")) return;
+    await deleteCertification(id);
+    await refreshCertsData();
+  }
+
+  return (
+    <main className="min-h-screen" style={{ background: "linear-gradient(160deg, #FDF2E9 0%, #F5EFFA 50%, #EAF3F8 100%)" }}>
+      <Sidebar />
+      <div className="pt-24 lg:pt-12 lg:ml-64 p-4 lg:px-8 lg:pb-8">
+        <header className="mb-6 flex items-center justify-between flex-wrap gap-4">
+          <h1 className="text-2xl font-bold flex-shrink-0" style={{ color: "#4A4238" }}>Staff Dashboard</h1>
+          {isManager ? (
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="text-xs font-semibold flex-shrink-0" style={{ color: "rgba(74,66,56,0.55)" }}>View staff member</label>
+              <select value={selectedId ?? ""} onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : null)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none min-w-[220px]">
+                <option value="">Select a staff member...</option>
+                {staff.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.role}{e.archived ? " (archived)" : ""}</option>)}
+              </select>
+              <div className="flex items-center gap-2 rounded-full px-4 py-2 shadow-sm text-sm flex-shrink-0" style={{ background: "#FCE8D5" }}>
+                <span style={{ color: "#B8501E" }}>👔 Manager view</span>
+                <button onClick={logout} className="text-xs font-semibold underline" style={{ color: "#B8501E" }}>
+                  Not you?
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-full px-4 py-2 shadow-sm text-sm flex-shrink-0" style={{ background: "#FCE8D5" }}>
+              <span style={{ color: "#B8501E" }}>👤 {identity.employeeName ?? ""}</span>
+              <button onClick={logout} className="text-xs font-semibold underline" style={{ color: "#B8501E" }}>
+                Not you?
+              </button>
+            </div>
+          )}
+        </header>
+
+        {selectedId == null ? (
+          <div className="rounded-2xl bg-white p-10 text-center shadow max-w-lg">
+            <p className="text-slate-400">Select a staff member above to view their dashboard.</p>
+          </div>
+        ) : loading ? (
+          <div className="rounded-2xl bg-white p-10 text-center shadow max-w-lg">
+            <p className="text-slate-400">Loading…</p>
+          </div>
+        ) : (
+          <div className="max-w-6xl mx-auto">
+            {selectedEmployee && (
+              <div className="text-center mb-8">
+                <div className="h-20 w-20 mx-auto rounded-full flex items-center justify-center text-white font-bold text-3xl shadow-lg mb-3"
+                  style={{ backgroundColor: selectedEmployee.color }}>
+                  {selectedEmployee.name.charAt(0)}
+                </div>
+                {editingProfile ? (
+                  <div className="max-w-sm mx-auto space-y-2">
+                    <input value={profileForm.name} onChange={(e) => setProfileForm((f) => ({ ...f, name: e.target.value }))}
+                      placeholder="Your name"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-center text-lg font-semibold focus:outline-none" />
+                    <input value={profileForm.email} onChange={(e) => setProfileForm((f) => ({ ...f, email: e.target.value }))}
+                      placeholder="your.email@mydeccandental.com" type="email"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-center text-sm focus:outline-none" />
+                    {profileError && <p className="text-xs text-red-600">{profileError}</p>}
+                    <div className="flex items-center justify-center gap-2">
+                      <button onClick={handleSaveProfile} disabled={profileSaving}
+                        className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                        style={{ backgroundColor: "#e8622a" }}>
+                        {profileSaving ? "Saving…" : "Save"}
+                      </button>
+                      <button onClick={() => { setEditingProfile(false); setProfileError(null); }}
+                        className="text-sm text-slate-400 hover:underline">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <h2 className="text-3xl font-bold" style={{ color: "#4A4238" }}>{selectedEmployee.name}</h2>
+                    <p className="text-sm mt-1" style={{ color: "rgba(74,66,56,0.55)" }}>
+                      {selectedEmployee.specialty ?? selectedEmployee.role}{selectedEmployee.email ? ` · ${selectedEmployee.email}` : ""}
+                    </p>
+                    {/* Only offered when you're looking at your own profile —
+                        a manager browsing someone else's dashboard shouldn't
+                        be editing their details from here. */}
+                    {identity.employeeId === selectedEmployee.id && (
+                      <button
+                        onClick={() => {
+                          setProfileForm({ name: selectedEmployee.name, email: selectedEmployee.email ?? "" });
+                          setProfileError(null);
+                          setEditingProfile(true);
+                        }}
+                        className="text-xs font-semibold mt-1 hover:underline" style={{ color: "#e8622a" }}>
+                        Edit my name or email
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="grid gap-5 lg:grid-cols-3">
+
+            {(missingOrExpiredCertCount > 0 || pendingPolicies.length > 0 || pendingRsvpCount > 0 || checkinDue || checkinUpcoming || reviewCounts.pending > 0) && (
+              <div className="lg:col-span-3 flex flex-wrap gap-3">
+                {missingOrExpiredCertCount > 0 && (
+                  <a href="#certifications-card" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
+                    <span style={{ fontSize: 18 }}>📄</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#A32D2D", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
+                      {missingOrExpiredCertCount} certification{missingOrExpiredCertCount !== 1 ? "s" : ""} need{missingOrExpiredCertCount === 1 ? "s" : ""} attention
+                    </span>
+                  </a>
+                )}
+                {pendingRsvpCount > 0 && (
+                  <button onClick={() => {
+                    const first = events.find((ev) => ev.rsvpEnabled && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId));
+                    const el = first ? document.getElementById(`event-${first.id}`) : document.getElementById("events-card");
+                    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }} className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FAEEDA", border: "1.5px solid #D9891A" }}>
+                    <span style={{ fontSize: 18 }}>📌</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#854F0B", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
+                      {pendingRsvpCount} event{pendingRsvpCount !== 1 ? "s" : ""} awaiting {viewingOwnDashboard ? "your" : "their"} rsvp
+                    </span>
+                  </button>
+                )}
+                {reviewCounts.pending > 0 && (
+                  <a href={viewingOwnDashboard ? "/review" : "/review-admin"} className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90"
+                    style={reviewCounts.overdue > 0 ? { background: "#FCEBEB", border: "1.5px solid #E24B4A" } : { background: "#FAEEDA", border: "1.5px solid #D9891A" }}>
+                    <span style={{ fontSize: 18 }}>📄</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: reviewCounts.overdue > 0 ? "#A32D2D" : "#854F0B", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
+                      {reviewCounts.pending} document{reviewCounts.pending !== 1 ? "s" : ""} to review{reviewCounts.overdue > 0 ? ` · ${reviewCounts.overdue} past due` : ""}
+                    </span>
+                  </a>
+                )}
+                {pendingPolicies.length > 0 && (
+                  <a href="/handbook" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
+                    <span style={{ fontSize: 18 }}>✍️</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#A32D2D", fontVariant: "small-caps", letterSpacing: "0.03em" }}>
+                      {pendingPolicies.length} signature{pendingPolicies.length !== 1 ? "s" : ""} needed
+                    </span>
+                  </a>
+                )}
+                {checkinDue && (
+                  <a href="/checkins" className="flex items-center gap-2.5 rounded-full px-6 py-3.5 transition hover:opacity-90" style={{ background: "#FCEBEB", border: "1.5px solid #E24B4A" }}>
+                    <span style={{ fontSize: 18 }}>🤝</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#A32D2D", fontVariant: "small-caps", letterSpacing: "0.03em" }}>check-in due</span>
+                  </a>
+                )}
+                {checkinUpcoming && (
+                  <span className="flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white" style={{ background: "#378ADD", boxShadow: "0 4px 14px rgba(55,138,221,0.4)" }}>
+                    <span style={{ fontSize: 16 }}>📅</span>
+                    Check-in {new Date(checkinUpcoming.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {showPtoCountdown && (
+              <div className="rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)" }}>
+                <span className="text-lg">🕐</span>
+                <p className="text-xs text-slate-700 leading-snug">
+                  <strong>PTO eligible in {ptoDaysLeft}d</strong><br />
+                  {new Date(ptoEligibilityDate! + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </p>
+              </div>
+            )}
+
+            {canSeeThisPersonsPay && selectedEmployee?.growthBonusEligible && showBonusCountdown && (
+              <div className="rounded-xl px-4 py-3 shadow flex items-center gap-2" style={{ background: "linear-gradient(135deg, #e0e7ff, #c7d2fe)" }}>
+                <span className="text-lg">⏳</span>
+                <p className="text-xs text-slate-700 leading-snug">
+                  <strong>Bonus eligible in {bonusDaysLeft}d</strong><br />
+                  {new Date(bonusEligibilityDate! + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </p>
+              </div>
+            )}
+
+            {canSeeThisPersonsPay && selectedEmployee?.growthBonusEligible && !showBonusCountdown && (
+              <div className="lg:col-span-3 rounded-2xl p-4" style={{ background: bonusUnlocked ? "linear-gradient(135deg, #d1fae5, #a7f3d0)" : "linear-gradient(135deg, #fff7ed, #ffedd5)", boxShadow: bonusUnlocked ? "0 8px 24px rgba(16,185,129,0.2)" : "0 8px 24px rgba(245,158,11,0.2)" }}>
+                {/* Laid out across rather than stacked — the same figures in
+                    roughly half the vertical space, so the cards below stay
+                    visible without scrolling. */}
+                <div className="flex items-center gap-4 flex-wrap mb-2">
+                  <div className="flex items-baseline gap-2 flex-shrink-0">
+                    <span className="text-3xl font-bold leading-none" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>{bonusProgressPct}%</span>
+                    <span className="text-xs font-semibold" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
+                      {QUARTER_LABELS[currentQuarter]} {bonusYear}{bonusUnlocked ? " — unlocked!" : ""}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-[160px]">
+                    <div className="w-full h-2 rounded-full bg-white overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${bonusProgressPct}%`, backgroundColor: bonusUnlocked ? "#10b981" : "#f59e0b" }} />
+                    </div>
+                    <p className="text-xs mt-1" style={{ color: bonusUnlocked ? "#047857" : "#b45309" }}>
+                      ${formatMoney(currentQuarterData?.netProductionCurrent ?? 0)} of ${formatMoney(requiredProduction)} goal
+                    </p>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>Received this year</p>
+                    <p className="text-lg font-bold leading-tight" style={{ color: bonusUnlocked ? "#065f46" : "#92400e" }}>${formatMoney(bonusReceivedThisYear)}</p>
+                    <p className="text-xs" style={{ color: "rgba(74,66,56,0.45)" }}>
+                      {bonusBeingPaced ? "Paid gradually — nothing reduced" : "Paid in full once unlocked"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2">
+                  {([1, 2, 3, 4] as const).map((q) => {
+                    const result = q <= currentQuarter ? bonusForQuarter(q) : null;
+                    const isPast = q < currentQuarter;
+                    const isCurrent = q === currentQuarter;
+                    const unlocked = result?.calc.eligible;
+                    return (
+                      <div key={q} className="flex items-center justify-center gap-1.5 rounded-lg py-1.5 px-2" style={{ background: unlocked ? "#EAF3DE" : isCurrent ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.4)", opacity: !isPast && !isCurrent ? 0.5 : 1 }}>
+                        <span className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>{QUARTER_LABELS[q].split(" ")[0]}</span>
+                        {unlocked ? (
+                          <span className="text-xs font-semibold" style={{ color: "#3B6D11" }}>✓ ${formatMoney(result!.myBonus)}</span>
+                        ) : isPast ? (
+                          <span className="text-xs text-slate-400">Not met</span>
+                        ) : isCurrent ? (
+                          <span className="text-xs text-slate-500">⏳ In progress</span>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {canSeeThisPersonsPay && selectedEmployee?.pvBonusEligible && (
+              <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
+                <div className="p-4 pb-2">
+                  <h2 className="font-bold text-slate-700">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
+                </div>
+                <div className="overflow-x-auto">
+                  {(() => {
+                    const percent = selectedEmployee.netProductionBonusPercent ?? 30;
+                    const allYears = Array.from(new Set([...pvAllQuarters.map((q) => q.year), bonusYear]));
+                    const fullQuarterSet: PvBonusQuarter[] = [];
+                    for (const y of allYears) {
+                      for (const q of [1, 2, 3, 4] as const) {
+                        const existing = pvAllQuarters.find((row) => row.year === y && row.quarter === q);
+                        fullQuarterSet.push(existing ?? { employeeId: selectedEmployee.id, year: y, quarter: q, totalIncome: 0, notes: "" });
+                      }
+                    }
+                    const calcs = computePvQuarterCalcs(fullQuarterSet, pvPayrollEntries, pvPayments, percent).filter((c) => c.year === bonusYear);
+                    return (
+                      <table className="w-full text-sm border-collapse min-w-[800px]">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                            <th className="px-5 py-2 font-medium">Quarter</th>
+                            <th className="px-2 py-2 font-medium">Total Income</th>
+                            <th className="px-2 py-2 font-medium">{percent}%</th>
+                            <th className="px-2 py-2 font-medium">Gusto Payroll</th>
+                            <th className="px-2 py-2 font-medium">Bonus</th>
+                            <th className="px-2 py-2 font-medium">Bonus Paid</th>
+                            <th className="px-2 py-2 font-medium">Date Paid</th>
+                            <th className="px-5 py-2 font-medium">Balance</th>
+                            <th className="px-2 py-2 font-medium"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {calcs.map((c) => {
+                            const key = `${c.year}-${c.quarter}`;
+                            const isOpen = expandedPvQuarter === key;
+                            const { start, end } = getPvQuarterDateRange(c.year, c.quarter);
+                            const quarterEntries = pvPayrollEntries.filter((e) => e.payPeriodStart >= start && e.payPeriodStart <= end);
+                            return (
+                              <Fragment key={key}>
+                                <tr className="border-b border-slate-50 last:border-0">
+                                  <td className="px-5 py-2 font-medium text-slate-700 whitespace-nowrap">{QUARTER_LABELS[c.quarter]}</td>
+                                  <td className="px-2 py-2 text-slate-500">${formatMoney(c.totalIncome)}</td>
+                                  <td className="px-2 py-2 text-slate-500">${formatMoney(c.thirtyPercent)}</td>
+                                  <td className="px-2 py-2 text-slate-500">${formatMoney(c.gustoPayroll)}</td>
+                                  <td className="px-2 py-2 font-semibold text-slate-700">${formatMoney(c.bonus)}</td>
+                                  <td className="px-2 py-2 text-slate-500">${formatMoney(c.bonusPaid)}</td>
+                                  <td className="px-2 py-2 text-slate-500 text-xs whitespace-nowrap">
+                                    {c.datesPaid.length > 0
+                                      ? c.datesPaid.length === 1
+                                        ? new Date(c.datesPaid[0] + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                                        : `${c.datesPaid.length} payments`
+                                      : "—"}
+                                  </td>
+                                  <td className={`px-5 py-2 font-semibold whitespace-nowrap ${c.balance > 0 ? "text-amber-600" : c.balance < 0 ? "text-red-500" : "text-slate-400"}`}>${formatMoney(c.balance)}</td>
+                                  <td className="px-2 py-2">
+                                    {quarterEntries.length > 0 && (
+                                      <button onClick={() => setExpandedPvQuarter(isOpen ? null : key)} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
+                                        {isOpen ? "Hide" : "Details"}
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                                {isOpen && (
+                                  <tr className="bg-slate-50/60 border-b border-slate-100">
+                                    <td colSpan={9} className="px-5 py-3">
+                                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Gusto Payroll Pay Periods</p>
+                                      <div className="space-y-1">
+                                        {quarterEntries.map((e) => (
+                                          <div key={e.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-3 py-1.5">
+                                            <span className="text-slate-600">
+                                              {new Date(e.payPeriodStart + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {new Date(e.payPeriodEnd + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                            </span>
+                                            <span className="font-medium text-slate-700">${formatMoney(e.amount)}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {canSeeThisPersonsPay && isHygienist && (
+              <div className="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
+                <h2 className="font-bold text-slate-700 mb-2">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
+                <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
+                  <span className="text-slate-500">
+                    {Math.abs(hygieneStart) > 0.5 && <>Brought forward ${formatMoney(hygieneStart)} {"\u00b7"} </>}
+                    Earned ${formatMoney(hygieneEarned)} {"\u00b7"} Paid ${formatMoney(hygienePaid)}
+                  </span>
+                  {hygieneBalance > 0 ? (
+                    <span className="text-amber-600 font-semibold">Bonus: ${formatMoney(hygieneBalance)}</span>
+                  ) : hygieneEarned > 0 || Math.abs(hygieneStart) > 0.5 ? (
+                    <span className="text-emerald-700 font-semibold">✓ Fully paid</span>
+                  ) : (
+                    <span className="text-slate-400">Not started</span>
+                  )}
+                </div>
+                <button onClick={() => setShowHygieneCalc((v) => !v)} className="mt-2 text-sm font-semibold text-orange-500 hover:underline">
+                  {showHygieneCalc ? "Hide" : "Show"} how this is calculated
+                </button>
+                {showHygieneCalc && (() => {
+                  const today = new Date().toISOString().slice(0, 10);
+                  const shown = hygieneRows.filter((r) => r.start <= today || r.patients > 0 || r.paid > 0);
+                  let running = hygieneStart;
+                  return (
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-xs text-slate-400">
+                            <th className="py-1 pr-3 font-medium">Pay period</th>
+                            <th className="py-1 pr-3 font-medium">Pay date</th>
+                            <th className="py-1 pr-3 font-medium">Patients</th>
+                            <th className="py-1 pr-3 font-medium">Earned (patients {"\u00d7"} ${HYGIENE_BONUS_PER_PATIENT})</th>
+                            <th className="py-1 pr-3 font-medium">Paid</th>
+                            <th className="py-1 font-medium">Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Math.abs(hygieneStart) > 0.5 && (
+                            <tr className="border-t border-slate-100 bg-amber-50/60">
+                              <td className="py-1.5 pr-3 font-medium text-amber-900" colSpan={5}>Brought forward from earlier years</td>
+                              <td className="py-1.5 font-semibold text-amber-700">${formatMoney(hygieneStart)}</td>
+                            </tr>
+                          )}
+                          {shown.map((r) => {
+                            running += r.earned - r.paid;
+                            return (
+                              <tr key={r.start} className="border-t border-slate-100">
+                                <td className="py-1.5 pr-3 text-slate-600 whitespace-nowrap">{r.label}</td>
+                                <td className="py-1.5 pr-3 text-slate-500 whitespace-nowrap">{formatPayDate(r.payDate)}</td>
+                                <td className="py-1.5 pr-3">{r.patients}</td>
+                                <td className="py-1.5 pr-3">${formatMoney(r.earned)}</td>
+                                <td className="py-1.5 pr-3">${formatMoney(r.paid)}</td>
+                                <td className="py-1.5 font-semibold" style={{ color: running > 0 ? "#b45309" : "#64748b" }}>${formatMoney(running)}</td>
+                              </tr>
+                            );
+                          })}
+                          <tr className="border-t-2 border-slate-200 font-semibold text-slate-700">
+                            <td className="py-1.5 pr-3">Total</td>
+                            <td className="py-1.5 pr-3" />
+                            <td className="py-1.5 pr-3">{shown.reduce((sum, r) => sum + r.patients, 0)}</td>
+                            <td className="py-1.5 pr-3">${formatMoney(hygieneEarned)}</td>
+                            <td className="py-1.5 pr-3">${formatMoney(hygienePaid)}</td>
+                            <td className="py-1.5" style={{ color: hygieneBalance > 0 ? "#b45309" : "#64748b" }}>${formatMoney(hygieneBalance)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(55,138,221,0.12)", borderTop: "4px solid #378ADD" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#185FA5" }}>📅 Upcoming Shifts</h2>
+              {shifts.length === 0 ? (
+                <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No upcoming shifts scheduled.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                  {shifts.map((s, i) => (
+                    <div key={i} className="flex items-center justify-between rounded-xl px-3 py-2 text-sm" style={{ background: "#E6F1FB" }}>
+                      <div>
+                        <span className="font-medium" style={{ color: "#0C447C" }}>
+                          {new Date(s.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                        </span>
+                        {s.detail && <span className="ml-2 text-xs" style={{ color: "#185FA5" }}>{s.detail}</span>}
+                      </div>
+                      <span className="text-xs font-semibold" style={{ color: "#185FA5" }}>{ROLE_ICONS[s.role]} {s.role}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(127,119,221,0.14)", borderTop: "4px solid #7F77DD" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#3C3489" }}>📝 Leave Requests</h2>
+              <div className="text-center mb-3">
+                <a href="/leave" className="inline-block rounded-full px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#534AB7" }}>
+                  + Submit Leave Request
+                </a>
+              </div>
+              {leaveRequests.length === 0 ? (
+                <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No leave requests on file.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                  {[...leaveRequests].sort((a, b) => a.startDate.localeCompare(b.startDate)).map((req) => (
+                    <div key={req.id} className="rounded-xl px-3 py-2" style={{ background: "#EEEDFE" }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium" style={{ color: "#3C3489" }}>
+                          {new Date(req.startDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          {req.startDate !== req.endDate && ` – ${new Date(req.endDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+                        </span>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${LEAVE_STATUS_STYLES[req.status]}`}>
+                          {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
+                        </span>
+                      </div>
+                      <div className="text-xs mt-0.5" style={{ color: "#534AB7" }}>{REASON_LABELS[req.reason] ?? req.reason} · {req.totalDays} day{req.totalDays !== 1 ? "s" : ""}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div id="events-card" className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(216,90,48,0.14)", borderTop: "4px solid #D85A30" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#993C1D" }}>📌 Events</h2>
+              {events.length === 0 ? (
+                <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No upcoming events.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                  {[...events].sort((a, b) => {
+                    const needsA = a.rsvpEnabled && !rsvps.some((r) => r.eventId === a.id && r.employeeId === selectedId);
+                    const needsB = b.rsvpEnabled && !rsvps.some((r) => r.eventId === b.id && r.employeeId === selectedId);
+                    if (needsA !== needsB) return needsA ? -1 : 1;
+                    return a.date.localeCompare(b.date);
+                  }).map((ev) => (
+                    <div key={ev.id} id={`event-${ev.id}`} className="rounded-xl px-3 py-2"
+                      style={ev.rsvpEnabled && !rsvps.some((r) => r.eventId === ev.id && r.employeeId === selectedId)
+                        // Awaiting your reply — outlined so it reads as needing
+                        // action, matching the amber alert pill above.
+                        ? { background: "#FAEEDA", border: "1.5px solid #D9891A" }
+                        : { background: ev.mandatory ? "#FCEBEB" : "#FAECE7" }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium" style={{ color: ev.mandatory ? "#A32D2D" : "#993C1D" }}>{ev.title}</span>
+                        {ev.mandatory && <span className="rounded-full text-xs font-semibold px-2 py-0.5 flex-shrink-0" style={{ background: "#F7C1C1", color: "#791F1F" }}>Mandatory</span>}
+                        {/* Attendance count is visible to everyone who can
+                            see the event, not just the person replying. */}
+                        {ev.rsvpEnabled && (
+                          <span className="rounded-full text-xs font-semibold px-2 py-0.5 flex-shrink-0" style={{ background: "#DDEFC8", color: "#3B6D11" }}>
+                            {rsvps.filter((r) => r.eventId === ev.id && r.attending).length} attending
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs mt-0.5" style={{ color: "rgba(74,66,56,0.5)" }}>
+                        {new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                        {ev.time ? ` · ${ev.time}${ev.endTime ? `–${ev.endTime}` : ""}` : " · All Day"}
+                      </div>
+                      {/* RSVP only appears on events where it was switched
+                          on, and only when you're viewing your own dashboard
+                          (a manager browsing someone else shouldn't answer
+                          for them). */}
+                      {ev.rsvpEnabled && identity.employeeId === selectedId && (() => {
+                        const mine = rsvps.find((r) => r.eventId === ev.id && r.employeeId === selectedId);
+                        return (
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <span className="text-xs font-semibold" style={{ color: "rgba(74,66,56,0.6)" }}>Attending?</span>
+                            <button onClick={() => handleRsvp(ev.id, true)}
+                              className="rounded-full px-3 py-0.5 text-xs font-semibold transition"
+                              style={mine?.attending === true
+                                ? { background: "#3B6D11", color: "white" }
+                                : { background: "white", color: "#3B6D11", border: "1px solid #3B6D11" }}>
+                              Yes
+                            </button>
+                            <button onClick={() => handleRsvp(ev.id, false)}
+                              className="rounded-full px-3 py-0.5 text-xs font-semibold transition"
+                              style={mine?.attending === false
+                                ? { background: "#A32D2D", color: "white" }
+                                : { background: "white", color: "#A32D2D", border: "1px solid #A32D2D" }}>
+                              No
+                            </button>
+                            {mine == null && <span className="text-xs" style={{ color: "rgba(74,66,56,0.4)" }}>no reply yet</span>}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="lg:col-span-3 grid gap-5 lg:grid-cols-2">
+            <div id="certifications-card" className={`rounded-2xl bg-white p-5 ${selectedEmployee && getApplicableRoles(selectedEmployee).length > 0 ? "" : "lg:col-span-2"}`} style={{ boxShadow: "0 8px 24px rgba(29,158,117,0.14)", borderTop: "4px solid #1D9E75" }}>
+              <h2 className="font-bold text-center mb-3" style={{ color: "#0F6E56" }}>📋 Certificates</h2>
+
+              {selectedEmployee && (
+                <RequiredCertsSection
+                  employee={selectedEmployee} certs={certs} requiredTypes={requiredTypesForCerts}
+                  ceEntries={ceEntriesForCerts}
+                  onAddCertForTitle={openForRequiredTitle}
+                  refreshAll={refreshCertsData}
+                  bare
+                  filter="certificates"
+                />
+              )}
+
+              <div className="flex items-center justify-between mt-4 mb-3">
+                <button onClick={() => setShowOtherDocs((s) => !s)} className="text-sm font-semibold flex items-center gap-1.5 hover:underline" style={{ color: "rgba(74,66,56,0.6)" }}>
+                  <span style={{ fontSize: 10 }}>{showOtherDocs ? "\u25bc" : "\u25b6"}</span>
+                  Other documents on file ({otherCerts.length})
+                </button>
+                {!showCertForm && (
+                  <button onClick={openNewCert} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#0F6E56" }}>
+                    + Add Certification
+                  </button>
+                )}
+              </div>
+
+              {showCertForm && (
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 mb-3 space-y-2">
+                  {certError && <p className="text-xs text-red-500">{certError}</p>}
+                  {titleIsFixed ? (
+                    <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-medium" style={{ color: "#4A4238" }}>
+                      {certForm.title}
+                    </div>
+                  ) : !useCustomTitle ? (
+                    <select
+                      value={titleOptions.includes(certForm.title) ? certForm.title : ""}
+                      onChange={(e) => {
+                        if (e.target.value === "__new__") { setUseCustomTitle(true); setCertForm((f) => ({ ...f, title: "" })); }
+                        else setCertForm((f) => ({ ...f, title: e.target.value }));
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none">
+                      <option value="">Select a document name...</option>
+                      {titleOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                      <option value="__new__">+ Add new document name...</option>
+                    </select>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input type="text" value={certForm.title} onChange={(e) => setCertForm((f) => ({ ...f, title: e.target.value }))}
+                        placeholder="e.g. CPR Certification" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                      {titleOptions.length > 0 && (
+                        <button type="button" onClick={() => { setUseCustomTitle(false); setCertForm((f) => ({ ...f, title: "" })); }}
+                          className="flex-shrink-0 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-500 hover:bg-white">
+                          Choose existing
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {(() => {
+                    const matchingType = requiredTypesForCerts.find((t) => t.title === certForm.title.trim());
+                    const isCompletionMode = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "completion";
+                    const isNeverExpires = matchingType && matchingType.kind !== "ce_hours" && matchingType.dateMode === "none";
+                    if (isNeverExpires) {
+                      return <p className="text-xs -mt-1" style={{ color: "rgba(74,66,56,0.5)" }}>This certificate never expires — no date needed, just the file.</p>;
+                    }
+                    return (
+                      <>
+                        <input type="date" value={certForm.expirationDate} onChange={(e) => setCertForm((f) => ({ ...f, expirationDate: e.target.value }))}
+                          className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                        {isCompletionMode ? (
+                          certForm.expirationDate ? (
+                            <p className="text-xs text-slate-400 -mt-1">Completion date → expires {new Date(addMonthsToDate(certForm.expirationDate, matchingType!.frequencyMonths) + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>
+                          ) : (
+                            <p className="text-xs text-slate-400 -mt-1">Enter the completion date — expiration will be calculated automatically.</p>
+                          )
+                        ) : (
+                          <p className="text-xs text-slate-400 -mt-1">Leave date blank if this never expires.</p>
+                        )}
+                      </>
+                    );
+                  })()}
+                  <input type="number" onFocus={(e) => e.target.select()} value={certForm.ceHours} onChange={(e) => setCertForm((f) => ({ ...f, ceHours: e.target.value }))}
+                    placeholder="CE credits earned (optional)" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  {/* Show what's already attached, so it's possible to check
+                      the right file is there before saving. */}
+                  {editingCertId && (() => {
+                    const existing = certs.find((x) => x.id === editingCertId);
+                    if (!existing?.fileUrl) return <p className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>No file attached yet.</p>;
+                    return (
+                      <p className="text-xs">
+                        <span style={{ color: "rgba(74,66,56,0.5)" }}>Currently attached: </span>
+                        <a href={existing.fileUrl} target="_blank" rel="noopener noreferrer" className="font-semibold hover:underline" style={{ color: "#185FA5" }}>
+                          {existing.fileName || "View file"} →
+                        </a>
+                      </p>
+                    );
+                  })()}
+                  <input type="file" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
+                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs focus:outline-none" />
+                  {editingCertId && <p className="text-xs text-slate-400">Leave file blank to keep the existing one.</p>}
+                  <div className="flex gap-2">
+                    <button onClick={handleSaveCert} disabled={certSaving}
+                      className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                      {certSaving ? "Saving…" : editingCertId ? "Save Changes" : "Upload"}
+                    </button>
+                    <button onClick={closeCertForm} className="rounded-lg border border-slate-200 px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!showOtherDocs ? null : otherCerts.length === 0 ? (
+                <p className="text-sm text-slate-400">Everything on file is already listed as a requirement above.</p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {otherCerts.map((cert) => {
+                    const badge = certBadge(cert);
+                    return (
+                      <div key={cert.id} className="rounded-xl bg-slate-50 px-3 py-2 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-slate-700 truncate">{cert.title}</div>
+                          <div className="text-xs text-slate-400">
+                            {cert.expirationDate
+                              ? new Date(cert.expirationDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                              : "No expiration"}
+                          </div>
+                          <button onClick={() => startEditCert(cert)} className="text-xs text-cyan-600 hover:underline mt-0.5">Edit</button>
+                          <button onClick={() => handleDeleteCert(cert.id)} className="text-xs text-red-400 hover:underline mt-0.5 ml-2">Delete</button>
+                          {cert.fileUrl && (
+                            <a href={cert.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-600 hover:underline mt-0.5 ml-2 inline-block">View file →</a>
+                          )}
+                        </div>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold flex-shrink-0 ${badge.className}`}>{badge.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {selectedEmployee && getApplicableRoles(selectedEmployee).length > 0 && (
+              <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(127,119,221,0.14)", borderTop: "4px solid #7F77DD" }}>
+                <h2 className="font-bold text-center mb-3" style={{ color: "#3C3489" }}>🎓 CE Courses</h2>
+                <RequiredCertsSection
+                  employee={selectedEmployee} certs={certs} requiredTypes={requiredTypesForCerts}
+                  ceEntries={ceEntriesForCerts}
+                  onAddCertForTitle={openForRequiredTitle}
+                  refreshAll={refreshCertsData}
+                  bare
+                  filter="ce"
+                />
+                <CeLogPanel employee={selectedEmployee} certs={certs} ceEntries={ceEntriesForCerts} requiredTypes={requiredTypesForCerts}
+                  onDeleteEntry={async (id) => {
+                    if (!confirm("Delete this CE course entry?")) return;
+                    await deleteCeCourseEntry(id);
+                    await refreshCertsData();
+                  }}
+                  onChanged={refreshCertsData}
+                  onEditCert={(certId) => {
+                    // Certificate rows are edited where the document lives, so the
+                    // file and expiration stay together. Open that form and scroll
+                    // to it, since it sits in the card above this log.
+                    const cert = certs.find((c) => c.id === certId);
+                    if (!cert) return;
+                    startEditCert(cert);
+                    document.getElementById("certifications-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }} />
+              </div>
+            )}
+            </div>
+
+            {/* Notes from check-ins and reviews. Only the shared half of each
+                entry is ever loaded here — the private note is for managers
+                and never reaches this page. */}
+            {myNotes.length > 0 && (
+              <div className="lg:col-span-3 rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(24,95,165,0.14)", borderTop: "4px solid #185FA5" }}>
+                <h2 className="font-bold mb-3" style={{ color: "#185FA5" }}>🗒️ Notes from your check-ins and reviews</h2>
+                <div className="space-y-2">
+                  {myNotes.map((n) => (
+                    <div key={n.id} className="rounded-xl px-3 py-2.5" style={{ background: "#F4F8FC" }}>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ background: "#E6F1FB", color: "#185FA5" }}>
+                          {NOTE_KIND_LABELS[n.kind]}
+                        </span>
+                        <span className="text-xs" style={{ color: "rgba(74,66,56,0.55)" }}>
+                          {new Date(n.noteDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          {n.recordedBy ? ` · ${n.recordedBy}` : ""}
+                        </span>
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap" style={{ color: "#4A4238" }}>{n.sharedNote}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* The wishlist lives on its own page and was easy to forget
+                about. Surfacing the leaders here keeps it visible, and the
+                unranked count gives people a reason to go and vote. */}
+            {wishlistItems.length > 0 && (
+              <div className="lg:col-span-3 rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(216,168,48,0.16)", borderTop: "4px solid #D8A830" }}>
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                  <h2 className="font-bold" style={{ color: "#8A6A12" }}>⭐ Team Wishlist — top requests</h2>
+                  <a href="/wishlist" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#D8A830" }}>
+                    {wishlistItems.some((i) => i.myRank != null) ? "Review my rankings →" : "Rank your top 5 →"}
+                  </a>
+                </div>
+
+                {(() => {
+                  const top = [...wishlistItems].sort((a, b) => b.score - a.score).slice(0, 3);
+                  const unranked = wishlistItems.filter((i) => i.myRank == null).length;
+                  const iHaveVoted = wishlistItems.some((i) => i.myRank != null);
+                  return (
+                    <>
+                      <div className="space-y-1.5 mb-3">
+                        {top.map((item, idx) => (
+                          <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-2" style={{ background: "#FDF6E4" }}>
+                            <span className="flex items-center gap-2 min-w-0">
+                              <span className="flex-shrink-0 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold text-white" style={{ background: "#D8A830" }}>{idx + 1}</span>
+                              <span className="text-sm truncate" style={{ color: "#4A4238" }}>{item.description}</span>
+                              {item.myRank != null && (
+                                <span className="flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: "#EAF3DE", color: "#3B6D11" }}>your #{item.myRank}</span>
+                              )}
+                            </span>
+                            <span className="flex-shrink-0 text-xs" style={{ color: "rgba(74,66,56,0.55)" }}>
+                              {item.estimatedCost != null ? `$${formatMoney(item.estimatedCost)}` : "—"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {identity.employeeId === selectedId && (
+                        iHaveVoted ? (
+                          unranked > 0 && (
+                            <p className="text-xs" style={{ color: "rgba(74,66,56,0.6)" }}>
+                              {unranked} item{unranked === 1 ? "" : "s"} you haven't ranked yet.
+                            </p>
+                          )
+                        ) : (
+                          <p className="text-xs font-semibold" style={{ color: "#8A6A12" }}>
+                            You haven't ranked anything yet — your picks help decide what gets bought.
+                          </p>
+                        )
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {canSeeThisPersonsPay && selectedEmployee?.hoBonusEligible && (() => {
+              const monthKey = (m: HoBonusMonth) => `${m.year}-${String(m.month).padStart(2, "0")}`;
+              const paidIn = (m: HoBonusMonth) => hoPaymentList.filter((pay) => pay.datePaid.startsWith(monthKey(m))).reduce((sum, pay) => sum + pay.amount, 0);
+              const totalProduction = hoMonths.reduce((sum, m) => sum + m.production, 0);
+              const totalEarned = totalProduction * 0.4;
+              const totalPaid = hoMonths.reduce((sum, m) => sum + paidIn(m), 0);
+              const net = totalEarned - totalPaid;
+              const isSelf = identity.employeeId != null && identity.employeeId === selectedId;
+              const who = isSelf ? "You are" : `${selectedEmployee?.name ?? "She"} is`;
+              let running = 0;
+              return (
+                <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
+                  <div className="p-4 pb-2">
+                    <h2 className="font-bold text-slate-700">{"\ud83d\udcb5"} {bonusYear} Compensation {"\u2014"} 40% of Production, paid the following month</h2>
+                  </div>
+                  <div className="px-4 py-3 text-sm" style={{ background: net > 0.005 ? "#FAEEDA" : net < -0.005 ? "#FCEBEB" : "#f1f5f9" }}>
+                    {net > 0.005 ? (
+                      <span style={{ color: "#854F0B" }}>{who} owed <strong>${formatMoney(net)}</strong> for {bonusYear}: ${formatMoney(totalEarned)} earned (40% of ${formatMoney(totalProduction)} production) {"\u2212"} ${formatMoney(totalPaid)} paid.</span>
+                    ) : net < -0.005 ? (
+                      <span style={{ color: "#A32D2D" }}>Paid ahead by <strong>${formatMoney(-net)}</strong> for {bonusYear}: ${formatMoney(totalEarned)} earned {"\u2212"} ${formatMoney(totalPaid)} paid.</span>
+                    ) : (
+                      <span className="text-slate-600">Paid up for {bonusYear}: ${formatMoney(totalEarned)} earned, ${formatMoney(totalPaid)} paid.</span>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm border-collapse min-w-[600px]">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+                          <th className="px-5 py-2 font-medium">Month</th>
+                          <th className="px-2 py-2 font-medium">Production</th>
+                          <th className="px-2 py-2 font-medium">40%</th>
+                          <th className="px-2 py-2 font-medium">Paid</th>
+                          <th className="px-5 py-2 font-medium" title="Everything earned so far minus everything paid so far">Total owed so far</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {hoMonths.map((m) => {
+                          const owed = m.production * 0.4;
+                          const paid = paidIn(m);
+                          running += owed - paid;
+                          const soFar = running;
+                          return (
+                            <tr key={`${m.year}-${m.month}`} className="border-b border-slate-50 last:border-0">
+                              <td className="px-5 py-2 font-medium text-slate-700 whitespace-nowrap">{MONTH_NAMES[m.month - 1]} {m.year}</td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(m.production)}</td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(owed)}</td>
+                              <td className="px-2 py-2 text-slate-500">${formatMoney(paid)}</td>
+                              <td className={`px-5 py-2 font-bold whitespace-nowrap ${soFar > 0.005 ? "text-amber-700" : soFar < -0.005 ? "text-red-600" : "text-slate-400"}`}>${formatMoney(soFar)}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr className="border-t-2 border-slate-200 font-semibold text-slate-700">
+                          <td className="px-5 py-2">Total</td>
+                          <td className="px-2 py-2">${formatMoney(totalProduction)}</td>
+                          <td className="px-2 py-2">${formatMoney(totalEarned)}</td>
+                          <td className="px-2 py-2">${formatMoney(totalPaid)}</td>
+                          <td className="px-5 py-2" style={{ color: net > 0.005 ? "#b45309" : net < -0.005 ? "#dc2626" : "#64748b" }}>${formatMoney(net)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+
+export default function StaffDashboardPage() {
+  return (
+    <AppIdentityGate>
+      {(identity, logout) => <DashboardPageBody identity={identity} logout={logout} />}
+    </AppIdentityGate>
+  );
+}
