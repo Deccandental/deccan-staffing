@@ -6,6 +6,8 @@ import { Certification, NewCertInput, createCertification, updateCertification, 
 import {
   RequiredCertType, RequiredCertRole, CeCourseEntry, RequiredCertStatus,
   addCeCourseEntry, deleteCeCourseEntry, updateCeCourseEntry, computeRequiredCertStatuses, addMonths,
+  CeDelivery, DELIVERY_LABELS, ProviderApproval, PROVIDER_APPROVAL_LABELS,
+  CeCategory, CATEGORY_LABELS, computeCeCompliance, MAX_UNITS_PER_DAY,
 } from "@/lib/requiredCertsStore";
 
 // Which required-cert roles apply to this employee — a specialty dentist
@@ -43,16 +45,19 @@ export function RequiredCertsSection({
   const [ceHours, setCeHours] = useState("");
   const [ceDate, setCeDate] = useState(new Date().toISOString().slice(0, 10));
   const [ceFile, setCeFile] = useState<File | null>(null);
+  const [ceDelivery, setCeDelivery] = useState<CeDelivery>("live");
+  const [ceProvider, setCeProvider] = useState("");
+  const [ceApproval, setCeApproval] = useState<ProviderApproval>("");
+  const [ceCategory, setCeCategory] = useState<CeCategory>("clinical");
   const [ceUploading, setCeUploading] = useState(false);
   const [ceError, setCeError] = useState<string | null>(null);
-  const [expandedTypeId, setExpandedTypeId] = useState<string | null>(null);
   const [completingTypeId, setCompletingTypeId] = useState<string | null>(null);
   const [completionDate, setCompletionDate] = useState(new Date().toISOString().slice(0, 10));
   const [completionError, setCompletionError] = useState<string | null>(null);
   const [completionSaving, setCompletionSaving] = useState(false);
   // Editing one already-logged course, in place, from inside its requirement.
   const [editingCeId, setEditingCeId] = useState<string | null>(null);
-  const [ceEdit, setCeEdit] = useState({ courseName: "", hours: "", dateCompleted: "" });
+  const [ceEdit, setCeEdit] = useState({ courseName: "", hours: "", dateCompleted: "", delivery: "live" as CeDelivery, provider: "", providerApproval: "" as ProviderApproval, category: "clinical" as CeCategory });
   const [ceEditFile, setCeEditFile] = useState<File | null>(null);
   const [ceEditExistingFile, setCeEditExistingFile] = useState<string | null>(null);
   const [ceEditError, setCeEditError] = useState<string | null>(null);
@@ -79,6 +84,13 @@ export function RequiredCertsSection({
   const totalStatus = statuses.find((s) => s.type.kind === "total_ce_hours");
   const requiredCeStatuses = statuses.filter((s) => s.type.kind !== "total_ce_hours" && !isElectiveType(s.type));
   const additionalCeStatuses = statuses.filter((s) => s.type.kind !== "total_ce_hours" && isElectiveType(s.type));
+  const compliance = filter === "ce"
+    ? computeCeCompliance(
+        requiredTypes, roles, certs, ceEntries,
+        employee.sedationPermit ?? "none", employee.ceFirstRenewalExempt ?? false,
+        totalStatus?.windowStart ?? null, totalStatus?.windowEnd ?? null
+      )
+    : null;
 
   async function handleLogCe(typeId: string) {
     const hours = Number(ceHours);
@@ -95,12 +107,16 @@ export function RequiredCertsSection({
       fileUrl = upload.url;
       fileName = upload.name;
     }
-    const result = await addCeCourseEntry({ employeeId: employee.id, requiredCertTypeId: typeId, courseName: ceCourseName.trim(), hours, dateCompleted: ceDate, fileUrl, fileName });
+    const result = await addCeCourseEntry({ employeeId: employee.id, requiredCertTypeId: typeId, courseName: ceCourseName.trim(), hours, dateCompleted: ceDate, fileUrl, fileName, delivery: ceDelivery, provider: ceProvider.trim(), providerApproval: ceApproval, category: ceCategory });
     if (!result.ok) { setCeError(result.error ?? "Failed to save."); return; }
     setCeError(null);
     setCeCourseName("");
     setCeHours("");
     setCeFile(null);
+    setCeDelivery("live");
+    setCeProvider("");
+    setCeApproval("");
+    setCeCategory("clinical");
     setLoggingTypeId(null);
     await refreshAll();
   }
@@ -112,7 +128,11 @@ export function RequiredCertsSection({
   }
 
   function startEditCe(e: CeCourseEntry) {
-    setCeEdit({ courseName: e.courseName, hours: String(e.hours), dateCompleted: e.dateCompleted });
+    setCeEdit({
+      courseName: e.courseName, hours: String(e.hours), dateCompleted: e.dateCompleted,
+      delivery: e.delivery ?? "live", provider: e.provider ?? "", providerApproval: e.providerApproval ?? "",
+      category: e.category ?? "clinical",
+    });
     setCeEditFile(null);
     setCeEditExistingFile(e.fileName ?? (e.fileUrl ? "Attached file" : null));
     setCeEditError(null);
@@ -139,6 +159,8 @@ export function RequiredCertsSection({
     const result = await updateCeCourseEntry(editingCeId, {
       courseName: ceEdit.courseName.trim(), hours, dateCompleted: ceEdit.dateCompleted,
       requiredCertTypeId: typeId, fileUrl, fileName,
+      delivery: ceEdit.delivery, provider: ceEdit.provider.trim(), providerApproval: ceEdit.providerApproval,
+      category: ceEdit.category,
     });
     setCeEditSaving(false);
     if (!result.ok) { setCeEditError(result.error ?? "Couldn't save."); return; }
@@ -199,14 +221,6 @@ export function RequiredCertsSection({
                       or correcting what satisfied it, not adding another course.
                       Logging more stays available, just no longer the default. */}
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    {status.satisfied && myEntries.length > 0 && (
-                      <button onClick={() => {
-                        setExpandedTypeId(expandedTypeId === type.id ? null : type.id);
-                        setEditingCeId(null);
-                      }} className="text-xs font-semibold hover:underline" style={{ color: "#e8622a" }}>
-                        {expandedTypeId === type.id ? "Done" : "Edit"}
-                      </button>
-                    )}
                     <button onClick={() => {
                       const opening = loggingTypeId !== type.id;
                       setLoggingTypeId(opening ? type.id : null);
@@ -228,13 +242,36 @@ export function RequiredCertsSection({
                       <input type="file" accept="image/*,application/pdf" onChange={(e) => setCeFile(e.target.files?.[0] ?? null)}
                         className="w-full text-xs text-slate-500 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-slate-600" />
                     </div>
-                    <button onClick={() => handleLogCe(type.id)} disabled={ceUploading} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white sm:col-span-4 justify-self-start disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Format</label>
+                      <select value={ceDelivery} onChange={(e) => setCeDelivery(e.target.value as CeDelivery)}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none">
+                        {(Object.keys(DELIVERY_LABELS) as CeDelivery[]).map((d) => <option key={d} value={d}>{DELIVERY_LABELS[d]}</option>)}
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Subject</label>
+                      <select value={ceCategory} onChange={(e) => setCeCategory(e.target.value as CeCategory)}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none">
+                        {(Object.keys(CATEGORY_LABELS) as CeCategory[]).map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+                      </select>
+                    </div>
+                    <input type="text" value={ceProvider} onChange={(e) => setCeProvider(e.target.value)}
+                      placeholder="Provider (optional)" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
+                    <select value={ceApproval} onChange={(e) => setCeApproval(e.target.value as ProviderApproval)}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none sm:col-span-2">
+                      {(Object.keys(PROVIDER_APPROVAL_LABELS) as ProviderApproval[]).map((a) => <option key={a} value={a}>{PROVIDER_APPROVAL_LABELS[a]}</option>)}
+                    </select>
+                                        <button onClick={() => handleLogCe(type.id)} disabled={ceUploading} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white sm:col-span-4 justify-self-start disabled:opacity-50" style={{ backgroundColor: "#e8622a" }}>
                       {ceUploading ? "Uploading…" : "Save Course"}
                     </button>
                     {ceError && <p className="text-xs text-red-600 sm:col-span-4">{ceError}</p>}
                   </div>
                 )}
-                {expandedTypeId === type.id && (
+                {/* The courses themselves, listed rather than hidden behind a
+                    toggle — the card is meant to answer "what have I taken?"
+                    without a click per requirement. */}
+                {myEntries.length > 0 && (
                   <div className="mt-2 space-y-1">
                     {myEntries.map((e) => (
                       <div key={e.id} className="text-xs bg-white rounded-lg px-3 py-1.5">
@@ -278,7 +315,21 @@ export function RequiredCertsSection({
                               )}
                             </div>
                             {ceEditError && <p className="text-xs text-red-600 sm:col-span-4">⚠️ {ceEditError}</p>}
-                            <button onClick={() => handleSaveCeEdit(type.id)} disabled={ceEditSaving}
+                            <select value={ceEdit.delivery} onChange={(ev) => setCeEdit((f) => ({ ...f, delivery: ev.target.value as CeDelivery }))}
+                              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none sm:col-span-2">
+                              {(Object.keys(DELIVERY_LABELS) as CeDelivery[]).map((d) => <option key={d} value={d}>{DELIVERY_LABELS[d]}</option>)}
+                            </select>
+                            <select value={ceEdit.category} onChange={(ev) => setCeEdit((f) => ({ ...f, category: ev.target.value as CeCategory }))}
+                              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none sm:col-span-2">
+                              {(Object.keys(CATEGORY_LABELS) as CeCategory[]).map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+                            </select>
+                            <input type="text" value={ceEdit.provider} onChange={(ev) => setCeEdit((f) => ({ ...f, provider: ev.target.value }))}
+                              placeholder="Provider (optional)" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
+                            <select value={ceEdit.providerApproval} onChange={(ev) => setCeEdit((f) => ({ ...f, providerApproval: ev.target.value as ProviderApproval }))}
+                              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none sm:col-span-2">
+                              {(Object.keys(PROVIDER_APPROVAL_LABELS) as ProviderApproval[]).map((a) => <option key={a} value={a}>{PROVIDER_APPROVAL_LABELS[a]}</option>)}
+                            </select>
+                                                        <button onClick={() => handleSaveCeEdit(type.id)} disabled={ceEditSaving}
                               className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white sm:col-span-4 justify-self-start disabled:opacity-50"
                               style={{ backgroundColor: "#e8622a" }}>
                               {ceEditSaving ? "Saving…" : "Save changes"}
@@ -440,6 +491,43 @@ export function RequiredCertsSection({
           <>
             {/* Total first: it is the number that answers "am I done?". */}
             {totalStatus && renderStatus(totalStatus)}
+            {compliance && (
+              <div className="rounded-xl p-3 text-xs" style={{ background: "#F5F7FA" }}>
+                {compliance.exemptFirstRenewal ? (
+                  <p style={{ color: "#185FA5" }}>First renewal — exempt from CE requirements.</p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-x-5 gap-y-1" style={{ color: "rgba(74,66,56,0.7)" }}>
+                      <span>Live <strong>{compliance.liveHours}</strong></span>
+                      <span>Home study <strong>{compliance.homeStudyHours}</strong> of {compliance.nonLiveCap} allowed</span>
+                      <span>Practice management <strong>{compliance.selfBenefitHours}</strong> of {compliance.selfBenefitCap} allowed</span>
+                      {compliance.permitExtraHours > 0 && (
+                        <span>Permit adds <strong>{compliance.permitExtraHours}</strong> (total {compliance.requiredHours})</span>
+                      )}
+                    </div>
+                    {/* The Board's flat limits. Breaching one doesn't reduce the
+                        hours shown anywhere else — it just means some of them
+                        won't be accepted, which is worth knowing before renewal
+                        rather than after. */}
+                    {(compliance.overNonLiveCap || compliance.overSelfBenefitCap || compliance.daysOverDailyCap.length > 0) && (
+                      <div className="mt-2 space-y-0.5" style={{ color: "#A32D2D" }}>
+                        {compliance.overNonLiveCap && (
+                          <p>⚠️ Home study is over the 50% limit — only {compliance.nonLiveCap} units will count.</p>
+                        )}
+                        {compliance.overSelfBenefitCap && (
+                          <p>⚠️ Practice management and teaching methodology are over the 20% limit — only {compliance.selfBenefitCap} units will count.</p>
+                        )}
+                        {compliance.daysOverDailyCap.map((d) => (
+                          <p key={d.date}>
+                            ⚠️ {new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} has {d.hours} units — the Board accepts {MAX_UNITS_PER_DAY} per day.
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
             {requiredCeStatuses.length > 0 && (
               <div className="rounded-xl border border-slate-100 bg-white">
                 <button onClick={() => setOpenRequired((o) => !o)}

@@ -9,6 +9,12 @@ export interface Certification {
   title: string;
   expirationDate: string | null; // YYYY-MM-DD, or null if this cert never expires
   ceHours: number | null; // optional — CE credit this document carries, if any
+  // A certificate carrying CE hours counts against the same live/home-study
+  // cap as a logged course, so it records delivery too.
+  ceDelivery?: "live" | "home_study";
+  // BLS is only acceptable to the Board when it included the in-person
+  // skills practice, skills test and written exam.
+  inPersonExam?: boolean;
   fileUrl: string;
   fileName: string;
   remindersSent: Record<string, boolean | string>;
@@ -21,6 +27,8 @@ export interface NewCertInput {
   title: string;
   expirationDate: string | null;
   ceHours?: number | null;
+  ceDelivery?: "live" | "home_study";
+  inPersonExam?: boolean;
   fileUrl: string;
   fileName: string;
 }
@@ -33,6 +41,8 @@ function fromRow(row: any): Certification {
     title: row.title,
     expirationDate: row.expiration_date ?? null,
     ceHours: row.ce_hours ?? null,
+    ceDelivery: (row.ce_delivery ?? "live") as "live" | "home_study",
+    inPersonExam: row.in_person_exam ?? false,
     fileUrl: row.file_url,
     fileName: row.file_name ?? "",
     remindersSent: row.reminders_sent ?? {},
@@ -140,6 +150,8 @@ export async function createCertification(input: NewCertInput): Promise<Certific
       title: input.title,
       expiration_date: input.expirationDate,
       ce_hours: input.ceHours ?? null,
+      ce_delivery: input.ceDelivery ?? "live",
+      in_person_exam: input.inPersonExam ?? false,
       file_url: input.fileUrl,
       file_name: input.fileName,
     })
@@ -159,6 +171,8 @@ export async function updateCertification(id: string, input: NewCertInput): Prom
     title: input.title,
     expiration_date: input.expirationDate,
     ce_hours: input.ceHours ?? null,
+    ce_delivery: input.ceDelivery ?? "live",
+    in_person_exam: input.inPersonExam ?? false,
     file_url: input.fileUrl,
     file_name: input.fileName,
   };

@@ -4,6 +4,49 @@ export type RequiredCertRole = "Dentist" | "RDA" | "Hygienist" | "Specialist" | 
 export type RequiredCertKind = "license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours";
 export type RequiredCertDateMode = "expiration" | "completion" | "none";
 
+// Whether a course counts against the Board's 50% cap on non-live units.
+// A live webinar counts as live; recorded or home study does not.
+export type CeDelivery = "live" | "home_study";
+export const DELIVERY_LABELS: Record<CeDelivery, string> = {
+  live: "Live / in person",
+  home_study: "Home study",
+};
+
+export type ProviderApproval = "" | "board" | "cerp" | "pace" | "other";
+export const PROVIDER_APPROVAL_LABELS: Record<ProviderApproval, string> = {
+  "": "Not recorded",
+  board: "Board-registered provider",
+  cerp: "ADA CERP",
+  pace: "AGD PACE",
+  other: "Other / unknown",
+};
+
+// Extra units a sedation or anaesthesia permit adds on top of the 50.
+export type SedationPermit = "none" | "oral_conscious" | "moderate" | "general" | "oms";
+export const PERMIT_LABELS: Record<SedationPermit, string> = {
+  none: "No permit",
+  oral_conscious: "Oral conscious sedation",
+  moderate: "Moderate sedation",
+  general: "General anaesthesia",
+  oms: "Oral & maxillofacial surgery",
+};
+export const PERMIT_EXTRA_HOURS: Record<SedationPermit, number> = {
+  none: 0, oral_conscious: 7, moderate: 15, general: 24, oms: 50,
+};
+
+// The Board's flat rules, in one place rather than scattered through the UI.
+// Practice management and teaching methodology are "primarily of benefit to
+// the licensee" and capped at 20% of the total; clinical subjects are not.
+export type CeCategory = "clinical" | "self_benefit";
+export const CATEGORY_LABELS: Record<CeCategory, string> = {
+  clinical: "Clinical / patient care",
+  self_benefit: "Practice management or teaching methodology",
+};
+export const SELF_BENEFIT_FRACTION = 0.2;
+
+export const MAX_UNITS_PER_DAY = 8;
+export const NON_LIVE_FRACTION = 0.5;
+
 export interface RequiredCertType {
   id: string;
   title: string;
@@ -13,6 +56,11 @@ export interface RequiredCertType {
   sortOrder: number;
   dateMode: RequiredCertDateMode;
   targetHours: number | null;
+  // "Up to 4 units" for BLS — a ceiling on what counts, separate from the
+  // target. Null means no ceiling.
+  maxCountableHours?: number | null;
+  requiresInPersonExam?: boolean;
+  requiresBoardProvider?: boolean;
 }
 
 function fromTypeRow(row: any): RequiredCertType {
@@ -21,6 +69,9 @@ function fromTypeRow(row: any): RequiredCertType {
     kind: row.kind, frequencyMonths: row.frequency_months, sortOrder: row.sort_order ?? 0,
     targetHours: row.target_hours ?? null,
     dateMode: row.date_mode ?? "expiration",
+    maxCountableHours: row.max_countable_hours ?? null,
+    requiresInPersonExam: row.requires_in_person_exam ?? false,
+    requiresBoardProvider: row.requires_board_provider ?? false,
   };
 }
 
@@ -172,6 +223,10 @@ export interface CeCourseEntry {
   // logged straight away and the certificate attached later.
   fileUrl?: string | null;
   fileName?: string | null;
+  delivery?: CeDelivery;
+  provider?: string;
+  providerApproval?: ProviderApproval;
+  category?: CeCategory;
 }
 
 function fromCeRow(row: any): CeCourseEntry {
@@ -179,6 +234,10 @@ function fromCeRow(row: any): CeCourseEntry {
     id: row.id, employeeId: row.employee_id, requiredCertTypeId: row.required_cert_type_id,
     courseName: row.course_name, hours: row.hours, dateCompleted: row.date_completed,
     fileUrl: row.file_url ?? null, fileName: row.file_name ?? null,
+    delivery: (row.delivery ?? "live") as CeDelivery,
+    provider: row.provider ?? "",
+    providerApproval: (row.provider_approval ?? "") as ProviderApproval,
+    category: (row.category ?? "clinical") as CeCategory,
   };
 }
 
@@ -199,6 +258,10 @@ export async function addCeCourseEntry(input: Omit<CeCourseEntry, "id">): Promis
     employee_id: input.employeeId, required_cert_type_id: input.requiredCertTypeId,
     course_name: input.courseName, hours: input.hours, date_completed: input.dateCompleted,
     file_url: input.fileUrl ?? null, file_name: input.fileName ?? null,
+    delivery: input.delivery ?? "live",
+    provider: input.provider ?? "",
+    provider_approval: input.providerApproval ?? "",
+    category: input.category ?? "clinical",
   });
   if (error) { console.error("addCeCourseEntry error:", error); return { ok: false, error: error.message }; }
   return { ok: true };
@@ -215,6 +278,7 @@ export async function updateCeCourseEntry(
   id: string,
   updates: {
     courseName: string; hours: number; dateCompleted: string; requiredCertTypeId: string;
+    delivery?: CeDelivery; provider?: string; providerApproval?: ProviderApproval; category?: CeCategory;
     // Left undefined when the attachment isn't changing, so editing the
     // hours on a course never silently drops the certificate already on it.
     fileUrl?: string | null; fileName?: string | null;
@@ -226,6 +290,10 @@ export async function updateCeCourseEntry(
     date_completed: updates.dateCompleted,
     required_cert_type_id: updates.requiredCertTypeId,
   };
+  if (updates.delivery !== undefined) payload.delivery = updates.delivery;
+  if (updates.provider !== undefined) payload.provider = updates.provider;
+  if (updates.providerApproval !== undefined) payload.provider_approval = updates.providerApproval;
+  if (updates.category !== undefined) payload.category = updates.category;
   if (updates.fileUrl !== undefined) payload.file_url = updates.fileUrl;
   if (updates.fileName !== undefined) payload.file_name = updates.fileName;
   const { error } = await supabase.from("ce_course_entries").update(payload).eq("id", id);
@@ -251,6 +319,9 @@ export interface RequiredCertStatus {
   satisfied: boolean; // true for license/standalone if not expired; true for ce_hours if any entry falls in the window; true for total_ce_hours/one_time_ce if target reached
   missingLicense: boolean; // ce_hours/total_ce_hours only: true if the role's license has no expiration date on file yet, so the window can't be computed
   targetHours: number | null;
+  // Set when the Board requires an in-person examination for this course and
+  // nothing on file records one.
+  needsInPersonExam?: boolean;
   // one_time_ce only: total hours ever logged for this requirement, at any
   // date. `satisfied` is driven by this, while `totalHoursInWindow` says how
   // many of those hours also fall inside the current renewal window and so
@@ -268,7 +339,7 @@ export function addMonths(dateStr: string, months: number): string {
 export function computeRequiredCertStatuses(
   role: RequiredCertRole[],
   types: RequiredCertType[],
-  allCerts: { title: string; expirationDate: string | null; ceHours: number | null; createdAt: string }[],
+  allCerts: { title: string; expirationDate: string | null; ceHours: number | null; createdAt: string; inPersonExam?: boolean; ceDelivery?: "live" | "home_study" }[],
   ceEntries: CeCourseEntry[],
   today: string
 ): RequiredCertStatus[] {
@@ -326,8 +397,19 @@ export function computeRequiredCertStatuses(
         return effectiveDate >= windowStart && effectiveDate <= licenseExpiration;
       });
       const certHours = matchingCerts.reduce((sum, c) => sum + (c.ceHours ?? 0), 0);
-      const totalHours = loggedHours + certHours;
-      return { type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration, satisfied: entries.length > 0 || matchingCerts.length > 0, missingLicense: false, targetHours: type.targetHours };
+      // "Up to 4 units" for BLS: more can be earned, but only the ceiling
+      // counts toward the renewal.
+      const rawHours = loggedHours + certHours;
+      const totalHours = type.maxCountableHours != null ? Math.min(rawHours, type.maxCountableHours) : rawHours;
+      // A requirement the Board only accepts with an in-person examination
+      // isn't met by a certificate that doesn't record one.
+      const inPersonOk = !type.requiresInPersonExam || matchingCerts.some((c) => c.inPersonExam) || entries.length > 0;
+      return {
+        type, expirationDate: null, totalHoursInWindow: totalHours, windowStart, windowEnd: licenseExpiration,
+        satisfied: (entries.length > 0 || matchingCerts.length > 0) && inPersonOk,
+        missingLicense: false, targetHours: type.targetHours,
+        needsInPersonExam: type.requiresInPersonExam && !inPersonOk,
+      };
     }
     if (type.kind === "total_ce_hours") {
       if (!licenseExpiration) {
@@ -389,4 +471,91 @@ export function computeRequiredCertStatuses(
     const satisfied = type.dateMode === "none" ? !!cert : !!expirationDate && expirationDate >= today;
     return { type, expirationDate, totalHoursInWindow: 0, windowStart: null, windowEnd: null, satisfied, missingLicense: false, targetHours: type.targetHours };
   });
+}
+
+
+// ------------------------------------------------- Board compliance checks --
+
+export interface CeComplianceSummary {
+  windowStart: string | null;
+  windowEnd: string | null;
+  /** 50, plus whatever a sedation or anaesthesia permit adds. */
+  requiredHours: number;
+  permitExtraHours: number;
+  liveHours: number;
+  homeStudyHours: number;
+  totalHours: number;
+  /** Half the requirement — the most that may come from home study. */
+  nonLiveCap: number;
+  overNonLiveCap: boolean;
+  selfBenefitHours: number;
+  selfBenefitCap: number;
+  overSelfBenefitCap: boolean;
+  /** Dates where more than 8 units were claimed, with the amount claimed. */
+  daysOverDailyCap: { date: string; hours: number }[];
+  exemptFirstRenewal: boolean;
+}
+
+/**
+ * The three flat rules the Board applies on top of the course requirements:
+ * a 50% ceiling on home study, a maximum of 8 units claimed in any one day,
+ * and extra units for a sedation or anaesthesia permit.
+ *
+ * Kept apart from computeRequiredCertStatuses because these are properties of
+ * the renewal period as a whole, not of any single requirement.
+ */
+export function computeCeCompliance(
+  types: RequiredCertType[],
+  role: RequiredCertRole[],
+  allCerts: { title: string; expirationDate: string | null; ceHours: number | null; ceDelivery?: "live" | "home_study"; createdAt: string }[],
+  ceEntries: CeCourseEntry[],
+  permit: SedationPermit,
+  exemptFirstRenewal: boolean,
+  windowStart: string | null,
+  windowEnd: string | null
+): CeComplianceSummary {
+  const totalType = types.find((t) => t.kind === "total_ce_hours" && role.includes(t.appliesToRole));
+  const permitExtraHours = PERMIT_EXTRA_HOURS[permit] ?? 0;
+  const requiredHours = (totalType?.targetHours ?? 50) + permitExtraHours;
+
+  const inWindow = (d: string) => (windowStart && windowEnd ? d >= windowStart && d <= windowEnd : true);
+
+  // Everything that earned credit in the window, from both sources, so the
+  // live/home-study split and the daily totals agree with the CE log.
+  const credits: { date: string; hours: number; delivery: "live" | "home_study"; category: CeCategory }[] = [];
+  for (const e of ceEntries) {
+    if (!inWindow(e.dateCompleted)) continue;
+    credits.push({ date: e.dateCompleted, hours: e.hours, delivery: e.delivery ?? "live", category: e.category ?? "clinical" });
+  }
+  for (const c of allCerts) {
+    if (c.ceHours == null || c.ceHours <= 0) continue;
+    const certType = types.find((t) => t.title === c.title);
+    const effectiveDate = certType && certType.dateMode === "completion" && c.expirationDate
+      ? addMonths(c.expirationDate, -certType.frequencyMonths)
+      : c.expirationDate ?? c.createdAt.slice(0, 10);
+    if (!inWindow(effectiveDate)) continue;
+    credits.push({ date: effectiveDate, hours: c.ceHours, delivery: c.ceDelivery ?? "live", category: "clinical" });
+  }
+
+  const liveHours = credits.filter((c) => c.delivery === "live").reduce((s, c) => s + c.hours, 0);
+  const homeStudyHours = credits.filter((c) => c.delivery === "home_study").reduce((s, c) => s + c.hours, 0);
+
+  const byDate = new Map<string, number>();
+  for (const c of credits) byDate.set(c.date, (byDate.get(c.date) ?? 0) + c.hours);
+  const daysOverDailyCap = [...byDate.entries()]
+    .filter(([, hours]) => hours > MAX_UNITS_PER_DAY)
+    .map(([date, hours]) => ({ date, hours }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const nonLiveCap = requiredHours * NON_LIVE_FRACTION;
+  const selfBenefitHours = credits.filter((c) => c.category === "self_benefit").reduce((s, c) => s + c.hours, 0);
+  const selfBenefitCap = requiredHours * SELF_BENEFIT_FRACTION;
+
+  return {
+    windowStart, windowEnd, requiredHours, permitExtraHours,
+    liveHours, homeStudyHours, totalHours: liveHours + homeStudyHours,
+    nonLiveCap, overNonLiveCap: homeStudyHours > nonLiveCap,
+    selfBenefitHours, selfBenefitCap, overSelfBenefitCap: selfBenefitHours > selfBenefitCap,
+    daysOverDailyCap, exemptFirstRenewal,
+  };
 }

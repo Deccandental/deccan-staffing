@@ -3,7 +3,7 @@
 import { Fragment, useState } from "react";
 import { Employee } from "@/types/employee";
 import { Certification, uploadCertFile } from "@/lib/certsStore";
-import { CeCourseEntry, RequiredCertType, addMonths, updateCeCourseEntry } from "@/lib/requiredCertsStore";
+import { CeCourseEntry, RequiredCertType, addMonths, updateCeCourseEntry, CeDelivery, DELIVERY_LABELS, CeCategory, CATEGORY_LABELS } from "@/lib/requiredCertsStore";
 import { getApplicableRoles } from "@/components/RequiredCertsSection";
 
 /**
@@ -28,6 +28,8 @@ interface CeLogRow {
   // than here — an hours log is the wrong place to delete a document.
   certId?: string;
   requiredCertTypeId?: string;
+  delivery?: CeDelivery;
+  category?: CeCategory;
   date: string;
   title: string;
   courseName: string;
@@ -53,7 +55,7 @@ export default function CeLogPanel({
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ courseName: "", hours: "", dateCompleted: "", requiredCertTypeId: "" });
+  const [editForm, setEditForm] = useState({ courseName: "", hours: "", dateCompleted: "", requiredCertTypeId: "", delivery: "live" as CeDelivery, category: "clinical" as CeCategory });
   const [editError, setEditError] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const [editFile, setEditFile] = useState<File | null>(null);
@@ -81,6 +83,8 @@ export default function CeLogPanel({
     rows.push({
       entryId: e.id,
       requiredCertTypeId: e.requiredCertTypeId,
+      delivery: e.delivery,
+      category: e.category,
       date: e.dateCompleted,
       title: type?.title ?? "CE course",
       courseName: e.courseName,
@@ -138,6 +142,8 @@ export default function CeLogPanel({
       hours: String(r.hours),
       dateCompleted: r.date,
       requiredCertTypeId: r.requiredCertTypeId ?? "",
+      delivery: r.delivery ?? "live",
+      category: r.category ?? "clinical",
     });
     setEditError("");
     setEditFile(null);
@@ -169,6 +175,8 @@ export default function CeLogPanel({
       hours,
       dateCompleted: editForm.dateCompleted,
       requiredCertTypeId: editForm.requiredCertTypeId,
+      delivery: editForm.delivery,
+      category: editForm.category,
       fileUrl,
       fileName,
     });
@@ -270,6 +278,14 @@ export default function CeLogPanel({
                           <input type="date" value={editForm.dateCompleted}
                             onChange={(e) => setEditForm((f) => ({ ...f, dateCompleted: e.target.value }))}
                             className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                          <select value={editForm.delivery} onChange={(ev) => setEditForm((f) => ({ ...f, delivery: ev.target.value as CeDelivery }))}
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none sm:col-span-2">
+                            {(Object.keys(DELIVERY_LABELS) as CeDelivery[]).map((d) => <option key={d} value={d}>{DELIVERY_LABELS[d]}</option>)}
+                          </select>
+                          <select value={editForm.category} onChange={(ev) => setEditForm((f) => ({ ...f, category: ev.target.value as CeCategory }))}
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none sm:col-span-2">
+                            {(Object.keys(CATEGORY_LABELS) as CeCategory[]).map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+                          </select>
                           <label className="text-xs sm:col-span-4" style={{ color: "rgba(74,66,56,0.6)" }}>
                             Counts toward
                             <select value={editForm.requiredCertTypeId}

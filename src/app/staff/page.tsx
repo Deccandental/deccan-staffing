@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate from "@/components/AppIdentityGate";
 import AccessDenied from "@/components/AccessDenied";
-import { Employee, EmployeeRole, DentistSpecialty } from "@/types/employee";
+import { Employee, EmployeeRole, DentistSpecialty, SedationPermitValue } from "@/types/employee";
 import {
   loadStaff, addEmployee, updateEmployee, removeEmployee, setEmployeeArchived,
   loadPrefs, setDentistPrefs, DentistPrefs,
@@ -46,6 +46,8 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   hoBonusEligible: false,
   exemptFromPolicySigning: false,
   exemptFromCheckin: false,
+  sedationPermit: "none",
+  ceFirstRenewalExempt: false,
   employmentType: "full_time",
   defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
 };
@@ -115,6 +117,8 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       hoBonusEligible: emp.hoBonusEligible ?? false,
       exemptFromPolicySigning: emp.exemptFromPolicySigning ?? false,
       exemptFromCheckin: emp.exemptFromCheckin ?? false,
+      sedationPermit: emp.sedationPermit ?? "none",
+      ceFirstRenewalExempt: emp.ceFirstRenewalExempt ?? false,
       employmentType: emp.employmentType ?? "full_time",
       defaultSchedule: { ...emp.defaultSchedule }
     });
@@ -410,6 +414,25 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                       <input type="checkbox" checked={form.exemptFromCheckin ?? false} onChange={(e) => setForm((f) => ({ ...f, exemptFromCheckin: e.target.checked }))} />
                       <span className="text-sm font-medium text-gray-700">Exempt from 6-month check-ins (e.g. the person conducting them)</span>
                     </label>
+                    {/* Dental Board CE settings. A sedation or anaesthesia
+                        permit adds units on top of the 50; a licensee's very
+                        first renewal is exempt from CE altogether. */}
+                    <label className="flex items-center gap-2 cursor-pointer mt-3">
+                      <input type="checkbox" checked={form.ceFirstRenewalExempt ?? false} onChange={(e) => setForm((f) => ({ ...f, ceFirstRenewalExempt: e.target.checked }))} />
+                      <span className="text-sm font-medium text-gray-700">First license renewal — exempt from CE this cycle</span>
+                    </label>
+                    <div className="mt-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Sedation / anaesthesia permit</label>
+                      <select value={form.sedationPermit ?? "none"}
+                        onChange={(e) => setForm((f) => ({ ...f, sedationPermit: e.target.value as SedationPermitValue }))}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none">
+                        <option value="none">No permit</option>
+                        <option value="oral_conscious">Oral conscious sedation (+7 units)</option>
+                        <option value="moderate">Moderate sedation (+15 units)</option>
+                        <option value="general">General anaesthesia (+24 units)</option>
+                        <option value="oms">Oral &amp; maxillofacial surgery (+50 units)</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
 

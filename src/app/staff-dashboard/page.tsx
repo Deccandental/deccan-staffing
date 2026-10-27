@@ -86,9 +86,11 @@ interface CertFormState {
   title: string;
   expirationDate: string;
   ceHours: string;
+  ceDelivery: "live" | "home_study";
+  inPersonExam: boolean;
 }
 
-const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "", ceHours: "" };
+const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "", ceHours: "", ceDelivery: "live", inPersonExam: false };
 
 function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
   const isManager = identity.canAdmin;
@@ -373,7 +375,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     const dateForForm = editIsCompletionMode && cert.expirationDate
       ? addMonthsToDate(cert.expirationDate, -editType.frequencyMonths)
       : cert.expirationDate ?? "";
-    setCertForm({ title: cert.title, expirationDate: dateForForm, ceHours: cert.ceHours != null ? String(cert.ceHours) : "" });
+    setCertForm({ title: cert.title, expirationDate: dateForForm, ceHours: cert.ceHours != null ? String(cert.ceHours) : "", ceDelivery: cert.ceDelivery ?? "live", inPersonExam: cert.inPersonExam ?? false });
     setEditingCertId(cert.id);
     setCertFile(null);
     setCertError("");
@@ -384,7 +386,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
   function openForRequiredTitle(title: string, existing?: Certification) {
     if (existing) { startEditCert(existing); return; }
-    setCertForm({ title, expirationDate: "", ceHours: "" });
+    setCertForm({ title, expirationDate: "", ceHours: "", ceDelivery: "live", inPersonExam: false });
     setEditingCertId(null);
     setCertFile(null);
     setCertError("");
@@ -467,6 +469,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
         title: certForm.title.trim(),
         expirationDate: resolvedExpiration,
         ceHours: certForm.ceHours ? Number(certForm.ceHours) : null,
+        ceDelivery: certForm.ceDelivery,
+        inPersonExam: certForm.inPersonExam,
         fileUrl, fileName,
       };
 
@@ -1104,6 +1108,36 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   })()}
                   <input type="number" onFocus={(e) => e.target.select()} value={certForm.ceHours} onChange={(e) => setCertForm((f) => ({ ...f, ceHours: e.target.value }))}
                     placeholder="CE credits earned (optional)" className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+                  {/* A certificate carrying CE hours counts against the same
+                      live/home-study limit as a logged course, so it needs the
+                      format too. BLS additionally needs the in-person exam
+                      recorded: online-only is not accepted by the Board. */}
+                  {Number(certForm.ceHours) > 0 && (() => {
+                    const matchingType = requiredTypesForCerts.find((t) => t.title === certForm.title.trim());
+                    return (
+                      <div className="grid gap-2 sm:grid-cols-2 mt-2">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 mb-1">Format</label>
+                          <select value={certForm.ceDelivery}
+                            onChange={(e) => setCertForm((f) => ({ ...f, ceDelivery: e.target.value as "live" | "home_study" }))}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none">
+                            <option value="live">Live / in person</option>
+                            <option value="home_study">Home study</option>
+                          </select>
+                        </div>
+                        {matchingType?.requiresInPersonExam && (
+                          <label className="flex items-start gap-2 text-xs sm:items-center" style={{ color: "rgba(74,66,56,0.7)" }}>
+                            <input type="checkbox" checked={certForm.inPersonExam}
+                              onChange={(e) => setCertForm((f) => ({ ...f, inPersonExam: e.target.checked }))}
+                              className="mt-0.5 sm:mt-0" />
+                            <span>Included in-person skills practice and exam<br />
+                              <span style={{ color: "rgba(74,66,56,0.45)" }}>Required — online-only isn&apos;t accepted.</span>
+                            </span>
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {/* Show what's already attached, so it's possible to check
                       the right file is there before saving. */}
                   {editingCertId && (() => {

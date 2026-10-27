@@ -19,6 +19,9 @@ export interface WeekdaySchedule {
   friday: boolean;
 }
 
+/** Dental Board sedation/anaesthesia permit, which adds CE units on top of the 50. */
+export type SedationPermitValue = "none" | "oral_conscious" | "moderate" | "general" | "oms";
+
 export interface Employee {
   id: number;
   name: string;
@@ -90,5 +93,8 @@ export interface Employee {
   // requests, certifications, past schedule assignments) still resolve
   // their name correctly, since the row itself is never deleted.
   archived?: boolean;
+  sedationPermit?: SedationPermitValue;
+  /** A licensee renewing for the very first time is exempt from CE. */
+  ceFirstRenewalExempt?: boolean;
   defaultSchedule: WeekdaySchedule;
 }
