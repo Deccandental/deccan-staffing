@@ -1325,7 +1325,7 @@ function PvBonusPanel() {
                                       <div className="space-y-1 mb-2 max-h-40 overflow-y-auto">
                                         {payments.filter((p) => p.year === year && p.quarter === quarter).map((p) => (
                                           <div key={p.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-2 py-1.5">
-                                            <span className="text-slate-600">{new Date(p.datePaid + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}: ${formatMoney(p.amount)}</span>
+                                            <span className="text-slate-600 truncate">{new Date(p.datePaid + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}: ${formatMoney(p.amount)}{p.notes ? <span className="text-slate-400"> · {p.notes}</span> : null}</span>
                                             <span className="flex items-center gap-2">
                                               <button onClick={() => startEditPayment(p)} className="text-orange-500 hover:underline">Edit</button>
                                               <button onClick={() => handleDeletePayment(p.id)} className="text-red-400 hover:underline">Delete</button>
@@ -1339,6 +1339,7 @@ function PvBonusPanel() {
                                       <div className="flex flex-wrap items-center gap-1.5">
                                         <input type="date" value={paymentForm.datePaid} onChange={(e) => setPaymentForm((f) => ({ ...f, datePaid: e.target.value }))} className={`${cellClass} w-32`} />
                                         <input type="number" onFocus={(e) => e.target.select()} value={paymentForm.amount} onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))} placeholder="$" className={`${cellClass} w-20`} />
+                                        <input type="text" value={paymentForm.notes} onChange={(e) => setPaymentForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Note (optional)" className={`${cellClass} w-40`} />
                                         <button onClick={() => handleAddPayment(year, quarter)} className="rounded-lg px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>
                                           {editingPaymentId ? "Save" : "+ Add"}
                                         </button>
