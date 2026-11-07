@@ -115,6 +115,12 @@ export default function ScheduleBuilder() {
   // sibling effect that also reads it in the same commit.
   const scheduleLoaded = loadedYearMonth === `${year}-${month}`;
 
+  // A dentist with a full-day absence on a date (approved leave, or marked
+  // unavailable on the Availability page) shouldn't be auto-added for that
+  // date. Remote and half days still count as working.
+  const isOutOn = (employeeId: number, date: string) =>
+    overrides.some((o) => o.employeeId === employeeId && o.date === date && !o.halfDay && o.reason !== "remote");
+
   async function applyDefaults() {
     const filled: MonthSchedule = { ...schedule };
     const toSave: { date: string; dentists: string[]; frontDeskRequired: number; hygienistsRequired: number }[] = [];
@@ -122,7 +128,10 @@ export default function ScheduleBuilder() {
       if (!filled[day.date]) {
         const dowKey = getWeekday(day.date);
         const dentists = staff
-          .filter((e) => e.role === "Dentist" && (day.isOpenTuesday || e.defaultSchedule[dowKey]))
+          // An open Tuesday used to mean "everyone's available" — from when
+          // Tuesdays were rare exceptions. Now each dentist's own schedule
+          // decides, Tuesdays included.
+          .filter((e) => e.role === "Dentist" && e.defaultSchedule[dowKey] && !isOutOn(e.id, day.date))
           .map((e) => e.name);
         filled[day.date] = { dentists, frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {}, hygienistOverrides: {}, assistantCounts: {}, floaterAssistantId: null };
         toSave.push({ date: day.date, dentists, frontDeskRequired: 2, hygienistsRequired: 1 });
@@ -158,7 +167,7 @@ export default function ScheduleBuilder() {
       const dowKey = getWeekday(date);
       const day = openDays.find((d) => d.date === date);
       const dentists = staff
-        .filter((e) => e.role === "Dentist" && (day?.isOpenTuesday || e.defaultSchedule[dowKey]))
+        .filter((e) => e.role === "Dentist" && e.defaultSchedule[dowKey] && !isOutOn(e.id, date))
         .map((e) => e.name);
       setSchedule((c) => ({ ...c, [date]: { dentists, frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {}, hygienistOverrides: {}, assistantCounts: {}, floaterAssistantId: null } }));
       await saveDaySchedule(date, dentists, 2, 1, {});
@@ -519,12 +528,15 @@ export default function ScheduleBuilder() {
                     const emp = staff.find((e) => e.name === name);
                     const dowKey = selectedDate ? getWeekday(selectedDate) : null;
                     const day = openDays.find((d) => d.date === selectedDate);
-                    const worksToday = emp && dowKey ? (day?.isOpenTuesday ? true : emp.defaultSchedule[dowKey]) : true;
+                    const worksToday = emp && dowKey ? emp.defaultSchedule[dowKey] : true;
                     const hasOverride = emp ? overrides.some((o) => o.employeeId === emp.id && o.date === selectedDate && !o.halfDay && o.reason !== "remote") : false;
                     const unavailable = !worksToday || hasOverride;
                     return (
                       <button key={name}
-                        onClick={() => { if (unavailable) return; setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name]); }}
+                        // An unavailable dentist can't be added — but one already
+                        // saved on this day (from before availability changed) can
+                        // always be removed.
+                        onClick={() => { if (unavailable && !checked) return; setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name]); }}
                         className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
                           unavailable ? "border-red-100 bg-red-50 opacity-60 cursor-not-allowed"
                           : checked ? "border-orange-400 bg-orange-50"
