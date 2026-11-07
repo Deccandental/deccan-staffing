@@ -59,7 +59,9 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
       }
 
       const daySched = schedule[day.date];
-      if (!daySched || daySched.dentists.length === 0) {
+      // No saved entry at all is "Not scheduled"; a saved day with zero
+      // dentists still prints its front desk and hygiene staffing.
+      if (!daySched) {
         return `
           <td class="day-cell open empty">
             <div class="day-number">${day.day}</div>
