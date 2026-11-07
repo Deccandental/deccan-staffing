@@ -3,7 +3,9 @@ import { supabase } from "./supabase";
 export interface StaffOverride {
   employeeId: number;
   date: string;
-  reason: "sick" | "pto" | "leave" | "other" | "remote";
+  // "extra" is the positive override: someone whose weekly pattern says OFF
+  // is coming in just this one day. Every other reason marks absence.
+  reason: "sick" | "pto" | "leave" | "other" | "remote" | "extra";
   halfDay?: "AM" | "PM" | null;
 }
 
@@ -32,8 +34,8 @@ export async function clearUnavailable(employeeId: number, date: string): Promis
 
 export async function isUnavailable(employeeId: number, date: string): Promise<boolean> {
   const { data } = await supabase.from("overrides").select("half_day, reason").eq("employee_id", employeeId).eq("date", date).single();
-  // Remote staff are still available
-  return !!data && !data.half_day && data.reason !== "remote";
+  // Remote staff are still available, and "extra" means present by definition.
+  return !!data && !data.half_day && data.reason !== "remote" && data.reason !== "extra";
 }
 
 export async function getOverrideForDate(employeeId: number, date: string): Promise<StaffOverride | undefined> {

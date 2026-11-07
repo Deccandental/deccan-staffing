@@ -33,7 +33,7 @@ export function buildDailyAssignments(
 
   function isUnavailable(emp: Employee): boolean {
     if (!date) return false;
-    if (overrides.some((o) => o.employeeId === emp.id && o.date === date && !o.halfDay && o.reason !== "remote")) return true;
+    if (overrides.some((o) => o.employeeId === emp.id && o.date === date && !o.halfDay && o.reason !== "remote" && o.reason !== "extra")) return true;
     // Full-day approved leave blocks scheduling too — a manual override isn't
     // the only way someone ends up out for the day. A half day doesn't block
     // (mirroring a half-day override), but this is now judged per date: a
@@ -45,7 +45,14 @@ export function buildDailyAssignments(
   }
 
   function isAvailable(emp: Employee): boolean {
-    const worksDay = isOpenTuesday ? true : (weekday ? emp.defaultSchedule[weekday] : true);
+    // One rule on every weekday: the person's own pattern decides, and an
+    // "extra" override flips a single date on. The old open-Tuesday bypass
+    // (everyone available) is retired; isOpenTuesday is kept in the
+    // signature only so existing call sites don't all change at once.
+    const extraIn = date
+      ? overrides.some((o) => o.employeeId === emp.id && o.date === date && o.reason === "extra" && !o.halfDay)
+      : false;
+    const worksDay = (weekday ? emp.defaultSchedule[weekday] : true) || extraIn;
     return worksDay && !isUnavailable(emp);
   }
 

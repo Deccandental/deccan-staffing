@@ -119,7 +119,12 @@ export default function ScheduleBuilder() {
   // unavailable on the Availability page) shouldn't be auto-added for that
   // date. Remote and half days still count as working.
   const isOutOn = (employeeId: number, date: string) =>
-    overrides.some((o) => o.employeeId === employeeId && o.date === date && !o.halfDay && o.reason !== "remote");
+    overrides.some((o) => o.employeeId === employeeId && o.date === date && !o.halfDay && o.reason !== "remote" && o.reason !== "extra");
+
+  // The mirror image: someone whose weekly pattern says OFF but who was
+  // marked "coming in just this day" on the Availability page.
+  const isInExtraOn = (employeeId: number, date: string) =>
+    overrides.some((o) => o.employeeId === employeeId && o.date === date && o.reason === "extra" && !o.halfDay);
 
   async function applyDefaults() {
     const filled: MonthSchedule = { ...schedule };
@@ -131,7 +136,7 @@ export default function ScheduleBuilder() {
           // An open Tuesday used to mean "everyone's available" — from when
           // Tuesdays were rare exceptions. Now each dentist's own schedule
           // decides, Tuesdays included.
-          .filter((e) => e.role === "Dentist" && e.defaultSchedule[dowKey] && !isOutOn(e.id, day.date))
+          .filter((e) => e.role === "Dentist" && (e.defaultSchedule[dowKey] || isInExtraOn(e.id, day.date)) && !isOutOn(e.id, day.date))
           .map((e) => e.name);
         filled[day.date] = { dentists, frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {}, hygienistOverrides: {}, assistantCounts: {}, floaterAssistantId: null };
         toSave.push({ date: day.date, dentists, frontDeskRequired: 2, hygienistsRequired: 1 });
@@ -167,7 +172,7 @@ export default function ScheduleBuilder() {
       const dowKey = getWeekday(date);
       const day = openDays.find((d) => d.date === date);
       const dentists = staff
-        .filter((e) => e.role === "Dentist" && e.defaultSchedule[dowKey] && !isOutOn(e.id, date))
+        .filter((e) => e.role === "Dentist" && (e.defaultSchedule[dowKey] || isInExtraOn(e.id, date)) && !isOutOn(e.id, date))
         .map((e) => e.name);
       setSchedule((c) => ({ ...c, [date]: { dentists, frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {}, hygienistOverrides: {}, assistantCounts: {}, floaterAssistantId: null } }));
       await saveDaySchedule(date, dentists, 2, 1, {});
@@ -528,8 +533,8 @@ export default function ScheduleBuilder() {
                     const emp = staff.find((e) => e.name === name);
                     const dowKey = selectedDate ? getWeekday(selectedDate) : null;
                     const day = openDays.find((d) => d.date === selectedDate);
-                    const worksToday = emp && dowKey ? emp.defaultSchedule[dowKey] : true;
-                    const hasOverride = emp ? overrides.some((o) => o.employeeId === emp.id && o.date === selectedDate && !o.halfDay && o.reason !== "remote") : false;
+                    const worksToday = emp && dowKey ? (emp.defaultSchedule[dowKey] || (selectedDate ? isInExtraOn(emp.id, selectedDate) : false)) : true;
+                    const hasOverride = emp ? overrides.some((o) => o.employeeId === emp.id && o.date === selectedDate && !o.halfDay && o.reason !== "remote" && o.reason !== "extra") : false;
                     const unavailable = !worksToday || hasOverride;
                     return (
                       <button key={name}

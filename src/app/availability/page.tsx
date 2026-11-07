@@ -188,13 +188,12 @@ function AvailabilityPageBody() {
                             {days.map((d) => {
                               const schedKey = DAY_MAP[d.weekday];
                               const worksDefault = schedKey ? emp.defaultSchedule[schedKey] : false;
-                              // An open Tuesday no longer bypasses anyone's personal
-                              // schedule — the Schedule Builder honours it on every
-                              // weekday now, and this grid mirrors that. Whether the
-                              // practice is open decides if the DAY exists; whether
-                              // the person works it is theirs alone.
-                              const shouldShow = worksDefault;
+                              // The weekly pattern decides the day — but a grey cell
+                              // can be flipped on for one date (reason "extra") when
+                              // someone is coming in exceptionally.
                               const override = getOverride(emp.id, d.date);
+                              const isExtraIn = override?.reason === "extra" && !override?.halfDay;
+                              const shouldShow = worksDefault || isExtraIn;
                               const reasonStyle = REASONS.find((r) => r.key === override?.reason) ?? REASONS[1];
                               const remoteByDefault = !override && !!(schedKey && emp.remoteDays?.[schedKey]);
                               const isRemote = (override?.reason === "remote" && !override.halfDay) || remoteByDefault;
@@ -232,7 +231,19 @@ function AvailabilityPageBody() {
                               return (
                                 <td key={d.date} className={`p-1 text-center ${d.isTuesday ? (d.isOpenTuesday ? "bg-blue-50" : "bg-slate-100") : ""}`}>
                                   {!shouldShow ? (
-                                    <div className="mx-auto h-8 w-8 flex items-center justify-center text-slate-200 text-xs">—</div>
+                                    <button
+                                      onClick={async () => { await setUnavailable(emp.id, d.date, "extra", null); await refresh(); }}
+                                      title="Off per their weekly schedule. Click if they're coming in just this day."
+                                      className="mx-auto h-8 w-8 rounded border border-dashed border-slate-200 flex items-center justify-center text-slate-300 text-xs transition hover:border-emerald-300 hover:text-emerald-400">
+                                      —
+                                    </button>
+                                  ) : isExtraIn && !worksDefault ? (
+                                    <button
+                                      onClick={async () => { await clearUnavailable(emp.id, d.date); await refresh(); }}
+                                      title="Coming in just this day (added by hand). Click to undo."
+                                      className="mx-auto h-8 w-8 rounded border text-xs font-bold transition hover:opacity-75 flex items-center justify-center bg-emerald-100 border-emerald-300 text-emerald-700">
+                                      IN
+                                    </button>
                                   ) : isRemote ? (
                                     <button onClick={() => handleToggle(emp.id, d.date)} title={tooltip}
                                       className="mx-auto h-8 w-8 rounded border text-xs font-bold transition hover:opacity-75 flex items-center justify-center bg-teal-200 border-teal-300 text-teal-700">
