@@ -110,7 +110,10 @@ export default function PublicCalendar() {
     for (const day of days) {
       if (!day.isOpen) continue;
       const daySched = schedule[day.date];
-      if (!daySched || daySched.dentists.length === 0) continue;
+      // A day with no dentists is still a staffed day — an open Tuesday can
+      // run on front desk alone. Skipping it hid the whole card, which made
+      // a deliberately dentist-free day look like an unsaved one.
+      if (!daySched) continue;
 
       const frontDeskRequired = daySched.frontDeskRequired ?? 2;
       const hygienistsRequired = daySched.hygienistsRequired ?? 1;
