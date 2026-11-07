@@ -188,11 +188,12 @@ function AvailabilityPageBody() {
                             {days.map((d) => {
                               const schedKey = DAY_MAP[d.weekday];
                               const worksDefault = schedKey ? emp.defaultSchedule[schedKey] : false;
-                              const isTuesdayOpen = d.isTuesday && d.isOpenTuesday;
-                              // Only a genuine Open Tuesday bypasses the normal schedule check for
-                              // everyone (matches the Schedule Builder's own engine) — a regular
-                              // closed Tuesday should still respect each person's real availability.
-                              const shouldShow = worksDefault || isTuesdayOpen;
+                              // An open Tuesday no longer bypasses anyone's personal
+                              // schedule — the Schedule Builder honours it on every
+                              // weekday now, and this grid mirrors that. Whether the
+                              // practice is open decides if the DAY exists; whether
+                              // the person works it is theirs alone.
+                              const shouldShow = worksDefault;
                               const override = getOverride(emp.id, d.date);
                               const reasonStyle = REASONS.find((r) => r.key === override?.reason) ?? REASONS[1];
                               const remoteByDefault = !override && !!(schedKey && emp.remoteDays?.[schedKey]);
