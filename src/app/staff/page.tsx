@@ -41,6 +41,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   growthBonusEligible: false,
   growthBonusMultiplier: 1,
   growthBonusStartDate: "",
+  netProductionStartDate: "",
   pvBonusEligible: false,
   hygieneBonusEligible: false,
   netProductionBonusPercent: 30,
@@ -113,6 +114,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       hireDate: emp.hireDate ?? "", growthBonusEligible: emp.growthBonusEligible ?? false,
       growthBonusMultiplier: emp.growthBonusMultiplier ?? 1,
       growthBonusStartDate: emp.growthBonusStartDate ?? "",
+      netProductionStartDate: emp.netProductionStartDate ?? "",
       pvBonusEligible: emp.pvBonusEligible ?? false,
       hygieneBonusEligible: emp.hygieneBonusEligible ?? false,
       netProductionBonusPercent: emp.netProductionBonusPercent ?? 30,
@@ -409,7 +411,14 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                           onChange={(e) => setForm((f) => ({ ...f, netProductionBonusPercent: Number(e.target.value) }))}
                           className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none" />
                         <span className="text-xs text-gray-500">%</span>
+                        <label className="text-xs text-gray-500 ml-3">Starts on</label>
+                        <input type="date" value={form.netProductionStartDate ?? ""}
+                          onChange={(e) => setForm((f) => ({ ...f, netProductionStartDate: e.target.value }))}
+                          className="rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none" />
                       </div>
+                    )}
+                    {form.pvBonusEligible && (
+                      <p className="text-xs text-gray-400 mt-1">Until the start date, their dashboard shows when the bonus begins instead of the calculation table. Leave blank to show it right away.</p>
                     )}
                     <label className="flex items-center gap-2 cursor-pointer mt-3">
                       <input type="checkbox" checked={form.hoBonusEligible ?? false} onChange={(e) => setForm((f) => ({ ...f, hoBonusEligible: e.target.checked }))} />

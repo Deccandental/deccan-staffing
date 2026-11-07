@@ -714,7 +714,25 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
-            {canSeeThisPersonsPay && selectedEmployee?.pvBonusEligible && (
+            {/* Before the arrangement's start date the table would show a
+                wall of zeros for quarters that were never part of the deal —
+                a friendly "starts on" note replaces it until then. */}
+            {canSeeThisPersonsPay && selectedEmployee?.pvBonusEligible &&
+              selectedEmployee.netProductionStartDate && new Date().toISOString().slice(0, 10) < selectedEmployee.netProductionStartDate && (
+              <div className="lg:col-span-3 rounded-2xl bg-white shadow p-5 flex items-center gap-3">
+                <span className="text-2xl">⏳</span>
+                <div>
+                  <h2 className="font-bold text-slate-700">💰 Net Production Based Bonus</h2>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Your bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of net production) starts on{" "}
+                    <strong>{new Date(selectedEmployee.netProductionStartDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</strong>.
+                    The calculation table will appear here from that date.
+                  </p>
+                </div>
+              </div>
+            )}
+            {canSeeThisPersonsPay && selectedEmployee?.pvBonusEligible &&
+              (!selectedEmployee.netProductionStartDate || new Date().toISOString().slice(0, 10) >= selectedEmployee.netProductionStartDate) && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
                 <div className="p-4 pb-2">
                   <h2 className="font-bold text-slate-700">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>

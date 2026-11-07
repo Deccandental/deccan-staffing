@@ -96,6 +96,8 @@ export interface Employee {
   sedationPermit?: SedationPermitValue;
   /** Growth bonus only counts quarters ending on/after this date. Null = no restriction. */
   growthBonusStartDate?: string | null;
+  /** Net production bonus begins on this date; before it, staff see a "starts on" note instead of the table. */
+  netProductionStartDate?: string | null;
   /** A licensee renewing for the very first time is exempt from CE. */
   ceFirstRenewalExempt?: boolean;
   defaultSchedule: WeekdaySchedule;

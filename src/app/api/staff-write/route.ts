@@ -15,7 +15,7 @@ import { verifySessionToken } from "@/lib/session";
 // What a caller gets back after adding someone: the same safe columns the app
 // loads normally. The PIN is never returned.
 const SAFE_COLUMNS =
-  "id, name, role, specialty, color, skills, email, can_admin, can_manage_leave, can_manage_events, can_manage_certs, can_manage_payroll, can_manage_staff_notes, pto_balance_hours, sick_balance_hours, exclude_from_payroll, remote_days, hire_date, growth_bonus_eligible, growth_bonus_multiplier, growth_bonus_start_date, pv_bonus_eligible, hygiene_bonus_eligible, net_production_bonus_percent, ho_bonus_eligible, exempt_from_policy_signing, exempt_from_checkin, sedation_permit, ce_first_renewal_exempt, employment_type, archived, default_schedule";
+  "id, name, role, specialty, color, skills, email, can_admin, can_manage_leave, can_manage_events, can_manage_certs, can_manage_payroll, can_manage_staff_notes, pto_balance_hours, sick_balance_hours, exclude_from_payroll, remote_days, hire_date, growth_bonus_eligible, growth_bonus_multiplier, growth_bonus_start_date, pv_bonus_eligible, net_production_start_date, hygiene_bonus_eligible, net_production_bonus_percent, ho_bonus_eligible, exempt_from_policy_signing, exempt_from_checkin, sedation_permit, ce_first_renewal_exempt, employment_type, archived, default_schedule";
 
 const BALANCE_COLUMNS = new Set(["pto_balance_hours", "sick_balance_hours"]);
 
