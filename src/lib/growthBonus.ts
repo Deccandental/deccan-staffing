@@ -108,6 +108,11 @@ export function computeQuarterCalc(q: GrowthBonusQuarter): QuarterCalc {
 // program AND have been employed at least 5 months by the quarter's end.
 export function isEligibleForQuarter(emp: Employee, quarterEnd: string): boolean {
   if (!emp.growthBonusEligible) return false;
+  // An explicit start date wins over everything else: quarters that end
+  // before it never count, however long the person has been employed.
+  // Lets someone be opted in today with their participation beginning at a
+  // chosen future quarter.
+  if (emp.growthBonusStartDate && quarterEnd < emp.growthBonusStartDate) return false;
   if (!emp.hireDate) return true;
   const hire = new Date(emp.hireDate + "T00:00:00");
   const end = new Date(quarterEnd + "T00:00:00");

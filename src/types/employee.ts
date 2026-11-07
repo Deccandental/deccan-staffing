@@ -94,6 +94,8 @@ export interface Employee {
   // their name correctly, since the row itself is never deleted.
   archived?: boolean;
   sedationPermit?: SedationPermitValue;
+  /** Growth bonus only counts quarters ending on/after this date. Null = no restriction. */
+  growthBonusStartDate?: string | null;
   /** A licensee renewing for the very first time is exempt from CE. */
   ceFirstRenewalExempt?: boolean;
   defaultSchedule: WeekdaySchedule;

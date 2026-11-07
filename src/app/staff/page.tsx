@@ -40,6 +40,7 @@ const EMPTY_EMP: Omit<Employee, "id"> = {
   excludeFromPayroll: false,
   growthBonusEligible: false,
   growthBonusMultiplier: 1,
+  growthBonusStartDate: "",
   pvBonusEligible: false,
   hygieneBonusEligible: false,
   netProductionBonusPercent: 30,
@@ -111,6 +112,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       remoteDays: emp.remoteDays ? { ...emp.remoteDays } : undefined,
       hireDate: emp.hireDate ?? "", growthBonusEligible: emp.growthBonusEligible ?? false,
       growthBonusMultiplier: emp.growthBonusMultiplier ?? 1,
+      growthBonusStartDate: emp.growthBonusStartDate ?? "",
       pvBonusEligible: emp.pvBonusEligible ?? false,
       hygieneBonusEligible: emp.hygieneBonusEligible ?? false,
       netProductionBonusPercent: emp.netProductionBonusPercent ?? 30,
@@ -382,7 +384,14 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                         <input type="number" onFocus={(e) => e.target.select()} step="0.1" value={form.growthBonusMultiplier ?? 1}
                           onChange={(e) => setForm((f) => ({ ...f, growthBonusMultiplier: Number(e.target.value) }))}
                           className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none" />
+                        <label className="text-xs text-gray-500 ml-3">Starts counting from</label>
+                        <input type="date" value={form.growthBonusStartDate ?? ""}
+                          onChange={(e) => setForm((f) => ({ ...f, growthBonusStartDate: e.target.value }))}
+                          className="rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none" />
                       </div>
+                    )}
+                    {form.growthBonusEligible && (
+                      <p className="text-xs text-gray-400 mt-1">Leave the date blank to start right away (the 5-months-employed rule still applies). To begin at a future quarter, enter its first day — e.g. 04/01/2027 for Q2 2027.</p>
                     )}
                     <p className="text-xs text-gray-400 mt-1">Owner, contractors (e.g. Dr. Ho), and temps stay unchecked — they're not part of this program.</p>
                     <label className="flex items-center gap-2 cursor-pointer mt-3">
