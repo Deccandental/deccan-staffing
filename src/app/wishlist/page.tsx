@@ -6,6 +6,7 @@ import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
 import { formatMoney } from "@/lib/format";
 import {
   WishlistItem, MAX_RANK, loadWishlistItems, addWishlistItem, deleteWishlistItem, setWishlistOrder, setMyRank,
+  markPurchased, clearPurchased,
 } from "@/lib/wishlist";
 
 function WishlistPageBody({ identity }: { identity: AppIdentity }) {
@@ -91,11 +92,16 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
     await refresh();
   }
 
+  // Bought items leave the running lists and gather in their own section,
+  // so the ranking always reflects what's still wished for.
+  const activeItems = items.filter((i) => !i.purchasedAt);
+  const purchasedItems = [...items.filter((i) => i.purchasedAt)]
+    .sort((a, b) => (b.purchasedAt ?? "").localeCompare(a.purchasedAt ?? ""));
   const priorityOrder = dragOrder
-    ? (dragOrder.map((id) => items.find((i) => i.id === id)).filter(Boolean) as WishlistItem[])
-    : [...items].sort((a, b) => a.sortOrder - b.sortOrder);
-  const mostWanted = [...items].sort((a, b) => b.score - a.score || a.sortOrder - b.sortOrder);
-  const usedRanks = new Set(items.filter((i) => i.myRank != null).map((i) => i.myRank as number));
+    ? (dragOrder.map((id) => activeItems.find((i) => i.id === id)).filter(Boolean) as WishlistItem[])
+    : [...activeItems].sort((a, b) => a.sortOrder - b.sortOrder);
+  const mostWanted = [...activeItems].sort((a, b) => b.score - a.score || a.sortOrder - b.sortOrder);
+  const usedRanks = new Set(activeItems.filter((i) => i.myRank != null).map((i) => i.myRank as number));
   const ranksLeft = MAX_RANK - usedRanks.size;
 
   function RankPicker({ item }: { item: WishlistItem }) {
@@ -194,7 +200,18 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
                           </div>
                         </div>
                         {isAdmin && (
-                          <button onClick={() => handleDelete(item.id)} className="text-xs text-red-400 hover:underline flex-shrink-0">Remove</button>
+                          <span className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Mark "${item.description}" as bought? Everyone's votes for it free up for the rest of the list.`)) return;
+                                await markPurchased(item.id);
+                                await refresh();
+                              }}
+                              className="text-xs font-semibold hover:underline" style={{ color: "#3B6D11" }}>
+                              Bought ✓
+                            </button>
+                            <button onClick={() => handleDelete(item.id)} className="text-xs text-red-400 hover:underline">Remove</button>
+                          </span>
                         )}
                       </div>
                     ))}
@@ -253,6 +270,37 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
                 )}
               </div>
             </div>
+
+            {purchasedItems.length > 0 && (
+              <div className="rounded-2xl bg-white shadow p-4 mt-4">
+                <h2 className="font-bold text-slate-700 mb-1">✓ Bought</h2>
+                <p className="text-xs text-slate-400 mb-3">Granted wishes. Votes were freed up when each was marked bought.</p>
+                <div className="space-y-2">
+                  {purchasedItems.map((item) => (
+                    <div key={item.id} className="rounded-xl p-3 flex items-center gap-3" style={{ background: "#F2F8EC" }}>
+                      <span className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{ background: "#5a8f2a" }}>✓</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-700">{item.description}</p>
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          {item.estimatedCost != null && <span className="text-xs text-slate-500">~${formatMoney(item.estimatedCost)}</span>}
+                          <span className="text-xs font-semibold" style={{ color: "#3B6D11" }}>
+                            bought {item.purchasedAt ? new Date(item.purchasedAt + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : ""}
+                          </span>
+                          <span className="text-xs text-gray-400">added by {item.addedByName}</span>
+                        </div>
+                      </div>
+                      {isAdmin && (
+                        <span className="flex items-center gap-2 flex-shrink-0">
+                          <button onClick={async () => { await clearPurchased(item.id); await refresh(); }}
+                            className="text-xs text-slate-400 hover:underline">Not bought</button>
+                          <button onClick={() => handleDelete(item.id)} className="text-xs text-red-400 hover:underline">Remove</button>
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

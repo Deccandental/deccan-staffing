@@ -16,6 +16,7 @@ export interface WishlistItem {
   createdAt: string;
   score: number; // sum of rankWeight across every voter's pick of this item
   myRank: number | null; // 1-5 if the current person has ranked this item, else null
+  purchasedAt: string | null; // date it was bought; null while still wished for
 }
 
 function fromItemRow(row: any, score: number, myRank: number | null): WishlistItem {
@@ -24,6 +25,7 @@ function fromItemRow(row: any, score: number, myRank: number | null): WishlistIt
     addedByEmployeeId: row.added_by_employee_id, addedByName: row.added_by_name,
     sortOrder: row.sort_order ?? 0, createdAt: row.created_at,
     score, myRank,
+    purchasedAt: row.purchased_at ?? null,
   };
 }
 
@@ -63,6 +65,26 @@ export async function addWishlistItem(description: string, estimatedCost: number
     description, estimated_cost: estimatedCost, added_by_employee_id: employeeId, added_by_name: employeeName, sort_order: nextOrder,
   });
   if (error) console.error("addWishlistItem error:", error);
+}
+
+/**
+ * Mark an item as bought. Its votes are released at the same time, so
+ * everyone's #1–#5 picks free up for the things still on the list — the
+ * point of ranking is to steer the next purchase, not to memorialize the
+ * last one.
+ */
+export async function markPurchased(id: string): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { error } = await supabase.from("wishlist_items").update({ purchased_at: today }).eq("id", id);
+  if (error) { console.error("markPurchased error:", error); return; }
+  const { error: voteErr } = await supabase.from("wishlist_votes").delete().eq("item_id", id);
+  if (voteErr) console.error("markPurchased (votes) error:", voteErr);
+}
+
+/** Undo a mistaken "bought" — the item returns to the list; released votes stay released. */
+export async function clearPurchased(id: string): Promise<void> {
+  const { error } = await supabase.from("wishlist_items").update({ purchased_at: null }).eq("id", id);
+  if (error) console.error("clearPurchased error:", error);
 }
 
 export async function deleteWishlistItem(id: string): Promise<void> {

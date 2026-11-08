@@ -1283,11 +1283,21 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 </div>
 
                 {(() => {
-                  const top = [...wishlistItems].sort((a, b) => b.score - a.score).slice(0, 3);
-                  const unranked = wishlistItems.filter((i) => i.myRank == null).length;
-                  const iHaveVoted = wishlistItems.some((i) => i.myRank != null);
+                  // Bought items leave the request list; the newest purchase
+                  // gets one celebratory line instead.
+                  const activeWishes = wishlistItems.filter((i) => !i.purchasedAt);
+                  const latestBought = [...wishlistItems.filter((i) => i.purchasedAt)]
+                    .sort((a, b) => (b.purchasedAt ?? "").localeCompare(a.purchasedAt ?? ""))[0];
+                  const top = [...activeWishes].sort((a, b) => b.score - a.score).slice(0, 3);
+                  const unranked = activeWishes.filter((i) => i.myRank == null).length;
+                  const iHaveVoted = activeWishes.some((i) => i.myRank != null);
                   return (
                     <>
+                      {latestBought && (
+                        <p className="text-xs font-semibold mb-2 rounded-lg px-3 py-1.5" style={{ background: "#EAF3DE", color: "#3B6D11" }}>
+                          ✓ Granted: {latestBought.description}
+                        </p>
+                      )}
                       <div className="space-y-1.5 mb-3">
                         {top.map((item, idx) => (
                           <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-2" style={{ background: "#FDF6E4" }}>
