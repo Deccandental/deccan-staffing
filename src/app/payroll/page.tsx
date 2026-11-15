@@ -40,6 +40,7 @@ import {
   loadCashAccounts, loadLatestBalances,
   loadRecurringBills as loadCashflowBills, loadBillPayments as loadCashflowBillPayments,
   buildOccurrences as buildCashflowOccurrences, computeSafeToSpend, addDays as addCashflowDays,
+  syncGrowthBonusProduction, isBonusQuarterSynced, BonusQuarterMonths,
 } from "@/lib/cashflow";
 
 const HYGIENE_BONUS_PER_PATIENT = 15;
@@ -702,6 +703,8 @@ function GrowthBonusPanel() {
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editPaymentForm, setEditPaymentForm] = useState({ date: "", amount: "", notes: "" });
   const [safeToPayTotal, setSafeToPayTotal] = useState<number | null>(null);
+  // Monthly Net Production entries (from Cash Flow) behind each connected quarter, keyed "YYYY-Q".
+  const [monthsByQuarter, setMonthsByQuarter] = useState<Record<string, BonusQuarterMonths>>({});
 
   useEffect(() => { refresh(); }, [year]);
 
@@ -715,6 +718,9 @@ function GrowthBonusPanel() {
     setLoading(true);
     const yearStart = `${year}-01-01`;
     const yearEnd = `${year}-12-31`;
+    // First bring the connected quarters in line with the monthly Net Production
+    // entered on Cash Flow, so the figures loaded just below are already current.
+    setMonthsByQuarter(await syncGrowthBonusProduction());
     const [s, q1, q2, q3, q4, entries, pays, d1, d2, d3, d4] = await Promise.all([
       loadStaff(),
       loadGrowthBonusQuarter(year, 1), loadGrowthBonusQuarter(year, 2), loadGrowthBonusQuarter(year, 3), loadGrowthBonusQuarter(year, 4),
@@ -772,6 +778,7 @@ function GrowthBonusPanel() {
 
   const { calc, split } = splitForQuarter(quarter, yearQuarters[quarter]);
   const requiredProduction = calc ? Math.max(form.bamThreshold, form.netProductionPriorYear * 1.2) : 0;
+  const autoMonths = monthsByQuarter[`${year}-${quarter}`]?.months ?? [];
   const progressPct = requiredProduction > 0 ? Math.min(100, Math.round((form.netProductionCurrent / requiredProduction) * 100)) : 0;
   const progressColor = calc?.eligible ? "#10b981" : progressPct >= 70 ? "#f59e0b" : progressPct >= 40 ? "#fb923c" : "#f87171";
 
@@ -859,7 +866,17 @@ function GrowthBonusPanel() {
           <div>
             <label className="block text-xs text-slate-400 mb-0.5">Net Production ({year})</label>
             <input type="number" onFocus={(e) => e.target.select()} value={form.netProductionCurrent} onChange={(e) => setForm((f) => ({ ...f, netProductionCurrent: Number(e.target.value) }))}
-              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none" />
+              readOnly={autoMonths.length > 0}
+              title={autoMonths.length > 0 ? "Added up from the monthly Net Production on Cash Flow" : undefined}
+              className={`w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none ${autoMonths.length > 0 ? "bg-slate-50 text-slate-500" : ""}`} />
+            {autoMonths.length > 0 ? (
+              <p className="text-xs text-slate-500 mt-1">
+                Added up from Cash Flow: {autoMonths.map((m) => `${new Date(m.month + "-01T00:00:00").toLocaleDateString("en-US", { month: "short" })} $${formatMoney(m.netProduction)}`).join(" + ")}.
+                To change it, edit the month under Cash Flow &rsaquo; Net production by month.
+              </p>
+            ) : isBonusQuarterSynced(year, quarter) ? (
+              <p className="text-xs text-slate-400 mt-1">Fills in by itself once a month of this quarter has Net Production entered on Cash Flow.</p>
+            ) : null}
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-0.5">Net Production ({year - 1}, same quarter)</label>
