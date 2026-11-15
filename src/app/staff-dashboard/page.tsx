@@ -696,14 +696,16 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                     const isCurrent = q === currentQuarter;
                     const unlocked = result?.calc.eligible;
                     return (
-                      <div key={q} className="flex items-center justify-center gap-1.5 rounded-lg py-1.5 px-2" style={{ background: unlocked ? "#EAF3DE" : isCurrent ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.4)", opacity: !isPast && !isCurrent ? 0.5 : 1 }}>
+                      // Green = goal met, light red = quarter ended without meeting it,
+                      // yellow = the quarter still running, faded = hasn't started.
+                      <div key={q} className="flex items-center justify-center gap-1.5 rounded-lg py-1.5 px-2" style={{ background: unlocked ? "#EAF3DE" : isPast ? "#FCE4E4" : isCurrent ? "#FEF3C7" : "rgba(255,255,255,0.4)", opacity: !isPast && !isCurrent ? 0.5 : 1 }}>
                         <span className="text-xs" style={{ color: "rgba(74,66,56,0.5)" }}>{QUARTER_LABELS[q].split(" ")[0]}</span>
                         {unlocked ? (
                           <span className="text-xs font-semibold" style={{ color: "#3B6D11" }}>✓ ${formatMoney(result!.myBonus)}</span>
                         ) : isPast ? (
-                          <span className="text-xs text-slate-400">Not met</span>
+                          <span className="text-xs font-semibold" style={{ color: "#A32D2D" }}>Not met</span>
                         ) : isCurrent ? (
-                          <span className="text-xs text-slate-500">⏳ In progress</span>
+                          <span className="text-xs font-semibold" style={{ color: "#92400e" }}>⏳ In progress</span>
                         ) : (
                           <span className="text-xs text-slate-400">—</span>
                         )}
