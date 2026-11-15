@@ -1,4 +1,5 @@
 import { secureData as supabase } from "./secureData"; // financial data goes through the secure server gateway, not the public key
+import { loadGrowthBonusQuarter, saveGrowthBonusQuarter } from "./growthBonus";
 
 export type BillFrequency = "weekly" | "biweekly" | "monthly" | "once";
 export type BillCategory = "bill" | "payroll";
@@ -538,12 +539,83 @@ export async function backfillDentalMonth(month: string, netProduction: number |
     month, net_production: netProduction, entered_at: new Date().toISOString(),
   }, { onConflict: "month" });
   if (error) { console.error("backfillDentalMonth error:", error); return { ok: false, error: error.message }; }
+  // Keep the staff Growth Bonus progress in step with the month just saved.
+  await syncGrowthBonusProduction(month);
   return { ok: true };
 }
 
 export async function deleteDentalMonthlyEntry(id: string): Promise<void> {
+  // Look up which month this is first, so its quarter's bonus total can be brought back in line afterwards.
+  const { data: row } = await supabase.from("dental_monthly_entries").select("month").eq("id", id).maybeSingle();
   const { error } = await supabase.from("dental_monthly_entries").delete().eq("id", id);
-  if (error) console.error("deleteDentalMonthlyEntry error:", error);
+  if (error) { console.error("deleteDentalMonthlyEntry error:", error); return; }
+  await syncGrowthBonusProduction((row as { month?: string } | null)?.month);
+}
+
+// ---------------- Growth Bonus <- monthly Net Production ----------------
+// The staff Growth Bonus (Payroll > Growth Bonus, and the progress bar on every
+// eligible person's Staff Dashboard) runs off ONE number per quarter: that
+// quarter's net production so far. It used to be typed in by hand, separately
+// from the monthly figures entered here. Now it is the sum of the quarter's
+// monthly Net Production entries, kept up to date whenever a month is saved.
+//
+// Only quarters from this one onward are connected. Earlier quarters keep the
+// figure that was entered by hand, so bonuses already worked out and paid for
+// them can never shift because a past month gets corrected later.
+export const BONUS_SYNC_FIRST_QUARTER = { year: 2026, quarter: 4 as 1 | 2 | 3 | 4 };
+
+export interface BonusQuarterMonths { total: number; months: { month: string; netProduction: number }[] }
+
+function quarterOfMonth(month: string): { year: number; quarter: 1 | 2 | 3 | 4 } {
+  const [y, m] = month.split("-").map(Number);
+  return { year: y, quarter: Math.ceil(m / 3) as 1 | 2 | 3 | 4 };
+}
+
+export function isBonusQuarterSynced(year: number, quarter: number): boolean {
+  const f = BONUS_SYNC_FIRST_QUARTER;
+  return year > f.year || (year === f.year && quarter >= f.quarter);
+}
+
+/**
+ * Brings each connected quarter's bonus production in line with the monthly
+ * entries. `touchedMonth` (a month just saved or deleted) makes sure that
+ * month's quarter is updated even if it now has no entries left.
+ * Returns the monthly breakdown per quarter, keyed "YYYY-Q".
+ */
+export async function syncGrowthBonusProduction(touchedMonth?: string | null): Promise<Record<string, BonusQuarterMonths>> {
+  const byQuarter: Record<string, BonusQuarterMonths> = {};
+  try {
+    const history = await loadDentalMonthlyHistory();
+    for (const e of history) {
+      if (e.netProduction == null) continue;
+      const { year, quarter } = quarterOfMonth(e.month);
+      if (!isBonusQuarterSynced(year, quarter)) continue;
+      const key = `${year}-${quarter}`;
+      byQuarter[key] = byQuarter[key] ?? { total: 0, months: [] };
+      byQuarter[key].months.push({ month: e.month, netProduction: e.netProduction });
+      byQuarter[key].total += e.netProduction;
+    }
+    for (const k of Object.keys(byQuarter)) {
+      byQuarter[k].months.sort((a, b) => a.month.localeCompare(b.month));
+      byQuarter[k].total = Math.round(byQuarter[k].total * 100) / 100;
+    }
+    const toCheck = new Set(Object.keys(byQuarter));
+    if (touchedMonth && /^\d{4}-\d{2}$/.test(touchedMonth)) {
+      const t = quarterOfMonth(touchedMonth);
+      if (isBonusQuarterSynced(t.year, t.quarter)) toCheck.add(`${t.year}-${t.quarter}`);
+    }
+    for (const key of toCheck) {
+      const [year, quarter] = key.split("-").map(Number);
+      const total = byQuarter[key]?.total ?? 0;
+      const existing = await loadGrowthBonusQuarter(year, quarter);
+      if (Math.abs(existing.netProductionCurrent - total) > 0.005) {
+        await saveGrowthBonusQuarter({ ...existing, netProductionCurrent: total });
+      }
+    }
+  } catch (err) {
+    console.error("syncGrowthBonusProduction error:", err);
+  }
+  return byQuarter;
 }
 
 // ---------------- Open Dental — historical monthly summary ----------------
