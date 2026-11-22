@@ -1,5 +1,5 @@
 import { LeaveRequest, LeaveStatus, LeaveReason } from "@/types/leave";
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 function rowToLeave(row: any): LeaveRequest {
   return {
@@ -105,11 +105,17 @@ export function isFullDayLeave(
   return leaveHalfOnDate(req, date) === null;
 }
 
-export async function updateLeaveStatus(id: string, status: LeaveStatus, reviewNote?: string): Promise<void> {
-  const { error } = await supabase.from("leave_requests").update({
+// Returns true only if the request was actually changed. Approving or
+// denying only applies to a request that is still pending, so a double click
+// (or two managers at once) can't approve it twice and deduct PTO twice.
+export async function updateLeaveStatus(id: string, status: LeaveStatus, reviewNote?: string): Promise<boolean> {
+  let query = supabase.from("leave_requests").update({
     status, review_note: reviewNote ?? null, reviewed_at: new Date().toISOString(),
   }).eq("id", id);
-  if (error) console.error("updateLeaveStatus error:", error);
+  if (status === "approved" || status === "denied") query = query.eq("status", "pending");
+  const { data, error } = await query;
+  if (error) { console.error("updateLeaveStatus error:", error); return false; }
+  return Array.isArray(data) && data.length > 0;
 }
 
 export async function cancelLeaveRequest(id: string): Promise<void> {

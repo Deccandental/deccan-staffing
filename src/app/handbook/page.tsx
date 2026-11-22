@@ -1,5 +1,6 @@
 "use client";
 
+import { sessionHeaders } from "@/lib/secureData";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
@@ -76,7 +77,7 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
     const created = await createRequirement(doc.id, version.id, label);
     if (created) {
       fetch("/api/policies/notify-new-cycle", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: sessionHeaders(),
         body: JSON.stringify({ requirementId: created.id }),
       }).catch((err) => console.error("notify-new-cycle error:", err));
     }
@@ -92,7 +93,7 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
     setNotifyResult(null);
     try {
       const res = await fetch("/api/policies/notify-new-cycle", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: sessionHeaders(),
         body: JSON.stringify({ requirementId: requirement.id }),
       });
       const data = await res.json();

@@ -1,5 +1,6 @@
 "use client";
 
+import { sessionHeaders } from "@/lib/secureData";
 import { useState, useEffect, useMemo } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { loadStaff } from "@/lib/staffStore";
@@ -238,7 +239,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
 
       try {
         await fetch("/api/leave/notify", {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", headers: sessionHeaders(),
           body: JSON.stringify({ request: req, type: "submitted" }),
         });
       } catch {}

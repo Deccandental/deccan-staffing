@@ -1,3 +1,4 @@
+import { esc } from "@/lib/html";
 const ADMIN_RECIPIENTS = ["dr.nanjapa@mydeccandental.com", "ketki@mydeccandental.com", "dr.coulter@mydeccandental.com"];
 
 export async function sendPolicySignReminder(params: {
@@ -21,10 +22,10 @@ export async function sendPolicySignReminder(params: {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto;">
       <h2 style="color: #e8622a;">Deccan Dental</h2>
-      <p>Hi ${params.employeeName},</p>
+      <p>Hi ${esc(params.employeeName)},</p>
       <p>${params.isNewCycle
-        ? `A new signing cycle has started for the <strong>${params.documentTitle}</strong> (${params.cycleLabel}). Please review and sign it at your earliest convenience.`
-        : `This is a reminder that your signature is still needed for the <strong>${params.documentTitle}</strong> (${params.cycleLabel}).`}</p>
+        ? `A new signing cycle has started for the <strong>${esc(params.documentTitle)}</strong> (${esc(params.cycleLabel)}). Please review and sign it at your earliest convenience.`
+        : `This is a reminder that your signature is still needed for the <strong>${esc(params.documentTitle)}</strong> (${esc(params.cycleLabel)}).`}</p>
       <p>You can read, search, and sign it directly in the Staff Scheduler app under <strong>Handbook</strong> in the sidebar.</p>
       <p style="color: #888; font-size: 13px;">This is an automated reminder from the Deccan Dental staff app.</p>
     </div>

@@ -9,7 +9,7 @@ import {
   loadStaff, addEmployee, updateEmployee, removeEmployee, setEmployeeArchived,
   loadPrefs, setDentistPrefs, DentistPrefs,
 } from "@/lib/staffStore";
-import { supabase } from "@/lib/supabase";
+import { secureData as supabase } from "@/lib/secureData";
 
 const ROLES: EmployeeRole[] = ["Dentist", "RDA", "Assistant", "Front Desk", "Hygienist"];
 
@@ -92,7 +92,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       if (!result.ok) { alert(`Failed to save: ${result.error ?? "unknown error"}`); return; }
     } else {
       const created = await addEmployee(form);
-      if (!created) { alert("Failed to create employee — please try again."); return; }
+      if (!created.employee) { alert(`Failed to create employee: ${created.error ?? "please try again."}`); return; }
     }
     setEditing(null);
     setAdding(false);
@@ -279,18 +279,18 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                     <div>
                       <label className="block text-sm font-medium text-gray-500 mb-1">{editing ? "Set New Leave Request PIN" : "Leave Request PIN"}</label>
                       <div className="flex gap-2">
-                        <input value={form.pin ?? ""} onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
-                          inputMode="numeric" maxLength={4}
-                          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm tracking-widest font-bold focus:outline-none" placeholder={editing ? "Leave blank to keep current PIN" : "4-digit PIN"} />
-                        <button type="button" onClick={() => setForm((f) => ({ ...f, pin: String(Math.floor(1000 + Math.random() * 9000)) }))}
+                        <input value={form.pin ?? ""} onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
+                          inputMode="numeric" maxLength={6}
+                          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm tracking-widest font-bold focus:outline-none" placeholder={editing ? "Leave blank to keep current PIN" : "6-digit PIN"} />
+                        <button type="button" onClick={() => setForm((f) => ({ ...f, pin: String(crypto.getRandomValues(new Uint32Array(1))[0] % 900000 + 100000) }))}
                           className="flex-shrink-0 rounded-xl border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-500 hover:bg-gray-50">
                           Random
                         </button>
                       </div>
                       <p className="text-xs text-gray-400 mt-1">
                         {editing
-                          ? "Used to log in on the Leave Request page. For their security, the current PIN isn't shown here — leave this blank to keep it unchanged, or enter a new one to replace it."
-                          : "Used to log in on the Leave Request page. Leave blank to disable self-service login for this person."}
+                          ? "6 digits, used to log in everywhere in the app. Staff can also change their own PIN from the sidebar. For their security, the current PIN isn't shown here — leave this blank to keep it unchanged, or enter a new one to replace it."
+                          : "6 digits, used to log in everywhere in the app. Leave blank to disable self-service login for this person."}
                       </p>
                     </div>
                   ) : (

@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 export interface PolicySection {
   heading: string;
@@ -145,7 +145,7 @@ export function getCurrentSeptemberCycleYear(today: Date = new Date()): number {
 export async function loadPendingSigners(requirementId: string, allActiveEmployees: { id: number; name: string; email?: string }[]): Promise<{ id: number; name: string; email?: string }[]> {
   const { data, error } = await supabase.from("policy_signatures").select("employee_id").eq("requirement_id", requirementId);
   if (error) { console.error("loadPendingSigners error:", error); return allActiveEmployees; }
-  const signedIds = new Set((data ?? []).map((r) => r.employee_id));
+  const signedIds = new Set((data ?? []).map((r: any) => r.employee_id));
   return allActiveEmployees.filter((e) => !signedIds.has(e.id));
 }
 

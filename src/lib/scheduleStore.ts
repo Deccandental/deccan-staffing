@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 // A dentist's assistant override value: either the legacy shape (a single
 // assistant id, or null for "explicitly none" — slot 0 only), or the new
@@ -33,12 +33,19 @@ function monthKey(year: number, month: number): string {
 }
 
 export async function loadSchedule(year: number, month: number): Promise<MonthSchedule> {
+  return (await loadScheduleOrNull(year, month)) ?? {};
+}
+
+// Like loadSchedule, but returns null when the load FAILED, so a caller can
+// tell "nothing saved yet" apart from "couldn't read it". The Schedule Builder
+// fills empty days with defaults, and must never do that after a failed load.
+export async function loadScheduleOrNull(year: number, month: number): Promise<MonthSchedule | null> {
   const key = monthKey(year, month);
   const { data, error } = await supabase
     .from("schedules")
     .select("date, dentists, front_desk_required, hygienists_required, assistant_overrides, hygienist_overrides, assistant_counts, floater_assistant_id")
     .like("date", `${key}-%`);
-  if (error) { console.error("loadSchedule error:", error); return {}; }
+  if (error) { console.error("loadSchedule error:", error); return null; }
   const schedule: MonthSchedule = {};
   for (const row of data ?? []) {
     schedule[row.date] = {
@@ -73,6 +80,19 @@ export async function saveDaySchedule(
     { onConflict: "date" }
   );
   if (error) console.error("saveDaySchedule error:", error);
+}
+
+// Saves a day's defaults only if nothing is saved for that date yet — an
+// existing row is left exactly as it is.
+export async function saveDefaultDayIfMissing(date: string, dentists: string[], frontDeskRequired = 2, hygienistsRequired = 1): Promise<void> {
+  const { error } = await supabase.from("schedules").upsert(
+    {
+      date, dentists, front_desk_required: frontDeskRequired, hygienists_required: hygienistsRequired,
+      assistant_overrides: {}, hygienist_overrides: {}, assistant_counts: {}, floater_assistant_id: null,
+    },
+    { onConflict: "date", ignoreDuplicates: true }
+  );
+  if (error) console.error("saveDefaultDayIfMissing error:", error);
 }
 
 export async function deleteDaySchedule(date: string): Promise<void> {

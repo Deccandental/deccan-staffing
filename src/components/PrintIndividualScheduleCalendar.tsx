@@ -9,7 +9,7 @@ import { loadHolidays } from "@/lib/holidays";
 import { getTempAssignmentsForMonth, TempAssignment } from "@/lib/tempAssignments";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { resolveDentistAssistants } from "@/lib/assistantSlots";
-import { supabase } from "@/lib/supabase";
+import { secureData as supabase } from "@/lib/secureData";
 import { Employee } from "@/types/employee";
 import { MonthSchedule } from "@/lib/scheduleStore";
 

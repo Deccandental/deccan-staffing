@@ -1,5 +1,5 @@
-// Drop-in replacement for the `supabase` client, for the app's financial
-// tables only.
+// Drop-in replacement for the `supabase` client. Every table the browser
+// uses goes through this: the database refuses the public key outright.
 //
 // It deliberately mimics the small slice of the Supabase query-builder API
 // those libraries already use — .select().eq().order(), .insert(),
@@ -46,13 +46,14 @@ interface RequestSpec {
   single?: "single" | "maybeSingle";
   payload?: unknown;
   onConflict?: string;
+  ignoreDuplicates?: boolean;
 }
 
 async function execute(spec: RequestSpec): Promise<{ data: any; error: { message: string } | null }> {
   try {
     const res = await fetch("/api/secure-data", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-session-token": getSessionToken() },
+      headers: { "Content-Type": "application/json", ...(getSessionToken() ? { "x-session-token": getSessionToken() } : {}) },
       body: JSON.stringify(spec),
     });
     const json = await res.json();
@@ -96,6 +97,7 @@ class QueryBuilder implements PromiseLike<{ data: any; error: { message: string 
   lte(column: string, value: unknown) { this.spec.filters.push({ column, op: "lte", value }); return this; }
   in(column: string, value: unknown[]) { this.spec.filters.push({ column, op: "in", value }); return this; }
   is(column: string, value: unknown) { this.spec.filters.push({ column, op: "is", value }); return this; }
+  like(column: string, pattern: string) { this.spec.filters.push({ column, op: "like", value: pattern }); return this; }
 
   order(column: string, opts?: { ascending?: boolean }) {
     this.spec.order.push({ column, ascending: opts?.ascending ?? true });
@@ -139,10 +141,17 @@ export const secureData = {
     return {
       select: (columns?: string) => makeBuilder(table, "select", { columns: columns ?? "*" }),
       insert: (payload: unknown) => makeBuilder(table, "insert", { payload }),
-      upsert: (payload: unknown, opts?: { onConflict?: string }) =>
-        makeBuilder(table, "upsert", { payload, onConflict: opts?.onConflict }),
+      upsert: (payload: unknown, opts?: { onConflict?: string; ignoreDuplicates?: boolean }) =>
+        makeBuilder(table, "upsert", { payload, onConflict: opts?.onConflict, ignoreDuplicates: opts?.ignoreDuplicates }),
       update: (payload: unknown) => makeBuilder(table, "update", { payload }),
       delete: () => makeBuilder(table, "delete"),
     };
   },
 };
+
+// Headers for a JSON POST to one of the app's own API routes, carrying the
+// session so the route can check who is asking.
+export function sessionHeaders(): Record<string, string> {
+  const t = getSessionToken();
+  return t ? { "Content-Type": "application/json", "x-session-token": t } : { "Content-Type": "application/json" };
+}

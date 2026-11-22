@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 export interface TempAssignment {
   id: string;
@@ -11,7 +11,7 @@ export interface TempAssignment {
 export async function getTempAssignments(date: string): Promise<TempAssignment[]> {
   const { data, error } = await supabase.from("temp_assignments").select("*").eq("date", date);
   if (error) { console.error("getTempAssignments error:", error); return []; }
-  return (data ?? []).map((row) => ({
+  return (data ?? []).map((row: any) => ({
     id: row.id, date: row.date, tempId: row.temp_id, role: row.role, notes: row.notes,
   }));
 }
@@ -20,7 +20,7 @@ export async function getTempAssignmentsForMonth(year: number, month: number): P
   const key = `${year}-${String(month).padStart(2, "0")}`;
   const { data, error } = await supabase.from("temp_assignments").select("*").like("date", `${key}-%`);
   if (error) { console.error("getTempAssignmentsForMonth error:", error); return []; }
-  return (data ?? []).map((row) => ({
+  return (data ?? []).map((row: any) => ({
     id: row.id, date: row.date, tempId: row.temp_id, role: row.role, notes: row.notes,
   }));
 }

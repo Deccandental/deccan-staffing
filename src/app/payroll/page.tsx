@@ -11,7 +11,7 @@ import { loadLeaveRequests } from "@/lib/leaveStore";
 import { Holiday, loadHolidays } from "@/lib/holidays";
 import { TempStaff } from "@/app/temps/page";
 import { getTempAssignmentsForMonth } from "@/lib/tempAssignments";
-import { supabase } from "@/lib/supabase";
+import { secureData as supabase } from "@/lib/secureData";
 import { PayrollEntry, loadPayrollEntries, loadPayrollEntriesInRange, savePayrollEntry } from "@/lib/payrollStore";
 import { routeFor, recordBonusPayment, PROGRAMME_LABELS, eligibleProgrammes, addOffCyclePayment, loadOffCyclePayments, deleteOffCyclePayment, OffCyclePayment, BonusProgramme } from "@/lib/bonusRouting";
 import { PayPeriod, getPayPeriodForDate, stepPayPeriod } from "@/lib/payPeriods";
@@ -77,7 +77,7 @@ function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string): b
 async function loadTemps(): Promise<TempStaff[]> {
   const { data, error } = await supabase.from("temps").select("*");
   if (error) { console.error("loadTemps error:", error); return []; }
-  return (data ?? []).map((row) => ({
+  return (data ?? []).map((row: any) => ({
     id: row.id, name: row.name, phone: row.phone ?? "", email: row.email ?? "",
     role: row.role, skills: row.skills ?? [], rating: row.rating ?? 0,
     notes: row.notes ?? "", addedAt: row.added_at,

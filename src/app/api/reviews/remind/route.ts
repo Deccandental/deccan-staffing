@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isCron } from "@/lib/routeAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { reviewEmailHtml, sendEmails } from "@/lib/reviewAuth";
 
@@ -8,8 +9,7 @@ export const runtime = "nodejs";
 const EVERY_DAYS = 3;
 
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  if (!isCron(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
   const today = new Date().toISOString().slice(0, 10);
   const { data: docs } = await supabaseAdmin.from("review_docs").select("id, title, note, due_date").eq("closed", false).not("due_date", "is", null).lte("due_date", today);

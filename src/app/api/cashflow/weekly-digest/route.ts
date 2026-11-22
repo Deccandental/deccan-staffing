@@ -1,18 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isCron } from "@/lib/routeAuth";
 import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
 import { sendWeeklyCashDigest } from "@/lib/cashflowEmail";
 import { buildStaleItems } from "@/lib/staleness";
 
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    }
-  } else {
-    console.warn("CRON_SECRET is not set — /api/cashflow/weekly-digest is unauthenticated");
-  }
+  if (!isCron(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
   // Same overdue rules as the Cash Flow page (src/lib/staleness.ts), so the
   // email never flags something the page doesn't, or the other way round.

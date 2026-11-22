@@ -1,9 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { sessionFrom, hasPerm } from "@/lib/routeAuth";
+import { esc } from "@/lib/html";
 
+// Sends leave emails. The caller only says WHICH request and what happened;
+// every detail in the email (names, dates, the recipient's address) is read
+// from the database here, so this route can't be used to send arbitrary mail.
 export async function POST(req: NextRequest) {
   try {
-    const { request, type } = await req.json();
+    const session = sessionFrom(req);
+    if (!session) return NextResponse.json({ ok: false, error: "Not authenticated." }, { status: 401 });
+
+    const body = await req.json();
+    const type = body?.type;
+    const requestId = String(body?.requestId ?? body?.request?.id ?? "");
+    if (!["submitted", "approved", "denied"].includes(type) || !requestId) {
+      return NextResponse.json({ ok: false, error: "Bad request." }, { status: 400 });
+    }
+
+    const { data: row } = await supabaseAdmin.from("leave_requests").select("*").eq("id", requestId).maybeSingle();
+    if (!row) return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
+
+    const isManager = hasPerm(session, "leaveManage");
+    if (type === "submitted" && !(isManager || (session.mode === "staff" && session.employeeId === row.employee_id))) {
+      return NextResponse.json({ ok: false, error: "Not permitted." }, { status: 403 });
+    }
+    if (type !== "submitted" && (!isManager || row.status !== type)) {
+      return NextResponse.json({ ok: false, error: "Not permitted." }, { status: 403 });
+    }
+
+    // The address on file for this person, not one supplied by the caller.
+    const { data: person } = await supabaseAdmin.from("staff").select("email").eq("id", row.employee_id).maybeSingle();
+    const request = {
+      employeeName: esc(row.employee_name),
+      plainName: String(row.employee_name ?? "").replace(/[\r\n]/g, " ").slice(0, 80),
+      employeeEmail: (person?.email || row.employee_email || "").trim(),
+      startDate: String(row.start_date), endDate: String(row.end_date),
+      totalDays: Number(row.total_days) || 0,
+      startsMidday: !!row.starts_midday, endsMidday: !!row.ends_midday,
+      isPartialDay: !!row.is_partial_day, partialHours: esc(row.partial_hours),
+      reason: String(row.reason ?? ""), notes: esc(row.notes), reviewNote: esc(row.review_note),
+    };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(request.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(request.endDate)) {
+      return NextResponse.json({ ok: false, error: "Bad dates." }, { status: 400 });
+    }
 
     const RESEND_API_KEY = process.env.RESEND_API_KEY;
     if (!RESEND_API_KEY) {
@@ -25,7 +65,7 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({
           from: "Deccan Dental <noreply@mydeccandental.com>",
           to: ["dr.nanjapa@mydeccandental.com"],
-          subject: `New Leave Request — ${request.employeeName}`,
+          subject: `New Leave Request — ${request.plainName}`,
           html: `
             <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#5a5a5a">
               <div style="background:#e8622a;padding:24px;border-radius:12px 12px 0 0">
@@ -36,7 +76,7 @@ export async function POST(req: NextRequest) {
                 <table style="width:100%;border-collapse:collapse;margin:16px 0">
                   <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Dates</td><td style="padding:8px;border-bottom:1px solid #eee;font-weight:bold">${dateRange}</td></tr>
                   <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Duration</td><td style="padding:8px;border-bottom:1px solid #eee">${request.totalDays} working day${request.totalDays !== 1 ? "s" : ""}${request.startsMidday || request.endsMidday ? ` (${request.startDate === request.endDate ? (request.endsMidday ? "morning only" : "afternoon only") : [request.startsMidday ? "from midday on the first day" : null, request.endsMidday ? "back at midday on the last day" : null].filter(Boolean).join(", ")})` : (request.isPartialDay && request.partialHours ? ` (${request.partialHours})` : "")}</td></tr>
-                  <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Reason</td><td style="padding:8px;border-bottom:1px solid #eee">${reasonLabels[request.reason]}</td></tr>
+                  <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Reason</td><td style="padding:8px;border-bottom:1px solid #eee">${esc(reasonLabels[request.reason] ?? request.reason)}</td></tr>
                   ${request.notes ? `<tr><td style="padding:8px;color:#888">Notes</td><td style="padding:8px;font-style:italic">"${request.notes}"</td></tr>` : ""}
                 </table>
                 <a href="${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/leave/manage" style="display:inline-block;background:#e8622a;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;margin-top:8px">Review Request →</a>
@@ -45,7 +85,7 @@ export async function POST(req: NextRequest) {
           `,
         }),
       });
-    } else {
+    } else if (request.employeeEmail) {
       // Notify employee of decision
       const approved = type === "approved";
       await fetch("https://api.resend.com/emails", {
@@ -66,7 +106,7 @@ export async function POST(req: NextRequest) {
                 <table style="width:100%;border-collapse:collapse;margin:16px 0">
                   <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Dates</td><td style="padding:8px;border-bottom:1px solid #eee;font-weight:bold">${dateRange}</td></tr>
                   <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Duration</td><td style="padding:8px;border-bottom:1px solid #eee">${request.totalDays} day${request.totalDays !== 1 ? "s" : ""}</td></tr>
-                  <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Reason</td><td style="padding:8px;border-bottom:1px solid #eee">${reasonLabels[request.reason]}</td></tr>
+                  <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Reason</td><td style="padding:8px;border-bottom:1px solid #eee">${esc(reasonLabels[request.reason] ?? request.reason)}</td></tr>
                   ${request.reviewNote ? `<tr><td style="padding:8px;color:#888">Manager note</td><td style="padding:8px;font-style:italic">"${request.reviewNote}"</td></tr>` : ""}
                 </table>
                 ${approved ? "<p style='color:#16a34a'>✓ Your absence has been recorded on the schedule.</p>" : ""}
@@ -99,8 +139,8 @@ export async function POST(req: NextRequest) {
       const rows = (recent ?? []).map((r) => `
         <div style="padding:7px 0;border-bottom:1px solid #eee;font-size:14px">
           <span style="font-weight:bold;color:#333">${fmt(r.start_date, r.end_date)}</span>
-          <span style="color:#333"> — ${r.employee_name}</span>
-          <span style="color:#888"> · ${reasonLabel[r.reason] ?? r.reason} · ${r.total_days} day${r.total_days !== 1 ? "s" : ""}</span>
+          <span style="color:#333"> — ${esc(r.employee_name)}</span>
+          <span style="color:#888"> · ${esc(reasonLabel[r.reason] ?? r.reason)} · ${esc(r.total_days)} day${r.total_days !== 1 ? "s" : ""}</span>
         </div>`).join("");
 
       await fetch("https://api.resend.com/emails", {
@@ -109,7 +149,7 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({
           from: "Deccan Dental <noreply@mydeccandental.com>",
           to: ["ketki@mydeccandental.com", "dr.coulter@mydeccandental.com", "dr.nanjapa@mydeccandental.com"],
-          subject: `Leave Approved — ${request.employeeName}, ${dateRange}`,
+          subject: `Leave Approved — ${request.plainName}, ${dateRange}`,
           html: `
             <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#5a5a5a">
               <div style="background:#e8622a;padding:24px;border-radius:12px 12px 0 0">

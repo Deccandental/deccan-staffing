@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { verifySessionToken } from "@/lib/session";
+import { verifySessionToken, SessionPayload } from "@/lib/session";
+import { pinProblem } from "@/lib/pinRules";
 
 // Server-side gateway for CHANGING the staff table.
 //
@@ -19,11 +20,28 @@ const SAFE_COLUMNS =
 
 const BALANCE_COLUMNS = new Set(["pto_balance_hours", "sick_balance_hours"]);
 
-function clean(payload: unknown): Record<string, unknown> | null {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+const COLUMN = /^[a-z_][a-z0-9_]*$/;
+
+// PINs and permission flags are the keys to the app, so only the super
+// passcode may set them. For anyone else they are dropped from the payload
+// (the Staff page doesn't show those fields to them anyway). A new PIN must
+// pass the same rules as a self-service change.
+async function clean(payload: unknown, session: SessionPayload, employeeId: number | null): Promise<{ payload?: Record<string, unknown>; error?: string }> {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return { error: "Bad payload." };
   const out = { ...(payload as Record<string, unknown>) };
   delete out.id; // an id is never taken from the body of an insert/update payload
-  return out;
+  if (Object.keys(out).some((k) => !COLUMN.test(k))) return { error: "Bad payload." };
+  if (session.mode !== "super") {
+    delete out.pin;
+    for (const k of Object.keys(out)) if (k.startsWith("can_")) delete out[k];
+  } else if ("pin" in out) {
+    if (out.pin === null || out.pin === "") out.pin = null;
+    else {
+      const problem = await pinProblem(String(out.pin), employeeId);
+      if (problem) return { error: problem };
+    }
+  }
+  return { payload: out };
 }
 
 export async function POST(req: NextRequest) {
@@ -41,16 +59,16 @@ export async function POST(req: NextRequest) {
     switch (body.action) {
       case "insert": {
         if (!isAdmin) return NextResponse.json({ error: "Not permitted." }, { status: 403 });
-        const payload = clean(body.payload);
-        if (!payload) return NextResponse.json({ error: "Bad payload." }, { status: 400 });
+        const { payload, error: payloadError } = await clean(body.payload, session, null);
+        if (!payload) return NextResponse.json({ error: payloadError }, { status: 400 });
         const { data, error } = await supabaseAdmin.from("staff").insert(payload as never).select(SAFE_COLUMNS).single();
         if (error) return NextResponse.json({ error: error.message }, { status: 400 });
         return NextResponse.json({ data });
       }
       case "update": {
         if (!isAdmin || !Number.isFinite(id)) return NextResponse.json({ error: "Not permitted." }, { status: 403 });
-        const payload = clean(body.payload);
-        if (!payload) return NextResponse.json({ error: "Bad payload." }, { status: 400 });
+        const { payload, error: payloadError } = await clean(body.payload, session, id);
+        if (!payload) return NextResponse.json({ error: payloadError }, { status: 400 });
         const { error } = await supabaseAdmin.from("staff").update(payload as never).eq("id", id);
         if (error) return NextResponse.json({ error: error.message }, { status: 400 });
         return NextResponse.json({ data: null });

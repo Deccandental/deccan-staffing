@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 export type RequiredCertRole = "Dentist" | "RDA" | "Hygienist" | "Specialist" | "Assistant" | "Front Desk";
 export type RequiredCertKind = "license" | "ce_hours" | "standalone" | "one_time_ce" | "total_ce_hours";

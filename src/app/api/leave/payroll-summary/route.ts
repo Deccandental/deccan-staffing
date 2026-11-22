@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { sessionFrom, hasPerm } from "@/lib/routeAuth";
+import { isCron } from "@/lib/routeAuth";
+import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
 import { getPayPeriods, getLookaheadWindow } from "@/lib/payPeriods";
 
 const REASON_LABELS: Record<string, string> = {
@@ -106,22 +108,14 @@ async function buildAndSend(): Promise<boolean> {
 
 // Cron-triggered — runs automatically on the 1st and 16th of each month (see vercel.json).
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    }
-  } else {
-    console.warn("CRON_SECRET is not set — /api/leave/payroll-summary is unauthenticated");
-  }
+  if (!isCron(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   const sent = await buildAndSend();
   return NextResponse.json({ ok: true, sent });
 }
 
-// Manual trigger from the Manage Leave page. No separate secret required —
-// reaching that page already requires the leaveManage passcode.
-export async function POST() {
+// Manual trigger from the Manage Leave page, for leave managers only.
+export async function POST(req: NextRequest) {
+  if (!hasPerm(sessionFrom(req), "leaveManage")) return NextResponse.json({ ok: false, error: "Not permitted." }, { status: 403 });
   const sent = await buildAndSend();
   return NextResponse.json({ ok: true, sent });
 }

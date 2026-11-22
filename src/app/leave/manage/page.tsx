@@ -1,14 +1,15 @@
 "use client";
 
+import { sessionHeaders } from "@/lib/secureData";
 import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate from "@/components/AppIdentityGate";
 import AccessDenied from "@/components/AccessDenied";
 import { LeaveRequest, LeaveReason } from "@/types/leave";
-import { loadLeaveRequests, updateLeaveStatus, deleteLeaveRequest, countBusinessDays, countLeaveDays, isPaidLeaveReason } from "@/lib/leaveStore";
+import { loadLeaveRequests, updateLeaveStatus, deleteLeaveRequest, countBusinessDays, countLeaveDays, isPaidLeaveReason, leaveHalfOnDate } from "@/lib/leaveStore";
 import { setUnavailable, clearUnavailable } from "@/lib/overrides";
 import { adjustLeaveBalance } from "@/lib/staffStore";
-import { supabase } from "@/lib/supabase";
+import { secureData as supabase } from "@/lib/secureData";
 
 const REASON_LABELS: Record<LeaveReason, string> = {
   sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other",
@@ -38,7 +39,7 @@ function LeaveManagePageBody() {
     setSendingPayroll(true);
     setPayrollMessage("");
     try {
-      const res = await fetch("/api/leave/payroll-summary", { method: "POST" });
+      const res = await fetch("/api/leave/payroll-summary", { method: "POST", headers: sessionHeaders() });
       const data = await res.json();
       setPayrollMessage(data.sent ? "Payroll summary email sent." : "Could not send the email — check that RESEND_API_KEY is set.");
     } catch {
@@ -60,7 +61,9 @@ function LeaveManagePageBody() {
     const end = new Date(req.endDate + "T00:00:00");
     while (cur <= end) {
       if (!CLOSED.has(cur.getDay())) {
-        await setUnavailable(req.employeeId, cur.toISOString().split("T")[0], req.reason as any);
+        const date = cur.toISOString().split("T")[0];
+        // Half-day leave (starting or ending at midday) only blocks that half.
+        await setUnavailable(req.employeeId, date, req.reason as any, leaveHalfOnDate(req, date));
       }
       cur.setDate(cur.getDate() + 1);
     }
@@ -81,7 +84,12 @@ function LeaveManagePageBody() {
   async function handleApprove(req: LeaveRequest) {
     setProcessing(req.id);
     const note = reviewNote[req.id] ?? "";
-    await updateLeaveStatus(req.id, "approved", note);
+    if (!(await updateLeaveStatus(req.id, "approved", note))) {
+      alert("Couldn't approve this request — it may already have been handled. Nothing else was changed.");
+      setProcessing(null);
+      await refresh();
+      return;
+    }
     await applyToAvailability(req);
     if (isPaidLeaveReason(req.reason)) {
       const hours = req.paidHours ?? req.totalDays * 8;
@@ -89,7 +97,7 @@ function LeaveManagePageBody() {
     }
     try {
       await fetch("/api/leave/notify", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: sessionHeaders(),
         body: JSON.stringify({ request: { ...req, status: "approved", reviewNote: note }, type: "approved" }),
       });
     } catch {}
@@ -100,10 +108,15 @@ function LeaveManagePageBody() {
   async function handleDeny(req: LeaveRequest) {
     setProcessing(req.id);
     const note = reviewNote[req.id] ?? "";
-    await updateLeaveStatus(req.id, "denied", note);
+    if (!(await updateLeaveStatus(req.id, "denied", note))) {
+      alert("Couldn't deny this request — it may already have been handled.");
+      setProcessing(null);
+      await refresh();
+      return;
+    }
     try {
       await fetch("/api/leave/notify", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: sessionHeaders(),
         body: JSON.stringify({ request: { ...req, status: "denied", reviewNote: note }, type: "denied" }),
       });
     } catch {}
@@ -113,6 +126,14 @@ function LeaveManagePageBody() {
 
   async function handleCancel(req: LeaveRequest) {
     setProcessing(req.id);
+    // Mark it cancelled first: if that fails, nothing else is touched, so the
+    // PTO refund can't be applied twice on a retry.
+    if (!(await updateLeaveStatus(req.id, "cancelled"))) {
+      alert("Couldn't cancel this request. Nothing was changed — please try again.");
+      setProcessing(null);
+      await refresh();
+      return;
+    }
     if (req.status === "approved") {
       await removeFromAvailability(req);
       if (isPaidLeaveReason(req.reason)) {
@@ -120,7 +141,6 @@ function LeaveManagePageBody() {
         await adjustLeaveBalance(req.employeeId, req.reason as "pto" | "sick", hours);
       }
     }
-    await updateLeaveStatus(req.id, "cancelled");
     setProcessing(null);
     await refresh();
   }

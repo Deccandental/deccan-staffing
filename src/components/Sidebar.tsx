@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 
 import { loadLatestBalances, loadCashAccounts } from "@/lib/cashflow";
-import { supabase } from "@/lib/supabase";
+import { secureData as supabase } from "@/lib/secureData";
 import { getSessionToken } from "@/lib/secureData";
 
 // Kept as a raw string (not imported from AppIdentityGate) to avoid a
@@ -48,6 +48,7 @@ const navItems: { label: string; href: string; icon: string; permission: Permiss
   { label: "Events Calendar", href: "/events-calendar", icon: "🗓️", permission: "any" },
   { label: "Live Quiz", href: "/quiz", icon: "🎯", permission: "any" },
   { label: "Secret Santa", href: "/secret-santa", icon: "🎅", permission: "any" },
+  { label: "Change My PIN", href: "/change-pin", icon: "🔑", permission: "any" },
   { label: "Schedule Builder", href: "/schedule-builder", icon: "✏️", permission: "canAdmin", group: "Admin" },
   { label: "Availability", href: "/availability", icon: "🏥", permission: "canAdmin", group: "Admin" },
   { label: "Staff", href: "/staff", icon: "👥", permission: "canAdmin", group: "Admin" },

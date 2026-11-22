@@ -1,5 +1,6 @@
-import { supabase } from "./supabase";
+import { supabaseAdmin as supabase } from "./supabaseAdmin";
 import { StaffEvent } from "./eventsStore";
+import { esc } from "@/lib/html";
 
 export type EventEmailType = "announcement" | "reminder-1day" | "reminder-1week" | "reminder-3weeks";
 
@@ -42,12 +43,12 @@ export async function sendEventEmail(event: StaffEvent, type: EventEmailType): P
               <h1 style="color:white;margin:0;font-size:20px">${label}</h1>
             </div>
             <div style="background:#f9f9f9;padding:24px;border-radius:0 0 12px 12px">
-              <p style="font-size:18px;font-weight:bold;margin:0 0 4px">${event.title}</p>
+              <p style="font-size:18px;font-weight:bold;margin:0 0 4px">${esc(event.title)}</p>
               ${event.mandatory ? `<p style="color:#dc2626;font-weight:bold;margin:0 0 12px">⚠ Mandatory attendance</p>` : ""}
               <table style="width:100%;border-collapse:collapse;margin:16px 0">
                 <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Date</td><td style="padding:8px;border-bottom:1px solid #eee;font-weight:bold">${dateLabel}</td></tr>
-                ${event.time ? `<tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Time</td><td style="padding:8px;border-bottom:1px solid #eee;font-weight:bold">${event.time}${event.endTime ? ` – ${event.endTime}` : ""}</td></tr>` : ""}
-                ${event.description ? `<tr><td style="padding:8px;color:#888">Details</td><td style="padding:8px">${event.description}</td></tr>` : ""}
+                ${event.time ? `<tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Time</td><td style="padding:8px;border-bottom:1px solid #eee;font-weight:bold">${esc(event.time)}${event.endTime ? ` – ${esc(event.endTime)}` : ""}</td></tr>` : ""}
+                ${event.description ? `<tr><td style="padding:8px;color:#888">Details</td><td style="padding:8px">${esc(event.description)}</td></tr>` : ""}
               </table>
               <p style="color:#888;font-size:12px;margin-top:24px">Deccan Dental Sleep Center</p>
             </div>

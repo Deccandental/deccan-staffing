@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 export interface OpenTuesday {
   date: string;
@@ -8,7 +8,7 @@ export interface OpenTuesday {
 export async function getOpenTuesdays(): Promise<OpenTuesday[]> {
   const { data, error } = await supabase.from("open_tuesdays").select("*");
   if (error) { console.error("getOpenTuesdays error:", error); return []; }
-  return (data ?? []).map((row) => ({
+  return (data ?? []).map((row: any) => ({
     date: row.date,
     halfDay: row.half_day ?? null,
   }));
