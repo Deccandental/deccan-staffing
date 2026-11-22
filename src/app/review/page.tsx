@@ -1,4 +1,5 @@
 "use client";
+import { todayStr } from "@/lib/today";
 
 import { useState, useEffect, useCallback } from "react";
 import AppIdentityGate, { AppIdentity } from "@/components/AppIdentityGate";
@@ -60,7 +61,7 @@ function ReviewBody({ identity }: { identity: AppIdentity }) {
     setMsg(`Thank you. "${it.doc.title}" is marked as reviewed.`); load();
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
   const todo = items.filter((i) => !i.reviewed_at).sort((a, b) => (a.doc.due_date ?? "9999").localeCompare(b.doc.due_date ?? "9999"));
   const done = items.filter((i) => i.reviewed_at).sort((a, b) => String(b.reviewed_at).localeCompare(String(a.reviewed_at)));
 

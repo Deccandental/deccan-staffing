@@ -1,7 +1,9 @@
 "use client";
+import { todayStr as practiceToday } from "@/lib/today";
 
 import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
+import ChangePinForm from "@/components/ChangePinForm";
 import { Employee } from "@/types/employee";
 import { loadStaff, updateOwnProfile } from "@/lib/staffStore";
 import { LeaveRequest } from "@/types/leave";
@@ -95,6 +97,7 @@ const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "", ceHours:
 function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
   const isManager = identity.canAdmin;
   const [staff, setStaff] = useState<Employee[]>([]);
+  const [changingPin, setChangingPin] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(identity.mode === "staff" ? (identity.employeeId ?? null) : null);
   // Documents this person has been asked to review and hasn't yet (shown as a chip with the other warnings).
   const [reviewCounts, setReviewCounts] = useState<{ pending: number; overdue: number }>({ pending: 0, overdue: 0 });
@@ -195,7 +198,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     if (selectedId == null) return;
     let cancelled = false;
     setLoading(true);
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = practiceToday();
     const yearStart = `${bonusYear}-01-01`;
     const yearEnd = `${bonusYear}-12-31`;
     Promise.all([
@@ -271,7 +274,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     let cancelled = false;
     (async () => {
       const slots = await loadAllSlots();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = practiceToday();
       const status = computeCheckinStatus(selectedId, slots, today);
       if (!cancelled) {
         setCheckinDue(status.isDue && !status.upcomingSlot);
@@ -304,7 +307,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const missingOrExpiredCertCount = selectedEmployee ? (() => {
     const roles = getApplicableRoles(selectedEmployee);
     if (roles.length === 0) return 0;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = practiceToday();
     const statuses = computeRequiredCertStatuses(roles, requiredTypesForCerts, certs, ceEntriesForCerts, today);
     return statuses.filter((s) => !s.satisfied).length;
   })() : 0;
@@ -579,6 +582,27 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                         Edit my name or email
                       </button>
                     )}
+                    {identity.mode === "staff" && identity.employeeId === selectedEmployee.id && (
+                      <>
+                        <span className="text-xs mx-2" style={{ color: "rgba(74,66,56,0.3)" }}>·</span>
+                        <button onClick={() => setChangingPin((v) => !v)}
+                          className="text-xs font-semibold mt-1 hover:underline" style={{ color: "#e8622a" }}>
+                          Change my PIN
+                        </button>
+                      </>
+                    )}
+                    {changingPin && (
+                      <div className="max-w-sm mx-auto mt-4 rounded-2xl bg-white p-5 shadow text-left">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm font-bold" style={{ color: "#4A4238" }}>Change my PIN</h3>
+                          <button onClick={() => setChangingPin(false)} className="text-xs text-slate-400 hover:underline">Close</button>
+                        </div>
+                        <ChangePinForm
+                          intro="Enter your current PIN, then choose a new 6-digit one. Don't share it with anyone."
+                          onDone={() => setChangingPin(false)}
+                        />
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -720,7 +744,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 wall of zeros for quarters that were never part of the deal —
                 a friendly "starts on" note replaces it until then. */}
             {canSeeThisPersonsPay && selectedEmployee?.pvBonusEligible &&
-              selectedEmployee.netProductionStartDate && new Date().toISOString().slice(0, 10) < selectedEmployee.netProductionStartDate && (
+              selectedEmployee.netProductionStartDate && practiceToday() < selectedEmployee.netProductionStartDate && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow p-5 flex items-center gap-3">
                 <span className="text-2xl">⏳</span>
                 <div>
@@ -734,7 +758,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
             {canSeeThisPersonsPay && selectedEmployee?.pvBonusEligible &&
-              (!selectedEmployee.netProductionStartDate || new Date().toISOString().slice(0, 10) >= selectedEmployee.netProductionStartDate) && (
+              (!selectedEmployee.netProductionStartDate || practiceToday() >= selectedEmployee.netProductionStartDate) && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
                 <div className="p-4 pb-2">
                   <h2 className="font-bold text-slate-700">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
@@ -845,7 +869,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   {showHygieneCalc ? "Hide" : "Show"} how this is calculated
                 </button>
                 {showHygieneCalc && (() => {
-                  const today = new Date().toISOString().slice(0, 10);
+                  const today = practiceToday();
                   const shown = hygieneRows.filter((r) => r.start <= today || r.patients > 0 || r.paid > 0);
                   let running = hygieneStart;
                   return (

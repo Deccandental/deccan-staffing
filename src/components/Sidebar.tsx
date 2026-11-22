@@ -7,7 +7,8 @@ import { usePathname } from "next/navigation";
 
 import { loadLatestBalances, loadCashAccounts } from "@/lib/cashflow";
 import { secureData as supabase } from "@/lib/secureData";
-import { getSessionToken } from "@/lib/secureData";
+import { getSessionToken, clearSessionToken } from "@/lib/secureData";
+import { NavIcon, NavIconName } from "@/components/NavIcons";
 
 // Kept as a raw string (not imported from AppIdentityGate) to avoid a
 // circular import, since AppIdentityGate itself renders <Sidebar />.
@@ -35,45 +36,95 @@ interface StoredIdentity {
   canManageStaffNotes?: boolean;
 }
 
-const navItems: { label: string; href: string; icon: string; permission: PermissionLevel; group?: string }[] = [
-  { label: "Calendar", href: "/calendar", icon: "📅", permission: "public" },
-  { label: "Leave Request", href: "/leave", icon: "📝", permission: "any" },
-  { label: "Staff Dashboard", href: "/staff-dashboard", icon: "🗂️", permission: "any" },
-  { label: "Certifications", href: "/certifications", icon: "📄", permission: "any" },
-  { label: "Wishlist", href: "/wishlist", icon: "⭐", permission: "any" },
-  { label: "Handbook", href: "/handbook", icon: "📘", permission: "any" },
-  { label: "Set-ups", href: "/setups", icon: "📸", permission: "any" },
-  { label: "To Review", href: "/review", icon: "✅", permission: "any" },
-  { label: "Check-Ins", href: "/checkins", icon: "🤝", permission: "any" },
-  { label: "Events Calendar", href: "/events-calendar", icon: "🗓️", permission: "any" },
-  { label: "Live Quiz", href: "/quiz", icon: "🎯", permission: "any" },
-  { label: "Secret Santa", href: "/secret-santa", icon: "🎅", permission: "any" },
-  { label: "Change My PIN", href: "/change-pin", icon: "🔑", permission: "any" },
-  { label: "Schedule Builder", href: "/schedule-builder", icon: "✏️", permission: "canAdmin", group: "Admin" },
-  { label: "Availability", href: "/availability", icon: "🏥", permission: "canAdmin", group: "Admin" },
-  { label: "Staff", href: "/staff", icon: "👥", permission: "canAdmin", group: "Admin" },
-  { label: "Staff Notes", href: "/staff-notes", icon: "🗒️", permission: "canManageStaffNotes", group: "Admin" },
-  { label: "Temp Staff", href: "/temps", icon: "🔄", permission: "canAdmin", group: "Admin" },
-  { label: "Holidays & Closures", href: "/holidays", icon: "🏖️", permission: "canAdmin", group: "Admin" },
-  { label: "Manage Leave", href: "/leave/manage", icon: "🔐", permission: "canManageLeave", group: "Admin" },
-  { label: "Events", href: "/events", icon: "📌", permission: "canManageEvents", group: "Admin" },
-  { label: "Send for Review", href: "/review-admin", icon: "📨", permission: "canAdmin", group: "Admin" },
-  { label: "Quiz Builder", href: "/quiz-admin", icon: "🧩", permission: "canAdmin", group: "Admin" },
-  { label: "Secret Santa Admin", href: "/santa-admin", icon: "🎁", permission: "canAdmin", group: "Admin" },
-  { label: "Payroll Dashboard", href: "/payroll", icon: "💵", permission: "canManagePayroll", group: "Finances" },
-  { label: "Cash Flow", href: "/cashflow", icon: "📊", permission: "canManagePayroll", group: "Finances" },
-  { label: "Statements", href: "/statements", icon: "🗄️", permission: "canManagePayroll", group: "Finances" },
+interface NavItem { label: string; href: string; icon: NavIconName; permission: PermissionLevel }
+interface NavGroup { title: string; items: NavItem[]; collapsible?: boolean }
+
+// Grouped so the menu reads as sections rather than one long list. Pages a
+// person can't open are left out entirely (a logged-out visitor still sees
+// the everyday pages, which ask them to log in).
+const NAV_GROUPS: NavGroup[] = [
+  {
+    title: "Overview",
+    items: [
+      { label: "Dashboard", href: "/staff-dashboard", icon: "dashboard", permission: "any" },
+      { label: "Calendar", href: "/calendar", icon: "calendar", permission: "public" },
+      { label: "Leave Request", href: "/leave", icon: "leave", permission: "any" },
+      { label: "Certifications", href: "/certifications", icon: "certificate", permission: "any" },
+    ],
+  },
+  {
+    title: "Workplace",
+    items: [
+      { label: "Handbook", href: "/handbook", icon: "book", permission: "any" },
+      { label: "To Review", href: "/review", icon: "checklist", permission: "any" },
+      { label: "Check-Ins", href: "/checkins", icon: "handshake", permission: "any" },
+      { label: "Set-ups", href: "/setups", icon: "camera", permission: "any" },
+      { label: "Events Calendar", href: "/events-calendar", icon: "events", permission: "any" },
+    ],
+  },
+  {
+    title: "Team",
+    collapsible: true,
+    items: [
+      { label: "Wishlist", href: "/wishlist", icon: "star", permission: "any" },
+      { label: "Live Quiz", href: "/quiz", icon: "target", permission: "any" },
+      { label: "Secret Santa", href: "/secret-santa", icon: "gift", permission: "any" },
+    ],
+  },
+  {
+    title: "Admin",
+    collapsible: true,
+    items: [
+      { label: "Schedule Builder", href: "/schedule-builder", icon: "pencil", permission: "canAdmin" },
+      { label: "Availability", href: "/availability", icon: "clinic", permission: "canAdmin" },
+      { label: "Staff", href: "/staff", icon: "users", permission: "canAdmin" },
+      { label: "Staff Notes", href: "/staff-notes", icon: "notes", permission: "canManageStaffNotes" },
+      { label: "Temp Staff", href: "/temps", icon: "swap", permission: "canAdmin" },
+      { label: "Holidays & Closures", href: "/holidays", icon: "sun", permission: "canAdmin" },
+      { label: "Manage Leave", href: "/leave/manage", icon: "shield", permission: "canManageLeave" },
+      { label: "Events", href: "/events", icon: "pin", permission: "canManageEvents" },
+      { label: "Send for Review", href: "/review-admin", icon: "send", permission: "canAdmin" },
+      { label: "Quiz Builder", href: "/quiz-admin", icon: "puzzle", permission: "canAdmin" },
+      { label: "Secret Santa Admin", href: "/santa-admin", icon: "giftbox", permission: "canAdmin" },
+    ],
+  },
+  {
+    title: "Finances",
+    collapsible: true,
+    items: [
+      { label: "Payroll", href: "/payroll", icon: "money", permission: "canManagePayroll" },
+      { label: "Cash Flow", href: "/cashflow", icon: "chart", permission: "canManagePayroll" },
+      { label: "Statements", href: "/statements", icon: "folder", permission: "canManagePayroll" },
+    ],
+  },
 ];
 
-// Quick-access tabs in the mobile toolbar — a handful of the most-used
-// pages, so switching between them doesn't require opening the full menu
-// each time. "More" (added separately) opens the full drawer for everything else.
-const MOBILE_QUICK_TABS = [
-  { label: "Dashboard", href: "/staff-dashboard", icon: "🗂️" },
-  { label: "Calendar", href: "/calendar", icon: "📅" },
-  { label: "Leave", href: "/leave", icon: "📝" },
-  { label: "Certs", href: "/certifications", icon: "📄" },
+// Quick-access tabs in the mobile toolbar — the most-used pages, so
+// switching between them doesn't need the full menu. "Menu" opens the rest.
+const MOBILE_QUICK_TABS: { label: string; href: string; icon: NavIconName }[] = [
+  { label: "Dashboard", href: "/staff-dashboard", icon: "dashboard" },
+  { label: "Calendar", href: "/calendar", icon: "calendar" },
+  { label: "Leave", href: "/leave", icon: "leave" },
+  { label: "Certs", href: "/certifications", icon: "certificate" },
 ];
+
+// Palette: warm neutral surface, ink text, the brand orange as the accent.
+const C = {
+  surface: "#FBF8F3",
+  border: "rgba(35,38,52,0.08)",
+  ink: "#232634",
+  text: "rgba(35,38,52,0.72)",
+  muted: "rgba(35,38,52,0.45)",
+  hover: "rgba(35,38,52,0.05)",
+  accent: "#E8622A",
+  accentSoft: "rgba(232,98,42,0.10)",
+};
+
+function logOff() {
+  try { sessionStorage.removeItem(IDENTITY_SESSION_KEY); } catch {}
+  clearSessionToken();
+  window.location.href = "/";
+}
 
 function useIdentity(): StoredIdentity | null {
   const [identity, setIdentity] = useState<StoredIdentity | null>(null);
@@ -149,123 +200,124 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
   }, [identity]);
   const lowBalanceWarning = useLowBalanceWarning(identity);
   const pendingSignature = usePendingSignature(identity);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set(["Admin", "Finances"]));
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set(["Team"]));
 
-  function toggleGroup(group: string) {
-    setCollapsedGroups((prev) => {
+  function toggle(title: string) {
+    setCollapsed((prev) => {
       const next = new Set(prev);
-      if (next.has(group)) next.delete(group); else next.add(group);
+      if (next.has(title)) next.delete(title); else next.add(title);
       return next;
     });
   }
 
+  // Logged out: show the everyday pages (they lead to the login screen) but
+  // not the manager-only sections.
+  const visible = (item: NavItem) => hasAccess(item.permission, identity) || (!identity && item.permission === "any");
+  const isActive = (href: string) => pathname === href;
+
+  const badge = (href: string) => {
+    if (href === "/review" && reviewCount > 0) {
+      return <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-semibold flex items-center justify-center" style={{ background: C.accent, color: "#fff" }} title="Documents waiting for your review">{reviewCount}</span>;
+    }
+    if ((href === "/cashflow" && lowBalanceWarning) || (href === "/handbook" && pendingSignature)) {
+      return <span className="ml-auto h-2 w-2 rounded-full flex-shrink-0" style={{ background: href === "/cashflow" ? "#DC2626" : C.accent }}
+        title={href === "/cashflow" ? "Cash balance is low" : "Your signature is needed"} />;
+    }
+    return null;
+  };
+
+  const initials = identity?.mode === "super"
+    ? "A"
+    : (identity?.employeeName ?? "").split(" ").filter((w) => /^[A-Za-z]/.test(w) && !/^Dr\.?$/.test(w)).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
+
   return (
     <>
-      <div className="px-5 py-6 flex-shrink-0" style={{ borderBottom: "1px solid rgba(35,38,52,0.08)" }}>
-        <div className="flex items-center justify-center">
-          <Image src="/logo.svg" alt="Deccan Dental Sleep Center" width={230} height={80} className="object-contain" priority />
-        </div>
-        <div className="mt-3 text-xs font-semibold tracking-widest uppercase text-center" style={{ color: "rgba(35,38,52,0.45)", fontFamily: "'Poppins', sans-serif" }}>
-          Staff Scheduler
-        </div>
+      <div className="px-6 pt-6 pb-5 flex-shrink-0">
+        <Link href="/staff-dashboard" onClick={onNavigate} className="block">
+          <Image src="/logo.svg" alt="Deccan Dental Sleep Center" width={180} height={62} className="object-contain" priority />
+        </Link>
+        <div className="mt-2 text-[11px] font-medium tracking-[0.14em] uppercase" style={{ color: C.muted }}>Staff Portal</div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
-        {navItems.map((item, i) => {
-          const active = pathname === item.href;
-          const accessible = hasAccess(item.permission, identity);
-          const showGroupLabel = item.group && item.group !== navItems[i - 1]?.group;
-          // A group stays open if the current page lives inside it, even if collapsed.
-          const groupHasActiveItem = item.group ? navItems.some((n) => n.group === item.group && n.href === pathname) : false;
-          const groupCollapsed = !!item.group && collapsedGroups.has(item.group) && !groupHasActiveItem;
-          if (item.group && groupCollapsed && !showGroupLabel) return null;
+      <nav className="flex-1 overflow-y-auto px-3 pb-4" aria-label="Main">
+        {NAV_GROUPS.map((group) => {
+          const items = group.items.filter(visible);
+          if (items.length === 0) return null;
+          const hasActive = items.some((i) => isActive(i.href));
+          const isCollapsed = !!group.collapsible && collapsed.has(group.title) && !hasActive;
           return (
-            <div key={item.href}>
-              {showGroupLabel && (
-                <button
-                  onClick={() => toggleGroup(item.group!)}
-                  className="w-full flex items-center justify-between px-4 pt-4 pb-1 text-xs font-bold tracking-widest uppercase"
-                  style={{ color: "rgba(74,66,56,0.6)" }}
-                >
-                  <span>{item.group}</span>
-                  <span className="text-[10px] normal-case tracking-normal font-semibold" style={{ transform: groupCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>▾</span>
+            <div key={group.title} className="mt-4 first:mt-0">
+              {group.collapsible ? (
+                <button onClick={() => toggle(group.title)} aria-expanded={!isCollapsed}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold tracking-[0.12em] uppercase rounded-md transition-colors"
+                  style={{ color: C.muted }}>
+                  <span>{group.title}</span>
+                  <NavIcon name="chevron" size={14} style={{ transform: isCollapsed ? "rotate(0deg)" : "rotate(90deg)", transition: "transform 0.15s" }} />
                 </button>
+              ) : (
+                <div className="px-3 py-1.5 text-[11px] font-semibold tracking-[0.12em] uppercase" style={{ color: C.muted }}>{group.title}</div>
               )}
-              {!groupCollapsed && (
-              <Link
-                href={item.href}
-                onClick={onNavigate}
-                className="flex items-center gap-3 rounded-full px-4 py-2.5 text-sm font-semibold transition-all duration-150"
-                style={
-                  active
-                    ? { background: "#EF843F", color: "white", boxShadow: "0 4px 14px rgba(239, 132, 63, 0.35)" }
-                    : accessible
-                    ? { color: "rgba(74,66,56,0.85)" }
-                    : { color: "rgba(74,66,56,0.28)" }
-                }
-                onMouseEnter={(e) => {
-                  if (!active) {
-                    (e.currentTarget as HTMLElement).style.background = "#FCE8D5";
-                    (e.currentTarget as HTMLElement).style.color = accessible ? "#B8501E" : "rgba(74,66,56,0.55)";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!active) {
-                    (e.currentTarget as HTMLElement).style.background = "transparent";
-                    (e.currentTarget as HTMLElement).style.color = accessible ? "rgba(74,66,56,0.85)" : "rgba(74,66,56,0.28)";
-                  }
-                }}
-              >
-                <span className="text-base leading-none w-5 text-center flex-shrink-0" style={{ opacity: accessible ? 1 : 0.4 }}>{item.icon}</span>
-                <span className="flex-1">{item.label}</span>
-                {item.href === "/review" && reviewCount > 0 && (
-                  <span className="text-[10px] font-bold rounded-full px-1.5 py-0.5 flex-shrink-0" style={{ background: "#dc2626", color: "#fff" }} title="Documents waiting for your review">{reviewCount}</span>
-                )}
-                {item.href === "/cashflow" && lowBalanceWarning && (
-                  <span className="text-xs flex-shrink-0" title="Cash balance is low">🚨</span>
-                )}
-                {item.href === "/handbook" && pendingSignature && (
-                  <span className="text-xs flex-shrink-0" title="Signature needed">✍️</span>
-                )}
-                {!accessible && <span className="text-xs flex-shrink-0" style={{ opacity: 0.5 }}>🔒</span>}
-                {active && <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.85)" }} />}
-              </Link>
+              {!isCollapsed && (
+                <ul className="mt-0.5 space-y-0.5">
+                  {items.map((item) => {
+                    const active = isActive(item.href);
+                    return (
+                      <li key={item.href}>
+                        <Link
+                          href={item.href}
+                          onClick={onNavigate}
+                          aria-current={active ? "page" : undefined}
+                          className="group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[14px] transition-colors"
+                          style={active
+                            ? { background: C.accentSoft, color: C.ink, fontWeight: 600 }
+                            : { color: C.text, fontWeight: 500 }}
+                          onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = C.hover; }}
+                          onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                        >
+                          {active && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full" style={{ background: C.accent }} />}
+                          <NavIcon name={item.icon} size={18} style={{ color: active ? C.accent : C.muted, flexShrink: 0 }} />
+                          <span className="truncate">{item.label}</span>
+                          {badge(item.href)}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
             </div>
           );
         })}
       </nav>
 
-      <div className="px-5 py-4 flex-shrink-0" style={{ borderTop: "1px solid rgba(74,66,56,0.08)" }}>
+      <div className="px-3 py-3 flex-shrink-0" style={{ borderTop: `1px solid ${C.border}` }}>
         {identity ? (
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#EF843F" }}>
-                {identity.mode === "super" ? "A" : (identity.employeeName ?? "?").charAt(0).toUpperCase()}
+          <div className="flex items-center gap-3 rounded-lg px-3 py-2">
+            <div className="h-9 w-9 rounded-full flex items-center justify-center text-[13px] font-semibold flex-shrink-0"
+              style={{ background: C.accentSoft, color: C.accent }}>
+              {initials}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-semibold truncate" style={{ color: C.ink }}>
+                {identity.mode === "super" ? "Administrator" : identity.employeeName ?? "Signed in"}
               </div>
-              <div>
-                <div className="text-xs font-bold" style={{ color: "#4A4238" }}>
-                  {identity.mode === "super" ? "Admin (passcode)" : identity.employeeName ?? "Signed in"}
-                </div>
-                <div className="text-xs" style={{ color: "rgba(74,66,56,0.55)" }}>Deccan Dental</div>
+              <div className="text-[12px] truncate" style={{ color: C.muted }}>
+                {identity.mode === "super" ? "Master passcode" : "Deccan Dental"}
               </div>
             </div>
-            <button
-              onClick={() => { try { sessionStorage.removeItem(IDENTITY_SESSION_KEY); } catch {} window.location.href = "/"; }}
-              className="mt-2 text-xs underline font-medium"
-              style={{ color: "rgba(74,66,56,0.6)" }}
-            >
-              Not you? Log off
+            <button onClick={logOff} title="Log out" aria-label="Log out"
+              className="h-8 w-8 rounded-md flex items-center justify-center transition-colors flex-shrink-0"
+              style={{ color: C.muted }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = C.hover; (e.currentTarget as HTMLElement).style.color = C.ink; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = C.muted; }}>
+              <NavIcon name="logout" size={18} />
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: "#EF843F" }}>D</div>
-            <div>
-              <div className="text-xs font-bold" style={{ color: "#4A4238" }}>Deccan Dental</div>
-              <div className="text-xs" style={{ color: "rgba(74,66,56,0.55)" }}>Sleep Center</div>
-            </div>
-          </div>
+          <Link href="/staff-dashboard" onClick={onNavigate}
+            className="flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[14px] font-semibold text-white"
+            style={{ background: C.accent }}>
+            Log in
+          </Link>
         )}
       </div>
     </>
@@ -279,52 +331,47 @@ export function Sidebar() {
   return (
     <>
       {/* ── Desktop sidebar (lg+) ── */}
-      <aside
-        className="hidden lg:flex fixed left-0 top-0 z-50 h-screen w-64 flex-col"
-        style={{ background: "#FBF7EF", borderRight: "1px solid rgba(74,66,56,0.08)" }}
-      >
+      <aside className="hidden lg:flex fixed left-0 top-0 z-50 h-screen w-64 flex-col"
+        style={{ background: C.surface, borderRight: `1px solid ${C.border}`, fontFamily: "'DM Sans', sans-serif" }}>
         <NavContent pathname={pathname} />
       </aside>
 
       {/* ── Mobile top bar (< lg) ── */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50" style={{ background: "#FBF7EF", boxShadow: "0 1px 3px rgba(74,66,56,0.08)" }}>
-        <div className="flex items-center justify-between px-4 py-2">
-          <div style={{ fontWeight: 700, color: "#232634", fontSize: 16, fontFamily: "'Poppins', sans-serif" }}>
-            deccan<span style={{ color: "#EF843F" }}>|</span>dental
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50"
+        style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, fontFamily: "'DM Sans', sans-serif" }}>
+        <div className="flex items-center justify-between px-4 h-11">
+          <div style={{ fontWeight: 700, color: C.ink, fontSize: 16, fontFamily: "'Poppins', sans-serif" }}>
+            deccan<span style={{ color: C.accent }}>|</span>dental
           </div>
         </div>
-        <div className="flex items-stretch border-t" style={{ borderColor: "rgba(35,38,52,0.08)" }}>
+        <div className="flex items-stretch" style={{ borderTop: `1px solid ${C.border}` }}>
           {MOBILE_QUICK_TABS.map((tab) => {
             const active = pathname === tab.href;
             return (
-              <a key={tab.href} href={tab.href} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2"
-                style={{ borderTop: active ? "2px solid #EF843F" : "2px solid transparent" }}>
-                <span style={{ fontSize: 19 }}>{tab.icon}</span>
-                <span style={{ fontSize: 10, fontWeight: active ? 700 : 500, color: active ? "#DE6C24" : "rgba(35,38,52,0.55)", fontFamily: "'Poppins', sans-serif" }}>{tab.label}</span>
-              </a>
+              <Link key={tab.href} href={tab.href} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-1.5"
+                style={{ color: active ? C.accent : C.muted, boxShadow: active ? `inset 0 -2px 0 ${C.accent}` : "none" }}>
+                <NavIcon name={tab.icon} size={20} />
+                <span style={{ fontSize: 11, fontWeight: active ? 600 : 500 }}>{tab.label}</span>
+              </Link>
             );
           })}
-          <button onClick={() => setOpen(true)} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2" style={{ borderTop: "2px solid transparent" }}>
-            <span style={{ fontSize: 19 }}>☰</span>
-            <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(35,38,52,0.55)", fontFamily: "'Poppins', sans-serif" }}>More</span>
+          <button onClick={() => setOpen(true)} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-1.5" style={{ color: C.muted }}>
+            <NavIcon name="menu" size={20} />
+            <span style={{ fontSize: 11, fontWeight: 500 }}>Menu</span>
           </button>
         </div>
       </div>
 
-      {/* ── Mobile drawer overlay ── */}
+      {/* ── Mobile drawer ── */}
       {open && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
-          <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setOpen(false)} />
-          <aside
-            className="relative flex flex-col w-72 h-full"
-            style={{ background: "#FBF7EF" }}
-          >
-            <button
-              onClick={() => setOpen(false)}
-              className="absolute top-4 right-4 text-xl opacity-50 hover:opacity-100 transition"
-              style={{ color: "#4A4238" }}
-              aria-label="Close menu"
-            >✕</button>
+          <div className="absolute inset-0" style={{ background: "rgba(15,17,26,0.45)" }} onClick={() => setOpen(false)} />
+          <aside className="relative flex flex-col w-72 max-w-[85vw] h-full shadow-xl"
+            style={{ background: C.surface, fontFamily: "'DM Sans', sans-serif" }}>
+            <button onClick={() => setOpen(false)} aria-label="Close menu"
+              className="absolute top-4 right-3 h-8 w-8 rounded-md flex items-center justify-center" style={{ color: C.muted }}>
+              <NavIcon name="close" size={18} />
+            </button>
             <NavContent pathname={pathname} onNavigate={() => setOpen(false)} />
           </aside>
         </div>

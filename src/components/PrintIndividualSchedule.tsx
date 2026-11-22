@@ -10,6 +10,8 @@ import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { resolveDentistAssistants } from "@/lib/assistantSlots";
 import { Employee } from "@/types/employee";
 import { MonthSchedule } from "@/lib/scheduleStore";
+import { loadLeaveRequests } from "@/lib/leaveStore";
+import { LeaveRequest } from "@/types/leave";
 
 interface Props {
   year: number;
@@ -22,6 +24,7 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
   const [mode, setMode] = useState<"print" | "email">("print");
   const [staff, setStaff] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -29,6 +32,7 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
   useEffect(() => {
     loadStaff().then(setStaff);
     getOverrides().then(setOverrides);
+    loadLeaveRequests().then(setLeaveRequests);
     loadPrefs().then(setPrefs);
     getOpenTuesdays().then(setOpenTuesdays);
     loadHolidays().then(setHolidays);
@@ -45,7 +49,9 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
         daySched.frontDeskRequired ?? 2,
         daySched.hygienistsRequired ?? 1,
         daySched.assistantCounts ?? {},
-        daySched.floaterAssistantId ?? null
+        daySched.floaterAssistantId ?? null,
+        leaveRequests,
+        daySched.assistantOverrides ?? {}
       );
       const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric",

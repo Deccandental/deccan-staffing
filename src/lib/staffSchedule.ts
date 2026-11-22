@@ -81,7 +81,8 @@ export async function loadUpcomingShiftsForEmployee(employeeId: number, daysAhea
           daySched.hygienistsRequired ?? 1,
           daySched.assistantCounts ?? {},
           daySched.floaterAssistantId ?? null,
-          leaveRequests
+          leaveRequests,
+          daySched.assistantOverrides ?? {}
         );
         const ao = daySched.assistantOverrides ?? {};
         const ac = daySched.assistantCounts ?? {};
@@ -179,7 +180,8 @@ export async function getScheduledEmployeeIdsInRange(startDate: string, endDate:
           daySched.hygienistsRequired ?? 1,
           daySched.assistantCounts ?? {},
           daySched.floaterAssistantId ?? null,
-          leaveRequests
+          leaveRequests,
+          daySched.assistantOverrides ?? {}
         );
         const ao = daySched.assistantOverrides ?? {};
         const ac = daySched.assistantCounts ?? {};

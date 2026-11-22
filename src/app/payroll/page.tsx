@@ -1,4 +1,5 @@
 "use client";
+import { todayStr } from "@/lib/today";
 
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
@@ -99,7 +100,7 @@ function PayrollPageBody() {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [savingAll, setSavingAll] = useState(false);
   const [ocEmployeeId, setOcEmployeeId] = useState("");
-  const [ocDate, setOcDate] = useState(new Date().toISOString().slice(0, 10));
+  const [ocDate, setOcDate] = useState(todayStr());
   const [ocAmount, setOcAmount] = useState("");
   const [ocProgramme, setOcProgramme] = useState<BonusProgramme | "none">("none");
   const [ocNotes, setOcNotes] = useState("");
@@ -645,7 +646,8 @@ function PayrollPageBody() {
                             </span>
                             <button onClick={async () => {
                               if (!confirm("Delete this off-cycle payment? Any linked bonus record will be removed too.")) return;
-                              await deleteOffCyclePayment(pay.id, pay.programme);
+                              const res = await deleteOffCyclePayment(pay.id, pay.programme);
+                              if (!res.ok) alert(`Couldn't delete this payment: ${res.error ?? "please try again."}`);
                               setOffCyclePayments(await loadOffCyclePayments());
                             }} className="text-xs text-red-400 hover:underline">Delete</button>
                           </div>
@@ -699,7 +701,7 @@ function GrowthBonusPanel() {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [payingFor, setPayingFor] = useState<number | null>(null);
-  const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().split("T")[0], amount: "", notes: "" });
+  const [paymentForm, setPaymentForm] = useState({ date: todayStr(), amount: "", notes: "" });
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editPaymentForm, setEditPaymentForm] = useState({ date: "", amount: "", notes: "" });
   const [safeToPayTotal, setSafeToPayTotal] = useState<number | null>(null);
@@ -738,7 +740,7 @@ function GrowthBonusPanel() {
     // How much bonus can safely be paid out right now, per the Cash Flow
     // tool's own numbers — current Fifth Third balance minus everything else
     // already scheduled to come out in the next 30 days, minus its cushion.
-    const today = new Date().toISOString().split("T")[0];
+    const today = todayStr();
     const [accounts, balances, cashBills, cashPayments] = await Promise.all([
       loadCashAccounts(), loadLatestBalances(),
       loadCashflowBills(), loadCashflowBillPayments(today, addCashflowDays(today, 30)),
@@ -813,7 +815,7 @@ function GrowthBonusPanel() {
     if (!amount || amount <= 0) return;
     await addGrowthBonusPayment({ employeeId, date: paymentForm.date, amount, notes: paymentForm.notes });
     setPayingFor(null);
-    setPaymentForm({ date: new Date().toISOString().split("T")[0], amount: "", notes: "" });
+    setPaymentForm({ date: todayStr(), amount: "", notes: "" });
     await refresh();
   }
 
@@ -1395,7 +1397,7 @@ function HoBonusPanel() {
   const [savingYear, setSavingYear] = useState<number | null>(null);
   const [hoPayments, setHoPayments] = useState<HoBonusPayment[]>([]);
   const [openHoMonth, setOpenHoMonth] = useState<string | null>(null);
-  const [hoPayDate, setHoPayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [hoPayDate, setHoPayDate] = useState(todayStr());
   const [hoPayAmount, setHoPayAmount] = useState("");
   const [hoPayNotes, setHoPayNotes] = useState("");
   const [hoPayError, setHoPayError] = useState("");

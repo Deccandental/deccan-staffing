@@ -1,3 +1,4 @@
+import { todayStr } from "@/lib/today";
 import { secureData as supabase } from "./secureData";
 
 export const MAX_RANK = 5;
@@ -74,7 +75,7 @@ export async function addWishlistItem(description: string, estimatedCost: number
  * last one.
  */
 export async function markPurchased(id: string): Promise<void> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
   const { error } = await supabase.from("wishlist_items").update({ purchased_at: today }).eq("id", id);
   if (error) { console.error("markPurchased error:", error); return; }
   const { error: voteErr } = await supabase.from("wishlist_votes").delete().eq("item_id", id);

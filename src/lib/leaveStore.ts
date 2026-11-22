@@ -71,14 +71,18 @@ export function computeDefaultPaidHours(totalDays: number): number {
  * Previously a morning off still counted as a whole day, so a half day of
  * PTO cost a full day of balance.
  */
-export function countLeaveDays(start: string, end: string, startsMidday: boolean, endsMidday: boolean): number {
-  const full = countBusinessDays(start, end);
-  if (full <= 0) return 0;
-  let days = full;
-  if (startsMidday) days -= 0.5;
-  if (endsMidday) days -= 0.5;
-  // A single day can only lose one half, never both.
-  return Math.max(0.5, days);
+export function countLeaveDays(start: string, end: string, startsMidday: boolean, endsMidday: boolean, ctx?: LeaveDayContext): number {
+  if (!start || !end || end < start) return 0;
+  let days = 0;
+  eachDate(start, end, (date) => {
+    let v = workdayValue(date, ctx);
+    // Only half of a day is taken when leave starts or ends at midday — and
+    // only if that day was a working day to begin with (a half day on a
+    // weekend or holiday shouldn't reduce the total).
+    if (v > 0 && ((startsMidday && date === start) || (endsMidday && date === end))) v = Math.min(v, 0.5);
+    days += v;
+  });
+  return days;
 }
 
 /**
@@ -128,15 +132,48 @@ export async function deleteLeaveRequest(id: string): Promise<void> {
   if (error) console.error("deleteLeaveRequest error:", error);
 }
 
-export function countBusinessDays(start: string, end: string): number {
-  const CLOSED = new Set([0, 6]);
-  let count = 0;
+// What the office calendar looks like, so leave only costs days that would
+// actually have been worked. Without it, every weekday counts (the old rule).
+export interface LeaveDayContext {
+  holidays?: { date: string }[];
+  openTuesdays?: { date: string; halfDay: "AM" | "PM" | null }[];
+  // The person's own working pattern; days they don't normally work are free.
+  schedule?: Partial<Record<"monday" | "tuesday" | "wednesday" | "thursday" | "friday", boolean>>;
+}
+
+const WEEKDAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
+
+function pad2(n: number) { return String(n).padStart(2, "0"); }
+
+/** How much of a working day this date is for the person: 1, 0.5 (half-day open Tuesday) or 0. */
+export function workdayValue(date: string, ctx?: LeaveDayContext): number {
+  const d = new Date(date + "T00:00:00");
+  const dow = d.getDay();
+  if (dow === 0 || dow === 6) return 0;
+  if (!ctx) return 1;
+  if (ctx.holidays?.some((h) => h.date === date)) return 0;
+  const key = WEEKDAY_KEYS[dow] as keyof NonNullable<LeaveDayContext["schedule"]>;
+  if (ctx.schedule && !ctx.schedule[key]) return 0;
+  if (dow === 2) {
+    const open = ctx.openTuesdays?.find((t) => t.date === date);
+    if (!open) return 0; // the office is closed on Tuesdays unless opened
+    return open.halfDay ? 0.5 : 1;
+  }
+  return 1;
+}
+
+function eachDate(start: string, end: string, fn: (date: string) => void) {
   const cur = new Date(start + "T00:00:00");
   const endDate = new Date(end + "T00:00:00");
   while (cur <= endDate) {
-    if (!CLOSED.has(cur.getDay())) count++;
+    fn(`${cur.getFullYear()}-${pad2(cur.getMonth() + 1)}-${pad2(cur.getDate())}`);
     cur.setDate(cur.getDate() + 1);
   }
+}
+
+export function countBusinessDays(start: string, end: string, ctx?: LeaveDayContext): number {
+  let count = 0;
+  eachDate(start, end, (date) => { count += workdayValue(date, ctx); });
   return count;
 }
 

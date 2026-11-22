@@ -1,3 +1,4 @@
+import { todayStr } from "@/lib/today";
 import { NextRequest, NextResponse } from "next/server";
 import { isCron } from "@/lib/routeAuth";
 import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
     supabase.from("required_cert_types").select("*"),
     supabase.from("ce_course_entries").select("*"),
   ]);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
 
   const docRequirements: { docTitle: string; requirementId: string; cycleLabel: string; signedIds: Set<number>; restrictedToEmployeeId: number | null }[] = [];
   for (const doc of docs ?? []) {

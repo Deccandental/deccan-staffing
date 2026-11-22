@@ -219,7 +219,8 @@ export const TABLE_RULES: Record<string, TableRule> = {
   ar_aging_entries: FIN, cash_accounts: FIN, credit_cards: FIN, card_charges: FIN,
   recurring_bills: FIN, bill_payments: FIN, balance_checks: FIN,
   card_statement_entries: FIN, bank_statement_entries: FIN,
-  debts: FIN, debt_statement_entries: FIN, off_cycle_payments: FIN,
+  debts: FIN, debt_statement_entries: FIN,
+  off_cycle_payments: COMP, // a person may see their own off-cycle payments (counted in their hygiene totals)
   production_goals: FIN, cashflow_settings: FIN,
   retirement_accruals: FIN, retirement_deposits: FIN,
 };

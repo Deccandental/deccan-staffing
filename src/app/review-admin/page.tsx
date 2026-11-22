@@ -1,4 +1,5 @@
 "use client";
+import { todayStr } from "@/lib/today";
 
 import { useState, useEffect, useCallback } from "react";
 import type { DragEvent } from "react";
@@ -146,7 +147,7 @@ function AdminBody() {
     load();
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
   return (
     <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
       <Sidebar />

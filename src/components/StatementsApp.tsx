@@ -1,4 +1,5 @@
 "use client";
+import { todayStr } from "@/lib/today";
 
 import { Fragment, useState, useEffect, useCallback } from "react";
 import type { DragEvent } from "react";
@@ -105,7 +106,7 @@ export default function StatementsApp({ forcedTab, embedded }: {
   const [chkSearch, setChkSearch] = useState("");
   const [chkAdding, setChkAdding] = useState(false);
   const [cNumber, setCNumber] = useState("");
-  const [cDate, setCDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [cDate, setCDate] = useState(() => todayStr());
   const [cAccount, setCAccount] = useState("");
   const [cPayee, setCPayee] = useState("");
   const [cAmount, setCAmount] = useState("");
@@ -143,7 +144,7 @@ export default function StatementsApp({ forcedTab, embedded }: {
   const [invAdding, setInvAdding] = useState(true);
   const [iVendor, setIVendor] = useState("");
   const [iOther, setIOther] = useState("");
-  const [iDate, setIDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [iDate, setIDate] = useState(() => todayStr());
   const [iNumber, setINumber] = useState("");
   const [iAmount, setIAmount] = useState("");
   const [vName, setVName] = useState("");
@@ -427,7 +428,7 @@ export default function StatementsApp({ forcedTab, embedded }: {
     setMsg(`Filed invoice ${iNumber.trim()} from ${name}.`);
     const filedMonth = iDate.slice(0, 7);
     // Clear the whole form so the next invoice starts fresh.
-    setIVendor(""); setIDate(new Date().toISOString().slice(0, 10)); setINumber(""); setIAmount(""); setICategory(""); setIMatch(null); setNvName(""); setIFile(null);
+    setIVendor(""); setIDate(todayStr()); setINumber(""); setIAmount(""); setICategory(""); setIMatch(null); setNvName(""); setIFile(null);
     if (!unpaidOnly && filedMonth !== invMonth) setInvMonth(filedMonth); else loadInvoices();
   }
 
@@ -436,14 +437,14 @@ export default function StatementsApp({ forcedTab, embedded }: {
     const first = accounts.find((a) => a.kind === "bank");
     const from = payFrom || (first ? `bank:${first.id}` : "other");
     setPayEditing(false);
-    setPayFor(f); setPayDate(new Date().toISOString().slice(0, 10)); setPayNote(""); setPayFrom(from);
+    setPayFor(f); setPayDate(todayStr()); setPayNote(""); setPayFrom(from);
     setPayMethod(payFrom.startsWith("card:") ? "card" : "check");
     setPayCheckNo(from.startsWith("bank:") ? nextCheckFor(from.slice(5)) : "");
   }
   // Changing a payment that's already marked paid: the same box, filled in with what was recorded.
   function openEditPay(f: FileRow) {
     setPayEditing(true); setPayFor(f);
-    setPayDate(f.paid_date ?? new Date().toISOString().slice(0, 10));
+    setPayDate(f.paid_date ?? todayStr());
     setPayFrom(f.paid_from_kind && f.paid_from_kind !== "other" && f.paid_from_id ? `${f.paid_from_kind}:${f.paid_from_id}` : "other");
     setPayMethod((f.paid_method as typeof payMethod) ?? (f.paid_from_kind === "card" ? "card" : "other"));
     setPayCheckNo(f.paid_check_number ?? ""); setPayNote(f.paid_note ?? "");
@@ -642,7 +643,7 @@ export default function StatementsApp({ forcedTab, embedded }: {
     return out.sort((a, z) => z.overlap - a.overlap || (a.diff ?? 9) - (z.diff ?? 9)).slice(0, 3);
   })();
 
-  const pendingCutoff = addDays(new Date().toISOString().slice(0, 10), -30);
+  const pendingCutoff = addDays(todayStr(), -30);
   const pendingOld = pending.filter((f) => f.invoice_date && f.invoice_date < pendingCutoff).sort((a, z) => String(a.invoice_date).localeCompare(String(z.invoice_date)));
   const pendingTotal = pending.reduce((n, f) => n + (f.amount ?? 0), 0);
   const pendingBanner = finance && pending.length > 0 && (
@@ -793,7 +794,7 @@ export default function StatementsApp({ forcedTab, embedded }: {
     const lines = [["Check #", "Date", "Account", "Payee", "Type", "Amount", "Memo", "Status", "Cleared date"].map(esc).join(",")]
       .concat(rows.map((c) => [c.check_number, c.check_date, c.account_name, c.payee, c.category ?? "", c.amount ?? "", c.memo, c.status, c.cleared_date ?? ""].map(esc).join(",")));
     const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
-    const a = document.createElement("a"); a.href = url; a.download = `check-register-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    const a = document.createElement("a"); a.href = url; a.download = `check-register-${todayStr()}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   }
 
   const nextCheckFor = (accountId: string): string => {

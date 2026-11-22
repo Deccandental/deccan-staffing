@@ -310,7 +310,7 @@ export default function ScheduleBuilder() {
         daySched.frontDeskRequired ?? 2,
         daySched.hygienistsRequired ?? 1,
         daySched.assistantCounts ?? {},
-        daySched.floaterAssistantId ?? null, leaveRequests
+        daySched.floaterAssistantId ?? null, leaveRequests, daySched.assistantOverrides ?? {}
       );
 
       // A warning here is only "real" if nothing -- a manual override or a
@@ -369,7 +369,7 @@ export default function ScheduleBuilder() {
         daySched.frontDeskRequired ?? 2,
         daySched.hygienistsRequired ?? 1,
         daySched.assistantCounts ?? {},
-        daySched.floaterAssistantId ?? null, leaveRequests
+        daySched.floaterAssistantId ?? null, leaveRequests, daySched.assistantOverrides ?? {}
       );
 
       const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);
@@ -433,7 +433,7 @@ export default function ScheduleBuilder() {
     const hr = schedule[selectedDate]?.hygienistsRequired ?? 1;
     const ac = schedule[selectedDate]?.assistantCounts ?? {};
     const fl = schedule[selectedDate]?.floaterAssistantId ?? null;
-    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday, fdr, hr, ac, fl, leaveRequests);
+    return buildDailyAssignments(staff, workingDentists, selectedDate, prefs, overrides, isOpenTuesday, fdr, hr, ac, fl, leaveRequests, schedule[selectedDate]?.assistantOverrides ?? {});
   }, [staff, workingDentists, selectedDate, schedule, prefs, overrides, openDays, leaveRequests]);
 
   function prevMonth() {
@@ -656,7 +656,7 @@ export default function ScheduleBuilder() {
                     daySched.frontDeskRequired ?? 2,
                     daySched.hygienistsRequired ?? 1,
                     daySched.assistantCounts ?? {},
-                    daySched.floaterAssistantId ?? null, leaveRequests
+                    daySched.floaterAssistantId ?? null, leaveRequests, daySched.assistantOverrides ?? {}
                   ) : null;
 
                   const ao = daySched?.assistantOverrides ?? {};

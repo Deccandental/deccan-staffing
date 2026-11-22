@@ -12,6 +12,8 @@ import { resolveDentistAssistants } from "@/lib/assistantSlots";
 import { secureData as supabase } from "@/lib/secureData";
 import { Employee } from "@/types/employee";
 import { MonthSchedule } from "@/lib/scheduleStore";
+import { loadLeaveRequests } from "@/lib/leaveStore";
+import { LeaveRequest } from "@/types/leave";
 
 interface Props {
   year: number;
@@ -26,11 +28,13 @@ export default function PrintIndividualScheduleCalendar({ year, month, schedule 
   const [mode, setMode] = useState<"print" | "email">("print");
   const [staff, setStaff] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
 
   useEffect(() => {
     loadStaff().then(setStaff);
     getOverrides().then(setOverrides);
+    loadLeaveRequests().then(setLeaveRequests);
     loadPrefs().then(setPrefs);
   }, []);
 
@@ -44,7 +48,9 @@ export default function PrintIndividualScheduleCalendar({ year, month, schedule 
       daySched.frontDeskRequired ?? 2,
       daySched.hygienistsRequired ?? 1,
       daySched.assistantCounts ?? {},
-      daySched.floaterAssistantId ?? null
+      daySched.floaterAssistantId ?? null,
+      leaveRequests,
+      daySched.assistantOverrides ?? {}
     );
 
     const tempName = (tempId: string) => temps.find((t) => t.id === tempId)?.name ?? "Temp";

@@ -1,3 +1,4 @@
+import { todayStr } from "@/lib/today";
 import { secureData as supabase } from "./secureData"; // financial data goes through the secure server gateway, not the public key
 import { loadGrowthBonusQuarter, saveGrowthBonusQuarter } from "./growthBonus";
 
@@ -294,7 +295,9 @@ export function projectCardCharges(charges: CardCharge[], cardId: string, fromDa
     for (let d = 1; d <= daysAhead; d++) {
       const date = new Date(from);
       date.setDate(date.getDate() + d);
-      if (date.getDate() === charge.approxDayOfMonth) total += charge.typicalAmount;
+      // A charge set for the 29th–31st lands on the last day of shorter months.
+      const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+      if (date.getDate() === Math.min(charge.approxDayOfMonth, lastDay)) total += charge.typicalAmount;
     }
   }
   return total;
@@ -332,17 +335,25 @@ export function addDays(dateStr: string, days: number): string {
   return toStr(d);
 }
 
+// Adds whole months, keeping the day of month but capping it at the last day
+// of the target month: Jan 31 + 1 month = Feb 28 (not Mar 3, which is what
+// plain Date arithmetic gives, and which skipped February entirely).
 export function addMonthsToDate(dateStr: string, months: number): string {
-  const d = parseLocal(dateStr);
-  d.setMonth(d.getMonth() + months);
-  return toStr(d);
+  const [y, m, day] = dateStr.split("-").map(Number);
+  const target = new Date(y, m - 1 + months, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, lastDay));
+  return toStr(target);
 }
 
 // Days from `fromDate` to the next occurrence of `dayOfMonth` (0 if today).
 export function daysUntilDayOfMonth(fromDate: string, dayOfMonth: number): number {
   const from = parseLocal(fromDate);
-  const candidate = new Date(from.getFullYear(), from.getMonth(), dayOfMonth);
-  if (candidate < from) candidate.setMonth(candidate.getMonth() + 1);
+  // Clamp to the month's last day (a "31st" charge falls on Feb 28 / Apr 30).
+  const onDay = (year: number, month: number) =>
+    new Date(year, month, Math.min(dayOfMonth, new Date(year, month + 1, 0).getDate()));
+  let candidate = onDay(from.getFullYear(), from.getMonth());
+  if (candidate < from) candidate = onDay(from.getFullYear(), from.getMonth() + 1);
   return Math.round((candidate.getTime() - from.getTime()) / 86400000);
 }
 
@@ -674,11 +685,16 @@ export function computeDueDatesInRange(bill: RecurringBill, startDate: string, e
     return dates;
   }
   if (bill.frequency === "monthly") {
-    let cursor = bill.anchorDate;
-    let guard = 0;
-    while (cursor < startDate && guard < 240) { cursor = addMonthsToDate(cursor, 1); guard++; }
-    guard = 0;
-    while (cursor <= endDate && guard < 240) { dates.push(cursor); cursor = addMonthsToDate(cursor, 1); guard++; }
+    // Always count months from the anchor (anchor + n), never from the
+    // previous due date — otherwise a bill on the 31st drifts to the 28th
+    // after February and stays there.
+    let n = 0;
+    while (addMonthsToDate(bill.anchorDate, n) < startDate && n < 2400) n++;
+    for (let guard = 0; guard < 240; guard++, n++) {
+      const due = addMonthsToDate(bill.anchorDate, n);
+      if (due > endDate) break;
+      dates.push(due);
+    }
   } else {
     const stepDays = bill.frequency === "biweekly" ? 14 : 7;
     let cursor = bill.anchorDate;
@@ -969,7 +985,7 @@ export function computeBonusObligations(input: {
   today?: string;
 }): BonusObligationsResult {
   const items: BonusObligation[] = [];
-  const today = input.today ?? new Date().toISOString().slice(0, 10);
+  const today = input.today ?? todayStr();
   const pct = (input.hoPercent ?? 40) / 100;
 
   if (input.hoMonths && input.hoMonths.length > 0) {
@@ -1211,7 +1227,7 @@ export function computeGoalProgress(
   annualGoal: number,
   monthlyActuals: { month: string; netProduction: number | null }[], // month as "YYYY-MM"
   year: number,
-  today: string = new Date().toISOString().slice(0, 10)
+  today: string = todayStr()
 ): GoalProgress {
   const baseline = annualGoal / 12;
   const currentMonth = today.slice(0, 4) === String(year) ? Number(today.slice(5, 7)) : 13;

@@ -1,4 +1,5 @@
 "use client";
+import { todayStr } from "@/lib/today";
 
 import { sessionHeaders } from "@/lib/secureData";
 import { useState, useEffect } from "react";
@@ -924,7 +925,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
             <div className="space-y-3">
               {allCerts.length === 0 ? (
                 <div className="rounded-2xl bg-white p-8 text-center shadow"><p className="text-slate-400">No certifications or licenses on file.</p></div>
-              ) : buildGroupedCertRows(requiredTypes, staff, allCerts, allCeEntries, new Date().toISOString().slice(0, 10)).map((row) => {
+              ) : buildGroupedCertRows(requiredTypes, staff, allCerts, allCeEntries, todayStr()).map((row) => {
                 function findCert(name: string): Certification | undefined {
                   const emp = staff.find((e) => e.name === name);
                   return allCerts.find((c) => c.title === row.title && (emp ? c.employeeId === emp.id : c.ownerType === "business"));
