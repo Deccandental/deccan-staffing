@@ -795,13 +795,13 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
   const employeeName = (id: number | null) => staff.find((e) => e.id === id)?.name ?? "Unknown";
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <header className="mb-8 flex items-start justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-3xl font-bold">Certifications</h1>
-            <p className="mt-1 text-slate-500">Personnel certifications and business licenses, with expiry reminders.</p>
+            <h1 className="page-title">Certifications</h1>
+            <p className="page-subtitle">Personnel certifications and business licenses, with expiry reminders.</p>
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm text-sm">
             <span className="text-gray-400">

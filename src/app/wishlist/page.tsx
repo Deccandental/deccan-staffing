@@ -124,18 +124,13 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
   }
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <header className="mb-2">
-          {/* People arrive here from the dashboard card, so give them a way
-              straight back rather than hunting through the sidebar. */}
-          <a href="/staff-dashboard" className="text-sm font-semibold hover:underline inline-block mb-1" style={{ color: "#e8622a" }}>
-            ← Back to dashboard
-          </a>
-          <h1 className="text-2xl font-bold">Wishlist</h1>
+          <h1 className="page-title">Wishlist</h1>
         </header>
-        <p className="text-sm text-slate-500 mb-1 max-w-3xl">
+        <p className="page-subtitle mb-1">
           A place for the whole team to suggest things the practice could use — equipment, supplies, software, anything.
           Anyone can add an item. Everyone also gets <strong>5 ranked picks</strong> — your #1 pick counts for more than your #5 —
           and you can move them to different items anytime.

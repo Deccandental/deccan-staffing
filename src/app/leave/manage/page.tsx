@@ -229,13 +229,13 @@ function LeaveManagePageBody() {
   }
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold" style={{ color: "#5a5a5a" }}>Leave Management</h1>
-            <p className="mt-1 text-gray-400">{pendingCount > 0 ? `${pendingCount} pending request${pendingCount !== 1 ? "s" : ""} awaiting review` : "No pending requests"}</p>
+            <h1 className="page-title">Leave Management</h1>
+            <p className="page-subtitle">{pendingCount > 0 ? `${pendingCount} pending request${pendingCount !== 1 ? "s" : ""} awaiting review` : "No pending requests"}</p>
           </div>
           <div className="flex items-center gap-2">
             {payrollMessage && <span className="text-xs text-slate-400 max-w-[200px]">{payrollMessage}</span>}

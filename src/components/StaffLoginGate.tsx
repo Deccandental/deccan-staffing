@@ -83,7 +83,7 @@ export default function StaffLoginGate({ children }: Props) {
 
   if (!identity) {
     return (
-      <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+      <main className="app-shell">
         <Sidebar />
         <div className="pt-16 lg:pt-0 lg:ml-64 flex items-center justify-center min-h-screen px-4">
           <div className="rounded-2xl bg-white p-6 sm:p-10 shadow-lg w-full max-w-sm text-center">

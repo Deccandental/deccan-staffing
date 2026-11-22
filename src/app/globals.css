@@ -41,3 +41,50 @@ input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
+/* ── Page layout ─────────────────────────────────────────────────────────
+   Every page uses the same shell, spacing and heading so they read as one
+   app: .app-shell (background), .app-content (the area beside the sidebar),
+   .page-title (the page's one H1) and .page-subtitle (the line under it).
+   The top padding lines the title up with the logo in the sidebar. */
+:root {
+  --page-bg: #F6F4F0;
+  --text-strong: #1F2230;
+  --text-muted: #5C6070;
+}
+
+.app-shell {
+  min-height: 100vh;
+  background: var(--page-bg);
+}
+
+.app-content {
+  padding: 104px 16px 32px;
+}
+@media (min-width: 1024px) {
+  .app-content {
+    margin-left: 16rem; /* sidebar width */
+    padding: 36px 40px 48px;
+  }
+}
+
+.page-title {
+  font-family: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 26px;
+  line-height: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .page-title { font-size: 22px; line-height: 30px; }
+}
+
+.page-subtitle {
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-muted);
+  max-width: 48rem;
+}

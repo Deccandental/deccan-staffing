@@ -1361,12 +1361,12 @@ export default function CashFlowPage() {
   const dueCount = cashAccounts.length > 0 ? staleItems.length : 0;
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <header className="mb-4">
-          <h1 className="text-2xl font-bold">Cash Flow</h1>
-          <p className="text-sm text-slate-500 mt-1">Fifth Third and Chase, tracked independently, plus credit card capacity and the weekly Friday review.</p>
+          <h1 className="page-title">Cash Flow</h1>
+          <p className="page-subtitle">Fifth Third and Chase, tracked independently, plus credit card capacity and the weekly Friday review.</p>
         </header>
 
         {!loading && (

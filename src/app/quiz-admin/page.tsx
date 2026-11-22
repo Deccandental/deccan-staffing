@@ -201,10 +201,10 @@ function QuizAdminBody({ identity }: { identity: AppIdentity }) {
   }
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
-        <h1 className="text-2xl font-bold">🧩 Quiz Builder</h1>
+      <div className="app-content">
+        <h1 className="page-title">Quiz Builder</h1>
         <p className="text-sm text-slate-500 mb-4 max-w-3xl">
           Write a quiz, then press <b>Host</b> to open the host screen on the TV. Staff open <b>🎯 Live Quiz</b> in the app on their phones,
           logged in with their own PIN, and answer as you move through the questions.

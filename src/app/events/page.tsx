@@ -115,13 +115,13 @@ function EventsPageBody() {
   }
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <header className="mb-8 flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-3xl font-bold">Events</h1>
-            <p className="mt-1 text-slate-500">Staff meetings, trainings, and announcements — with automatic reminders.</p>
+            <h1 className="page-title">Events</h1>
+            <p className="page-subtitle">Staff meetings, trainings, and announcements — with automatic reminders.</p>
           </div>
           <button onClick={() => { if (showForm) { closeForm(); } else { setForm(EMPTY_FORM); setAllDay(false); setEditingId(null); setShowForm(true); } }}
             className="rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow hover:opacity-90 transition"

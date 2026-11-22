@@ -54,12 +54,12 @@ function EventsCalendarBody() {
   const selectedEvents = selectedDate ? eventsByDate[selectedDate] ?? [] : [];
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <header className="mb-4">
-          <h1 className="text-2xl font-bold">Events Calendar</h1>
-          <p className="text-sm text-slate-500 mt-1">Events only — no staff shifts. For the full schedule, see the Calendar page.</p>
+          <h1 className="page-title">Events Calendar</h1>
+          <p className="page-subtitle">Events only — no staff shifts. For the full schedule, see the Calendar page.</p>
         </header>
 
         <div className="max-w-4xl">

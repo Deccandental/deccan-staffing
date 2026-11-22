@@ -7,12 +7,12 @@ import AccessDenied from "@/components/AccessDenied";
 
 function ScheduleBuilderPageInner() {
   return (
-    <main className="min-h-screen bg-slate-100">
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <header className="mb-8">
-          <h1 className="text-3xl font-bold">Schedule Builder</h1>
-          <p className="mt-1 text-slate-500">Deccan Dental — Build your monthly staffing schedule.</p>
+          <h1 className="page-title">Schedule Builder</h1>
+          <p className="page-subtitle">Deccan Dental — Build your monthly staffing schedule.</p>
         </header>
         <ScheduleBuilder />
       </div>

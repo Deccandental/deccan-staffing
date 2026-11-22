@@ -591,10 +591,10 @@ export default function StatementsApp({ forcedTab, embedded }: {
   // ---------------- Login ----------------
   if (!role) {
     return (
-      <main className="min-h-screen flex items-center justify-center px-4" style={{ background: "#f5f5f5" }}>
+      <main className="app-shell flex items-center justify-center px-4">
         <div className="rounded-2xl bg-white p-6 sm:p-10 shadow-lg w-full max-w-sm text-center">
-          <h1 className="text-2xl font-bold mb-1" style={{ color: "#5a5a5a" }}>Statements</h1>
-          <p className="text-gray-400 text-sm mb-6">Enter your PIN or passcode.</p>
+          <h1 className="page-title mb-1">Statements</h1>
+          <p className="page-subtitle mx-auto mb-6">Enter your PIN or passcode.</p>
           <input type="password" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleLogin()}
             placeholder="PIN or passcode" maxLength={64}
             className={`w-full rounded-xl border px-4 py-3 text-center text-lg font-bold focus:outline-none mb-3 ${loginError ? "border-red-300 bg-red-50" : "border-gray-200"}`} />
@@ -890,8 +890,8 @@ export default function StatementsApp({ forcedTab, embedded }: {
         <div className="flex flex-wrap items-center justify-between gap-3">
           {tab !== "statements" ? (
             <div>
-              <h1 className="text-2xl font-bold">Statements</h1>
-              <p className="text-sm text-slate-500">{finance ? "The check register and the month-end package for your CPA. The CPA can view and download anything filed." : "View and download any statement. This page is read-only."}</p>
+              <h1 className="page-title">Statements</h1>
+              <p className="page-subtitle">{finance ? "The check register and the month-end package for your CPA. The CPA can view and download anything filed." : "View and download any statement. This page is read-only."}</p>
             </div>
           ) : <span />}
           {!finance && <button onClick={logout} className="text-sm text-slate-500 hover:underline">Log out</button>}
@@ -1129,9 +1129,9 @@ export default function StatementsApp({ forcedTab, embedded }: {
     return <main className="min-h-screen p-4 lg:p-8" style={{ background: "#f5f5f5" }}>{content}</main>;
   }
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">{content}</div>
+      <div className="app-content">{content}</div>
     </main>
   );
 }

@@ -491,11 +491,11 @@ function PayrollPageBody() {
   }
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <header className="mb-4">
-          <h1 className="text-2xl font-bold">Payroll Dashboard</h1>
+          <h1 className="page-title">Payroll Dashboard</h1>
         </header>
 
         <div className="mb-4 flex rounded-lg border border-slate-200 bg-white overflow-hidden w-fit">

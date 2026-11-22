@@ -109,13 +109,14 @@ const MOBILE_QUICK_TABS: { label: string; href: string; icon: NavIconName }[] = 
 ];
 
 // Palette: warm neutral surface, ink text, the brand orange as the accent.
+// Text is kept dark enough to read comfortably (it was too faint before).
 const C = {
   surface: "#FBF8F3",
-  border: "rgba(35,38,52,0.08)",
-  ink: "#232634",
-  text: "rgba(35,38,52,0.72)",
-  muted: "rgba(35,38,52,0.45)",
-  hover: "rgba(35,38,52,0.05)",
+  border: "rgba(35,38,52,0.10)",
+  ink: "#1F2230",
+  text: "#33364A",
+  muted: "#6B6F80",
+  hover: "rgba(35,38,52,0.06)",
   accent: "#E8622A",
   accentSoft: "rgba(232,98,42,0.10)",
 };
@@ -232,7 +233,7 @@ function NavContent({ pathname, onNavigate }: { pathname: string; onNavigate?: (
 
   return (
     <>
-      <div className="px-6 pt-6 pb-5 flex-shrink-0">
+      <div className="px-6 pt-7 pb-5 flex-shrink-0">
         <Link href="/staff-dashboard" onClick={onNavigate} className="block">
           <Image src="/logo.svg" alt="Deccan Dental Sleep Center" width={180} height={62} className="object-contain" priority />
         </Link>

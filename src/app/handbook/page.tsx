@@ -335,12 +335,12 @@ function HandbookPageBody({ identity }: { identity: AppIdentity }) {
   const activeDoc = documents.find((d) => d.slug === activeSlug);
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <header className="mb-4 print:hidden">
-          <h1 className="text-2xl font-bold">Employee Handbook</h1>
-          <p className="text-sm text-slate-500 mt-1">Read, search, and sign the current handbook and arbitration agreement.</p>
+          <h1 className="page-title">Employee Handbook</h1>
+          <p className="page-subtitle">Read, search, and sign the current handbook and arbitration agreement.</p>
         </header>
 
         {loading ? <p className="text-slate-400 text-sm">Loading…</p> : (
