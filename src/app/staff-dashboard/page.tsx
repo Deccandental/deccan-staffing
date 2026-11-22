@@ -3,6 +3,7 @@ import { todayStr as practiceToday } from "@/lib/today";
 
 import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
+import ChangePinForm from "@/components/ChangePinForm";
 import { Employee } from "@/types/employee";
 import { loadStaff, updateOwnProfile } from "@/lib/staffStore";
 import { LeaveRequest } from "@/types/leave";
@@ -96,6 +97,7 @@ const EMPTY_CERT_FORM: CertFormState = { title: "", expirationDate: "", ceHours:
 function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout: () => void }) {
   const isManager = identity.canAdmin;
   const [staff, setStaff] = useState<Employee[]>([]);
+  const [changingPin, setChangingPin] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(identity.mode === "staff" ? (identity.employeeId ?? null) : null);
   // Documents this person has been asked to review and hasn't yet (shown as a chip with the other warnings).
   const [reviewCounts, setReviewCounts] = useState<{ pending: number; overdue: number }>({ pending: 0, overdue: 0 });
@@ -579,6 +581,27 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                         className="text-xs font-semibold mt-1 hover:underline" style={{ color: "#e8622a" }}>
                         Edit my name or email
                       </button>
+                    )}
+                    {identity.mode === "staff" && identity.employeeId === selectedEmployee.id && (
+                      <>
+                        <span className="text-xs mx-2" style={{ color: "rgba(74,66,56,0.3)" }}>·</span>
+                        <button onClick={() => setChangingPin((v) => !v)}
+                          className="text-xs font-semibold mt-1 hover:underline" style={{ color: "#e8622a" }}>
+                          Change my PIN
+                        </button>
+                      </>
+                    )}
+                    {changingPin && (
+                      <div className="max-w-sm mx-auto mt-4 rounded-2xl bg-white p-5 shadow text-left">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm font-bold" style={{ color: "#4A4238" }}>Change my PIN</h3>
+                          <button onClick={() => setChangingPin(false)} className="text-xs text-slate-400 hover:underline">Close</button>
+                        </div>
+                        <ChangePinForm
+                          intro="Enter your current PIN, then choose a new 6-digit one. Don't share it with anyone."
+                          onDone={() => setChangingPin(false)}
+                        />
+                      </div>
                     )}
                   </>
                 )}
