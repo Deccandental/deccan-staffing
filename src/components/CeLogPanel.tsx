@@ -188,7 +188,7 @@ export default function CeLogPanel({
 
   return (
     <div className="mt-3">
-      <button onClick={() => setOpen((o) => !o)} className="text-xs font-semibold hover:underline print:hidden" style={{ color: "#3C3489" }}>
+      <button onClick={() => setOpen((o) => !o)} className="text-xs font-semibold hover:underline print:hidden" style={{ color: "#C24E1C" }}>
         {open ? "▼" : "▶"} CE log — every course and certificate that earned credit
       </button>
 

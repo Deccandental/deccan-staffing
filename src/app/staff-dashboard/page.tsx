@@ -564,7 +564,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   </div>
                 ) : (
                   <>
-                    <h2 className="text-3xl font-bold" style={{ color: "#4A4238" }}>{selectedEmployee.name}</h2>
+                    <h2 className="text-3xl font-bold" style={{ color: "var(--text-strong)" }}>{selectedEmployee.name}</h2>
                     <p className="text-sm mt-1" style={{ color: "rgba(74,66,56,0.55)" }}>
                       {selectedEmployee.specialty ?? selectedEmployee.role}{selectedEmployee.email ? ` · ${selectedEmployee.email}` : ""}
                     </p>
@@ -921,8 +921,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
 
-            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(55,138,221,0.12)", borderTop: "4px solid #378ADD" }}>
-              <h2 className="font-bold text-center mb-3" style={{ color: "#185FA5" }}>📅 Upcoming Shifts</h2>
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "var(--card-shadow)", border: "1px solid var(--card-border)" }}>
+              <h2 className="card-title mb-3">Upcoming Shifts</h2>
               {shifts.length === 0 ? (
                 <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No upcoming shifts scheduled.</p>
               ) : (
@@ -942,10 +942,10 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
-            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(127,119,221,0.14)", borderTop: "4px solid #7F77DD" }}>
-              <h2 className="font-bold text-center mb-3" style={{ color: "#3C3489" }}>📝 Leave Requests</h2>
+            <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "var(--card-shadow)", border: "1px solid var(--card-border)" }}>
+              <h2 className="card-title mb-3">Leave Requests</h2>
               <div className="text-center mb-3">
-                <a href="/leave" className="inline-block rounded-full px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#534AB7" }}>
+                <a href="/leave" className="inline-block rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#E8622A" }}>
                   + Submit Leave Request
                 </a>
               </div>
@@ -971,8 +971,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               )}
             </div>
 
-            <div id="events-card" className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(216,90,48,0.14)", borderTop: "4px solid #D85A30" }}>
-              <h2 className="font-bold text-center mb-3" style={{ color: "#993C1D" }}>📌 Events</h2>
+            <div id="events-card" className="rounded-2xl bg-white p-5" style={{ boxShadow: "var(--card-shadow)", border: "1px solid var(--card-border)" }}>
+              <h2 className="card-title mb-3">Events</h2>
               {events.length === 0 ? (
                 <p className="text-sm text-center" style={{ color: "rgba(74,66,56,0.4)" }}>No upcoming events.</p>
               ) : (
@@ -1038,8 +1038,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             </div>
 
             <div className="lg:col-span-3 grid gap-5 lg:grid-cols-2">
-            <div id="certifications-card" className={`rounded-2xl bg-white p-5 ${selectedEmployee && getApplicableRoles(selectedEmployee).length > 0 ? "" : "lg:col-span-2"}`} style={{ boxShadow: "0 8px 24px rgba(29,158,117,0.14)", borderTop: "4px solid #1D9E75" }}>
-              <h2 className="font-bold text-center mb-3" style={{ color: "#0F6E56" }}>📋 Certificates</h2>
+            <div id="certifications-card" className={`rounded-2xl bg-white p-5 ${selectedEmployee && getApplicableRoles(selectedEmployee).length > 0 ? "" : "lg:col-span-2"}`} style={{ boxShadow: "var(--card-shadow)", border: "1px solid var(--card-border)" }}>
+              <h2 className="card-title mb-3">Certificates</h2>
 
               {selectedEmployee && (
                 <RequiredCertsSection
@@ -1058,7 +1058,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   Other documents on file ({otherCerts.length})
                 </button>
                 {!showCertForm && (
-                  <button onClick={openNewCert} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#0F6E56" }}>
+                  <button onClick={openNewCert} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#E8622A" }}>
                     + Add Certification
                   </button>
                 )}
@@ -1241,8 +1241,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
             </div>
 
             {selectedEmployee && getApplicableRoles(selectedEmployee).length > 0 && (
-              <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(127,119,221,0.14)", borderTop: "4px solid #7F77DD" }}>
-                <h2 className="font-bold text-center mb-3" style={{ color: "#3C3489" }}>🎓 CE Courses</h2>
+              <div className="rounded-2xl bg-white p-5" style={{ boxShadow: "var(--card-shadow)", border: "1px solid var(--card-border)" }}>
+                <h2 className="card-title mb-3">CE Courses</h2>
                 <RequiredCertsSection
                   employee={selectedEmployee} certs={certs} requiredTypes={requiredTypesForCerts}
                   ceEntries={ceEntriesForCerts}
@@ -1275,8 +1275,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 entry is ever loaded here — the private note is for managers
                 and never reaches this page. */}
             {myNotes.length > 0 && (
-              <div className="lg:col-span-3 rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(24,95,165,0.14)", borderTop: "4px solid #185FA5" }}>
-                <h2 className="font-bold mb-3" style={{ color: "#185FA5" }}>🗒️ Notes from your check-ins and reviews</h2>
+              <div className="lg:col-span-3 rounded-2xl bg-white p-5" style={{ boxShadow: "var(--card-shadow)", border: "1px solid var(--card-border)" }}>
+                <h2 className="card-title mb-3">Notes from your check-ins and reviews</h2>
                 <div className="space-y-2">
                   {myNotes.map((n) => (
                     <div key={n.id} className="rounded-xl px-3 py-2.5" style={{ background: "#F4F8FC" }}>
@@ -1300,9 +1300,9 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 about. Surfacing the leaders here keeps it visible, and the
                 unranked count gives people a reason to go and vote. */}
             {wishlistItems.length > 0 && (
-              <div className="lg:col-span-3 rounded-2xl bg-white p-5" style={{ boxShadow: "0 8px 24px rgba(216,168,48,0.16)", borderTop: "4px solid #D8A830" }}>
+              <div className="lg:col-span-3 rounded-2xl bg-white p-5" style={{ boxShadow: "var(--card-shadow)", border: "1px solid var(--card-border)" }}>
                 <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-                  <h2 className="font-bold" style={{ color: "#8A6A12" }}>⭐ Team Wishlist — top requests</h2>
+                  <h2 className="card-title">Team Wishlist — top requests</h2>
                   <a href="/wishlist" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition" style={{ backgroundColor: "#D8A830" }}>
                     {wishlistItems.some((i) => i.myRank != null) ? "Review my rankings →" : "Rank your top 5 →"}
                   </a>
