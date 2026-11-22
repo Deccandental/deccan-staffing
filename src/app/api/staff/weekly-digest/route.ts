@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { isCron } from "@/lib/routeAuth";
+import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
 import { sendStaffWeeklyDigest } from "@/lib/staffDigestEmail";
 import { loadAllSlots, computeCheckinStatus } from "@/lib/checkinsStore";
 import { computeRequiredCertStatuses, type RequiredCertRole, type RequiredCertType, type CeCourseEntry } from "@/lib/requiredCertsStore";
+import { esc } from "@/lib/html";
 
 function daysUntil(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -35,15 +37,7 @@ function mapCeRow(row: any): CeCourseEntry {
 }
 
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    }
-  } else {
-    console.warn("CRON_SECRET is not set — /api/staff/weekly-digest is unauthenticated");
-  }
+  if (!isCron(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
   const [{ data: staffRows }, { data: certRows }, { data: docs }, { data: eventRows }, checkinSlots] = await Promise.all([
     // Role and specialty are needed to work out which requirements apply to
@@ -89,8 +83,8 @@ export async function GET(req: NextRequest) {
     for (const cert of myCerts) {
       if (!cert.expiration_date) continue;
       const remaining = daysUntil(cert.expiration_date);
-      if (remaining < 0) items.push(`<strong>Certification expired:</strong> ${cert.title} (expired ${Math.abs(remaining)} day${Math.abs(remaining) === 1 ? "" : "s"} ago)`);
-      else if (remaining <= 60) items.push(`<strong>Certification expiring:</strong> ${cert.title} — ${remaining} day${remaining === 1 ? "" : "s"} left`);
+      if (remaining < 0) items.push(`<strong>Certification expired:</strong> ${esc(cert.title)} (expired ${Math.abs(remaining)} day${Math.abs(remaining) === 1 ? "" : "s"} ago)`);
+      else if (remaining <= 60) items.push(`<strong>Certification expiring:</strong> ${esc(cert.title)} — ${remaining} day${remaining === 1 ? "" : "s"} left`);
     }
 
     // Requirements with nothing on file at all. Previously invisible here,
@@ -121,7 +115,7 @@ export async function GET(req: NextRequest) {
       const isCertKind = req.kind === "license" || req.kind === "standalone";
       if (isCertKind) {
         const onFile = myCerts.some((c) => c.title === req.title);
-        if (!onFile) items.push(`<strong>Certificate missing:</strong> ${req.title} — nothing on file yet`);
+        if (!onFile) items.push(`<strong>Certificate missing:</strong> ${esc(req.title)} — nothing on file yet`);
       }
     }
 
@@ -147,11 +141,11 @@ export async function GET(req: NextRequest) {
         if (k === "total_ce_hours") {
           const target = st.targetHours ?? 0;
           const left = Math.round((target - st.totalHoursInWindow) * 100) / 100;
-          ceLines.push(`<strong>${st.type.title}:</strong> ${left} of ${target} hrs still needed (${Math.round(st.totalHoursInWindow * 100) / 100} logged)`);
+          ceLines.push(`<strong>${esc(st.type.title)}:</strong> ${left} of ${target} hrs still needed (${Math.round(st.totalHoursInWindow * 100) / 100} logged)`);
         } else if (k === "one_time_ce") {
-          ceLines.push(`<strong>${st.type.title}:</strong> not yet completed`);
+          ceLines.push(`<strong>${esc(st.type.title)}:</strong> not yet completed`);
         } else {
-          ceLines.push(`<strong>${st.type.title}:</strong> none logged for this renewal period`);
+          ceLines.push(`<strong>${esc(st.type.title)}:</strong> none logged for this renewal period`);
         }
       }
       if (ceLines.length > 0) {
@@ -162,7 +156,7 @@ export async function GET(req: NextRequest) {
     if (!emp.exempt_from_policy_signing) {
       for (const dr of docRequirements) {
         if (dr.restrictedToEmployeeId != null && dr.restrictedToEmployeeId !== emp.id) continue;
-        if (!dr.signedIds.has(emp.id)) items.push(`<strong>Signature needed:</strong> ${dr.docTitle} (${dr.cycleLabel})`);
+        if (!dr.signedIds.has(emp.id)) items.push(`<strong>Signature needed:</strong> ${esc(dr.docTitle)} (${esc(dr.cycleLabel)})`);
       }
     }
 
@@ -171,13 +165,13 @@ export async function GET(req: NextRequest) {
       if (!invited) continue;
       const remaining = daysUntil(ev.date);
       if (remaining >= 0 && remaining <= 21) {
-        items.push(`<strong>${ev.mandatory ? "Mandatory event" : "Event"}:</strong> ${ev.title} on ${new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })}`);
+        items.push(`<strong>${ev.mandatory ? "Mandatory event" : "Event"}:</strong> ${esc(ev.title)} on ${new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })}`);
         // Only nudge if this event asks for an RSVP and this person hasn't
         // answered yet — someone who already replied needs no reminder.
         if (ev.rsvp_enabled) {
           const answered = (rsvpRows ?? []).some((r) => r.event_id === ev.id && r.employee_id === emp.id);
           if (!answered) {
-            items.push(`<strong>RSVP needed:</strong> let us know if you're attending ${ev.title} — answer on your Staff Dashboard`);
+            items.push(`<strong>RSVP needed:</strong> let us know if you're attending ${esc(ev.title)} — answer on your Staff Dashboard`);
           }
         }
       }
@@ -186,7 +180,7 @@ export async function GET(req: NextRequest) {
     if (!emp.exempt_from_checkin) {
       const checkinStatus = computeCheckinStatus(emp.id, checkinSlots, today);
       if (checkinStatus.upcomingSlot) {
-        items.push(`<strong>Check-in scheduled:</strong> ${new Date(checkinStatus.upcomingSlot.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })} at ${checkinStatus.upcomingSlot.time}`);
+        items.push(`<strong>Check-in scheduled:</strong> ${new Date(checkinStatus.upcomingSlot.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })} at ${esc(checkinStatus.upcomingSlot.time)}`);
       } else if (checkinStatus.isDue) {
         items.push(`<strong>Check-in due:</strong> ${checkinStatus.lastCompletedDate ? "please schedule your next 6-month check-in" : "please schedule your first check-in"} — pick a slot on the Check-Ins page`);
       }

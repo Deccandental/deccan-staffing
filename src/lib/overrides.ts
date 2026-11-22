@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 export interface StaffOverride {
   employeeId: number;
@@ -12,7 +12,7 @@ export interface StaffOverride {
 export async function getOverrides(): Promise<StaffOverride[]> {
   const { data, error } = await supabase.from("overrides").select("*");
   if (error) { console.error("getOverrides error:", error); return []; }
-  return (data ?? []).map((row) => ({
+  return (data ?? []).map((row: any) => ({
     employeeId: row.employee_id,
     date: row.date,
     reason: row.reason,

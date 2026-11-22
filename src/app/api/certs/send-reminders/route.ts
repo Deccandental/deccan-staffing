@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { isCron } from "@/lib/routeAuth";
+import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
 import { sendCertEmail, CertEmailType } from "@/lib/certEmail";
 import { Certification } from "@/lib/certsStore";
 
@@ -37,15 +38,7 @@ const THRESHOLDS: { days: number; key: string; type: CertEmailType }[] = [
 const EXPIRED_REPEAT_DAYS = 7;
 
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    }
-  } else {
-    console.warn("CRON_SECRET is not set — /api/certs/send-reminders is unauthenticated");
-  }
+  if (!isCron(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
   const { data, error } = await supabase.from("certifications").select("*").not("expiration_date", "is", null);
   if (error) {

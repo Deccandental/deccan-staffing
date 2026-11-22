@@ -1,3 +1,4 @@
+import { esc } from "@/lib/html";
 export async function sendStaffWeeklyDigest(params: {
   employeeName: string;
   employeeEmail: string;
@@ -13,7 +14,7 @@ export async function sendStaffWeeklyDigest(params: {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto;">
       <h2 style="color: #e8622a;">Deccan Dental — Your Weekly Update</h2>
-      <p>Hi ${params.employeeName},</p>
+      <p>Hi ${esc(params.employeeName)},</p>
       ${hasItems ? `
         <p>Here's what needs your attention this week:</p>
         <ul>

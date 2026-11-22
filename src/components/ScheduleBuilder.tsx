@@ -7,7 +7,7 @@ import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getWeekday } from "@/lib/dateUtils";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
-import { loadSchedule, saveDaySchedule, MonthSchedule, AssistantOverrides } from "@/lib/scheduleStore";
+import { loadScheduleOrNull, saveDaySchedule, saveDefaultDayIfMissing, MonthSchedule, AssistantOverrides } from "@/lib/scheduleStore";
 import { resolveDentistAssistants, getDentistSlotOverrides, isOnApprovedLeave } from "@/lib/assistantSlots";
 import { loadHolidays, Holiday } from "@/lib/holidays";
 import { loadLeaveRequests } from "@/lib/leaveStore";
@@ -15,7 +15,7 @@ import { LeaveRequest } from "@/types/leave";
 import { Employee } from "@/types/employee";
 import { TempAssignment, getTempAssignmentsForMonth } from "@/lib/tempAssignments";
 import { TempStaff } from "@/app/temps/page";
-import { supabase } from "@/lib/supabase";
+import { secureData as supabase } from "@/lib/secureData";
 import MonthlyOverview, { DayAssignmentSummary, DayEventSummary } from "./MonthlyOverview";
 import { loadEventsForMonth } from "@/lib/eventsStore";
 import DailyAssignmentPanel from "./DailyAssignmentPanel";
@@ -27,7 +27,7 @@ type View = "build" | "review";
 async function loadTemps(): Promise<TempStaff[]> {
   const { data, error } = await supabase.from("temps").select("*");
   if (error) { console.error("loadTemps error:", error); return []; }
-  return (data ?? []).map((row) => ({
+  return (data ?? []).map((row: any) => ({
     id: row.id, name: row.name, phone: row.phone ?? "", email: row.email ?? "",
     role: row.role, skills: row.skills ?? [], rating: row.rating ?? 0,
     notes: row.notes ?? "", addedAt: row.added_at,
@@ -52,6 +52,8 @@ export default function ScheduleBuilder() {
   const [schedule, setSchedule] = useState<MonthSchedule>({});
   const [dayEvents, setDayEvents] = useState<Record<string, DayEventSummary[]>>({});
   const [loadedYearMonth, setLoadedYearMonth] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [selectedDate, setSelectedDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [staffLoaded, setStaffLoaded] = useState(false);
@@ -91,10 +93,14 @@ export default function ScheduleBuilder() {
   useEffect(() => {
     async function load() {
       const [saved, ta, ev] = await Promise.all([
-        loadSchedule(year, month),
+        loadScheduleOrNull(year, month),
         getTempAssignmentsForMonth(year, month),
         loadEventsForMonth(year, month),
       ]);
+      // A failed load must never look like an empty month: the auto-fill
+      // below would then overwrite every saved assignment with defaults.
+      if (saved == null) { setLoadFailed(true); return; }
+      setLoadFailed(false);
       setSchedule(saved);
       setMonthTempAssignments(ta);
       const grouped: Record<string, DayEventSummary[]> = {};
@@ -106,7 +112,7 @@ export default function ScheduleBuilder() {
       setLoadedYearMonth(`${year}-${month}`);
     }
     load();
-  }, [year, month]);
+  }, [year, month, reloadKey]);
 
   const openDays = generateMonth(year, month, openTuesdays, holidays).filter((d) => d.isOpen);
   // True only once the schedule actually loaded from the DB matches the
@@ -144,8 +150,9 @@ export default function ScheduleBuilder() {
     }
     setSchedule(filled);
     setSaving(true);
+    // Only fills days with no saved row; anything already saved is untouched.
     await Promise.all(toSave.map(({ date, dentists, frontDeskRequired, hygienistsRequired }) =>
-      saveDaySchedule(date, dentists, frontDeskRequired, hygienistsRequired, {})
+      saveDefaultDayIfMissing(date, dentists, frontDeskRequired, hygienistsRequired)
     ));
     setSaving(false);
   }
@@ -437,6 +444,16 @@ export default function ScheduleBuilder() {
   function nextMonth() {
     if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1);
     setSchedule({}); setSelectedDate("");
+  }
+
+  if (loadFailed) {
+    return (
+      <div className="rounded-2xl bg-red-50 border border-red-200 p-6 text-center">
+        <p className="font-semibold text-red-700 mb-1">Couldn&apos;t load this month&apos;s schedule.</p>
+        <p className="text-sm text-red-600 mb-4">Nothing has been changed. Check your connection and try again.</p>
+        <button onClick={() => setReloadKey((k) => k + 1)} className="rounded-xl px-4 py-2 text-sm font-semibold text-white" style={{ backgroundColor: "#e8622a" }}>Try again</button>
+      </div>
+    );
   }
 
   return (

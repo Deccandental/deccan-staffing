@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 export const MAX_RANK = 5;
 // Borda-style weighting: rank 1 is worth the most, rank 5 the least.
@@ -43,7 +43,7 @@ export async function loadWishlistItems(myEmployeeId: number | null): Promise<Wi
     scoreByItem.set(v.item_id, (scoreByItem.get(v.item_id) ?? 0) + rankWeight(v.rank));
     if (myEmployeeId != null && v.employee_id === myEmployeeId) myRankByItem.set(v.item_id, v.rank);
   }
-  return (itemsRes.data ?? []).map((row) =>
+  return (itemsRes.data ?? []).map((row: any) =>
     fromItemRow(row, scoreByItem.get(row.id) ?? 0, myRankByItem.get(row.id) ?? null)
   );
 }

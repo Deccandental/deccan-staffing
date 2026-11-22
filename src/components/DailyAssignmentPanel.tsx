@@ -8,7 +8,7 @@ import { AssistantOverrides } from "@/lib/scheduleStore";
 import { resolveDentistAssistants, resolveFloater, getDentistSlotOverrides, setDentistSlotOverride, clearDentistSlotOverride } from "@/lib/assistantSlots";
 import { TempStaff } from "@/app/temps/page";
 import { TempAssignment, getTempAssignments, addTempAssignment, removeTempAssignment } from "@/lib/tempAssignments";
-import { supabase } from "@/lib/supabase";
+import { secureData as supabase } from "@/lib/secureData";
 import { isOnApprovedLeave } from "@/lib/assistantSlots";
 
 interface Props {
@@ -38,7 +38,7 @@ const ROLE_COLORS: Record<string, string> = {
 async function loadTemps(): Promise<TempStaff[]> {
   const { data, error } = await supabase.from("temps").select("*").order("rating", { ascending: false });
   if (error) { console.error("loadTemps error:", error); return []; }
-  return (data ?? []).map((row) => ({
+  return (data ?? []).map((row: any) => ({
     id: row.id, name: row.name, phone: row.phone ?? "", email: row.email ?? "",
     role: row.role, skills: row.skills ?? [], rating: row.rating ?? 0,
     notes: row.notes ?? "", addedAt: row.added_at,

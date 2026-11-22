@@ -1,5 +1,6 @@
 "use client";
 
+import { sessionHeaders } from "@/lib/secureData";
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate from "@/components/AppIdentityGate";
@@ -89,7 +90,7 @@ function EventsPageBody() {
     if (announceNow) {
       try {
         await fetch("/api/events/notify", {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", headers: sessionHeaders(),
           body: JSON.stringify({ eventId: saved.id }),
         });
       } catch {}

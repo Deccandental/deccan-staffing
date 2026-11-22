@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
 import { storeSessionToken, clearSessionToken, hasSessionToken } from "@/lib/secureData";
+import ChangePinForm from "@/components/ChangePinForm";
 
 export interface AppIdentity {
   mode: "super" | "staff";
@@ -34,9 +35,16 @@ export default function AppIdentityGate({ children }: Props) {
   const [staffLoaded, setStaffLoaded] = useState(false);
   const [code, setCode] = useState("");
   const [error, setError] = useState(false);
+  const [errorText, setErrorText] = useState("");
+  // Staff details beyond names/schedules are only returned to a logged-in
+  // session, so only re-sync permissions from a list loaded with one.
+  const [staffHasDetails, setStaffHasDetails] = useState(false);
+  // Set straight after a login with an old 4-digit PIN: ask for a new one.
+  const [pinPrompt, setPinPrompt] = useState<string | null>(null);
 
   useEffect(() => {
-    loadStaff().then((s) => { setStaff(s); setStaffLoaded(true); });
+    const withSession = hasSessionToken();
+    loadStaff().then((s) => { setStaff(s); setStaffLoaded(true); setStaffHasDetails(withSession); });
     try {
       const saved = sessionStorage.getItem(IDENTITY_SESSION_KEY);
       // Only trust a stored session if its token is still present —
@@ -55,7 +63,7 @@ export default function AppIdentityGate({ children }: Props) {
   // a later change to someone's email or permissions wouldn't take effect
   // until they manually logged out and back in.
   useEffect(() => {
-    if (!staffLoaded || !identity || identity.mode !== "staff" || identity.employeeId == null) return;
+    if (!staffLoaded || !staffHasDetails || !identity || identity.mode !== "staff" || identity.employeeId == null) return;
     const match = staff.find((e) => e.id === identity.employeeId && !e.archived);
     if (!match) return;
     const fresh: AppIdentity = {
@@ -67,7 +75,7 @@ export default function AppIdentityGate({ children }: Props) {
     };
     if (JSON.stringify(fresh) !== JSON.stringify(identity)) persist(fresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staffLoaded, staff, identity?.employeeId]);
+  }, [staffLoaded, staffHasDetails, staff, identity?.employeeId]);
 
   function persist(id: AppIdentity) {
     setIdentity(id);
@@ -83,8 +91,11 @@ export default function AppIdentityGate({ children }: Props) {
       setCode("");
       return;
     }
-    const result = await res.json();
-    if (result.token) storeSessionToken(result.token);
+    const result = await res.json().catch(() => ({}));
+    if (result.token) {
+      storeSessionToken(result.token);
+      loadStaff().then((s) => { setStaff(s); setStaffHasDetails(true); });
+    }
     if (result.isSuper) {
       persist({
         mode: "super",
@@ -101,8 +112,11 @@ export default function AppIdentityGate({ children }: Props) {
         canManageCerts: !!match.canManageCerts, canManagePayroll: !!match.canManagePayroll,
       canManageStaffNotes: !!match.canManageStaffNotes,
       });
+      if (result.pinNeedsUpdate) setPinPrompt(code);
+      setCode("");
     } else {
       setError(true);
+      setErrorText(typeof result.error === "string" ? result.error : "");
       setCode("");
     }
   }
@@ -133,13 +147,13 @@ export default function AppIdentityGate({ children }: Props) {
               onChange={(e) => setCode(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleLogin()}
               placeholder="Enter PIN or passcode"
-              maxLength={6}
+              maxLength={12}
               className={`w-full rounded-xl border px-4 py-3 text-center text-xl tracking-widest font-bold focus:outline-none mb-3 ${
                 error ? "border-red-300 bg-red-50" : "border-gray-200"
               }`}
               style={{ fontSize: 24 }}
             />
-            {error && <p className="text-red-500 text-sm mb-3">Not recognized.</p>}
+            {error && <p className="text-red-500 text-sm mb-3">{errorText || "Not recognized."}</p>}
             <button
               onClick={handleLogin}
               className="w-full rounded-xl py-3 font-semibold text-white hover:opacity-90"
@@ -147,6 +161,26 @@ export default function AppIdentityGate({ children }: Props) {
             >
               Continue
             </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (pinPrompt != null && identity.mode === "staff") {
+    return (
+      <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+        <Sidebar />
+        <div className="pt-16 lg:pt-0 lg:ml-64 flex items-center justify-center min-h-screen px-4">
+          <div className="rounded-2xl bg-white p-6 sm:p-10 shadow-lg w-full max-w-sm">
+            <div className="text-5xl mb-4 text-center">🔑</div>
+            <h1 className="text-2xl font-bold mb-1 text-center" style={{ color: "#5a5a5a" }}>Please choose a new PIN</h1>
+            <ChangePinForm
+              knownCurrentPin={pinPrompt}
+              intro="PINs are now 6 digits, to keep everyone's information safe. Your old PIN still works until you change it."
+              onDone={() => setPinPrompt(null)}
+              onSkip={() => setPinPrompt(null)}
+            />
           </div>
         </div>
       </main>

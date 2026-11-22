@@ -1,5 +1,5 @@
 import { Employee } from "@/types/employee";
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 import { getSessionToken } from "./secureData";
 
 export type DentistPrefs = Record<number, number[]>;
@@ -83,7 +83,7 @@ async function staffWrite(body: Record<string, unknown>): Promise<{ ok: boolean;
   }
 }
 
-export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee | null> {
+export async function addEmployee(emp: Omit<Employee, "id">): Promise<{ employee: Employee | null; error?: string }> {
   const payload = {
     name: emp.name, role: emp.role, specialty: emp.specialty ?? null,
     color: emp.color, skills: emp.skills, email: emp.email ?? "", pin: emp.pin || null,
@@ -94,8 +94,8 @@ export async function addEmployee(emp: Omit<Employee, "id">): Promise<Employee |
     hire_date: emp.hireDate || null, growth_bonus_eligible: emp.growthBonusEligible ?? false, growth_bonus_multiplier: emp.growthBonusMultiplier ?? 1, growth_bonus_start_date: emp.growthBonusStartDate || null, net_production_start_date: emp.netProductionStartDate || null, pv_bonus_eligible: emp.pvBonusEligible ?? false, hygiene_bonus_eligible: emp.hygieneBonusEligible ?? false, net_production_bonus_percent: emp.netProductionBonusPercent ?? 30, ho_bonus_eligible: emp.hoBonusEligible ?? false, exempt_from_policy_signing: emp.exemptFromPolicySigning ?? false, exempt_from_checkin: emp.exemptFromCheckin ?? false, sedation_permit: emp.sedationPermit ?? "none", ce_first_renewal_exempt: emp.ceFirstRenewalExempt ?? false, employment_type: emp.employmentType ?? "full_time",
   };
   const res = await staffWrite({ action: "insert", payload });
-  if (!res.ok || !res.data) { console.error("addEmployee error:", res.error); return null; }
-  return rowToEmployee(res.data);
+  if (!res.ok || !res.data) { console.error("addEmployee error:", res.error); return { employee: null, error: res.error }; }
+  return { employee: rowToEmployee(res.data) };
 }
 
 export async function updateEmployee(emp: Employee): Promise<{ ok: boolean; error?: string }> {

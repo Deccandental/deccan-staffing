@@ -15,7 +15,7 @@ import { loadHolidays, Holiday } from "@/lib/holidays";
 import { Employee } from "@/types/employee";
 import { TempAssignment, getTempAssignmentsForMonth } from "@/lib/tempAssignments";
 import { TempStaff } from "@/app/temps/page";
-import { supabase } from "@/lib/supabase";
+import { secureData as supabase } from "@/lib/secureData";
 import PrintSchedule from "./PrintSchedule";
 import PrintIndividualScheduleCalendar from "./PrintIndividualScheduleCalendar";
 
@@ -51,7 +51,7 @@ interface DayInfo {
 async function loadTemps(): Promise<TempStaff[]> {
   const { data, error } = await supabase.from("temps").select("*");
   if (error) { console.error("loadTemps error:", error); return []; }
-  return (data ?? []).map((row) => ({
+  return (data ?? []).map((row: any) => ({
     id: row.id, name: row.name, phone: row.phone ?? "", email: row.email ?? "",
     role: row.role, skills: row.skills ?? [], rating: row.rating ?? 0,
     notes: row.notes ?? "", addedAt: row.added_at,

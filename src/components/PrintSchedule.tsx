@@ -8,7 +8,7 @@ import { getOpenTuesdays } from "@/lib/openTuesdays";
 import { getTempAssignmentsForMonth } from "@/lib/tempAssignments";
 import { getOverrides } from "@/lib/overrides";
 import { resolveDentistAssistants } from "@/lib/assistantSlots";
-import { supabase } from "@/lib/supabase";
+import { secureData as supabase } from "@/lib/secureData";
 import { MonthSchedule } from "@/lib/scheduleStore";
 
 interface Props {
@@ -111,15 +111,15 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
       // Get temp assignments for this day
       const dayTemps = tempsByDate[day.date] ?? [];
       const tempFD = dayTemps.filter((t) => t.role === "Front Desk").map((t) => {
-        const temp = temps.find((tm) => tm.id === t.tempId);
+        const temp = temps.find((tm: any) => tm.id === t.tempId);
         return temp ? `${temp.name.split(" ")[0]}*` : "Temp*";
       });
       const tempHyg = dayTemps.filter((t) => t.role === "Hygienist").map((t) => {
-        const temp = temps.find((tm) => tm.id === t.tempId);
+        const temp = temps.find((tm: any) => tm.id === t.tempId);
         return temp ? `${temp.name.split(" ")[0]}*` : "Temp*";
       });
       const tempAsst = dayTemps.filter((t) => t.role === "Assistant" || t.role === "RDA").map((t) => {
-        const temp = temps.find((tm) => tm.id === t.tempId);
+        const temp = temps.find((tm: any) => tm.id === t.tempId);
         return temp ? `${temp.name.split(" ")[0]}*` : "Temp*";
       });
 

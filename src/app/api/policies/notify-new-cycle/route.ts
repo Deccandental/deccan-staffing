@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { sessionFrom, hasPerm } from "@/lib/routeAuth";
+import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
 import { sendPolicySignReminder } from "@/lib/policyEmail";
 
 export async function POST(req: NextRequest) {
+  if (!hasPerm(sessionFrom(req), "admin")) return NextResponse.json({ ok: false, error: "Not permitted." }, { status: 403 });
   const { requirementId } = await req.json();
   if (!requirementId) return NextResponse.json({ ok: false, error: "missing requirementId" }, { status: 400 });
 

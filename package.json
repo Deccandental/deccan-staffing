@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:gateway": "npx --yes tsx --tsconfig tsconfig.json tests/gateway.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 export interface Holiday {
   date: string;
@@ -9,7 +9,7 @@ export interface Holiday {
 export async function loadHolidays(): Promise<Holiday[]> {
   const { data, error } = await supabase.from("holidays").select("*").order("date");
   if (error) { console.error("loadHolidays error:", error); return []; }
-  return (data ?? []).map((row) => ({ date: row.date, name: row.name, type: row.type }));
+  return (data ?? []).map((row: any) => ({ date: row.date, name: row.name, type: row.type }));
 }
 
 export async function addHoliday(holiday: Holiday): Promise<void> {

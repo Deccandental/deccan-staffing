@@ -21,6 +21,9 @@ if (!serviceRoleKey) {
   );
 }
 
-export const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey ?? "", {
+// A placeholder (never a real key) keeps the module loadable when the key is
+// missing — e.g. during `next build` in an environment that doesn't have it —
+// instead of crashing the whole build. Requests then fail with an auth error.
+export const supabaseAdmin = createClient(supabaseUrl || "http://supabase-url-not-set.invalid", serviceRoleKey || "service-role-key-not-set", {
   auth: { autoRefreshToken: false, persistSession: false },
 });

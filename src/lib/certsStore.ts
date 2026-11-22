@@ -1,4 +1,5 @@
-import { supabase } from "./supabase";
+import { supabase as storageClient } from "./supabase";
+import { secureData as supabase, getSessionToken } from "./secureData";
 
 export type CertOwnerType = "personnel" | "business";
 
@@ -117,10 +118,23 @@ export async function uploadCertFile(file: File): Promise<{ url: string; name: s
   }
 
   const ext = toUpload.name.includes(".") ? toUpload.name.split(".").pop() : "";
-  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext ? `.${ext}` : ""}`;
-  const { error } = await supabase.storage.from("Certificates").upload(path, toUpload);
+  // The server hands out a one-time upload slot; the bucket refuses direct uploads.
+  let slot: { path: string; token: string; publicUrl: string };
+  try {
+    const res = await fetch("/api/certs/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-session-token": getSessionToken() },
+      body: JSON.stringify({ size: toUpload.size, ext }),
+    });
+    const json = await res.json();
+    if (!res.ok) return { error: json.error ?? "Upload failed. Please try again." };
+    slot = json;
+  } catch {
+    return { error: "Upload failed. Please try again." };
+  }
+  const { error } = await storageClient.storage.from("Certificates").uploadToSignedUrl(slot.path, slot.token, toUpload);
   if (error) { console.error("uploadCertFile error:", error); return { error: "Upload failed. Please try again." }; }
-  const { data } = supabase.storage.from("Certificates").getPublicUrl(path);
+  const data = { publicUrl: slot.publicUrl };
   return { url: data.publicUrl, name: originalName };
 }
 

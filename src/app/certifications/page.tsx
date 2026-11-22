@@ -1,5 +1,6 @@
 "use client";
 
+import { sessionHeaders } from "@/lib/secureData";
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Employee } from "@/types/employee";
@@ -780,7 +781,7 @@ function CertificationsPageBody({ identity, logout }: { identity: AppIdentity; l
     setNotifyMsg((m) => ({ ...m, [id]: "Sending…" }));
     try {
       const res = await fetch("/api/certs/notify", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: sessionHeaders(),
         body: JSON.stringify({ certId: id }),
       });
       const data = await res.json();

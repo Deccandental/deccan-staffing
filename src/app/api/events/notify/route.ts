@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { sessionFrom, hasPerm } from "@/lib/routeAuth";
+import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
 import { sendEventEmail } from "@/lib/eventEmail";
 import { StaffEvent } from "@/lib/eventsStore";
 
@@ -26,6 +27,7 @@ function fromRow(row: any): StaffEvent {
 
 export async function POST(req: NextRequest) {
   try {
+    if (!hasPerm(sessionFrom(req), "events")) return NextResponse.json({ ok: false, error: "Not permitted." }, { status: 403 });
     const { eventId } = await req.json();
     if (!eventId) return NextResponse.json({ ok: false, error: "eventId required" }, { status: 400 });
 

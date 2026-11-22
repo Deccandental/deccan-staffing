@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 /**
  * A running log of notes about each staff member.
@@ -67,7 +67,7 @@ export async function loadSharedStaffNotes(employeeId: number): Promise<StaffNot
     .neq("shared_note", "")
     .order("note_date", { ascending: false });
   if (error) { console.error("loadSharedStaffNotes error:", error); return []; }
-  return (data ?? []).map((row) => ({ ...fromRow(row), privateNote: "" }));
+  return (data ?? []).map((row: any) => ({ ...fromRow(row), privateNote: "" }));
 }
 
 /** Full notes including the private half — managers only. */

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate from "@/components/AppIdentityGate";
 import AccessDenied from "@/components/AccessDenied";
-import { supabase } from "@/lib/supabase";
+import { secureData as supabase } from "@/lib/secureData";
 import { addEmployee } from "@/lib/staffStore";
 import { EmployeeRole } from "@/types/employee";
 
@@ -150,7 +150,7 @@ function TempsPageBody() {
       archived: false,
       defaultSchedule: { monday: true, tuesday: false, wednesday: true, thursday: true, friday: true },
     });
-    if (!created) {
+    if (!created.employee) {
       alert("Something went wrong converting this person to staff. They were not changed.");
       setConvertingToStaff(false);
       return;

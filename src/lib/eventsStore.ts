@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { secureData as supabase } from "./secureData";
 
 export interface StaffEvent {
   id: string;

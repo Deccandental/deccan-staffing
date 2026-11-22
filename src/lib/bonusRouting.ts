@@ -104,6 +104,14 @@ export async function recordBonusPayment(opts: {
       // treating the payment date as a single-day period.
       const start = opts.payPeriodStart ?? paidDate;
       const end = opts.payPeriodEnd ?? paidDate;
+      // Saving payroll with the bonus left blank must not wipe an amount
+      // already recorded on the Hygiene tab for this period.
+      if (!(amount > 0)) {
+        const { data: existing, error: readError } = await supabase.from("hygiene_bonus_entries")
+          .select("amount_paid").eq("employee_id", employeeId).eq("pay_period_start", start).maybeSingle();
+        if (readError) return { ok: false, error: readError.message };
+        if (existing && Number(existing.amount_paid) > 0) return { ok: true };
+      }
       const { error } = await supabase.from("hygiene_bonus_entries").upsert({
         employee_id: employeeId, pay_period_start: start, pay_period_end: end,
         amount_paid: amount, updated_at: new Date().toISOString(),

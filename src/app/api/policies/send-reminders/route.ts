@@ -1,19 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { isCron } from "@/lib/routeAuth";
+import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
 import { sendPolicySignReminder } from "@/lib/policyEmail";
 
 const REMINDER_THROTTLE_DAYS = 6;
 
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    }
-  } else {
-    console.warn("CRON_SECRET is not set — /api/policies/send-reminders is unauthenticated");
-  }
+  if (!isCron(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
   const { data: docs, error: docsErr } = await supabase.from("policy_documents").select("*");
   if (docsErr) { console.error("policies/send-reminders load docs error:", docsErr); return NextResponse.json({ ok: false }, { status: 500 }); }

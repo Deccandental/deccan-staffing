@@ -1,5 +1,6 @@
-import { supabase } from "./supabase";
+import { supabaseAdmin as supabase } from "./supabaseAdmin";
 import { Certification } from "./certsStore";
+import { esc, safeUrl } from "@/lib/html";
 
 export type CertEmailType = "reminder-7day" | "reminder-30day" | "reminder-60day" | "reminder-expired" | "manual";
 
@@ -53,12 +54,12 @@ export async function sendCertEmail(cert: Certification, type: CertEmailType): P
               <h1 style="color:white;margin:0;font-size:20px">${label}</h1>
             </div>
             <div style="background:#f9f9f9;padding:24px;border-radius:0 0 12px 12px">
-              <p style="font-size:18px;font-weight:bold;margin:0 0 4px">${cert.title}</p>
+              <p style="font-size:18px;font-weight:bold;margin:0 0 4px">${esc(cert.title)}</p>
               <p style="color:#888;font-size:13px;margin:0 0 12px">${cert.ownerType === "business" ? "Business license" : "Personnel certification"}</p>
               <table style="width:100%;border-collapse:collapse;margin:16px 0">
                 <tr><td style="padding:8px;border-bottom:1px solid #eee;color:#888">Expires</td><td style="padding:8px;border-bottom:1px solid #eee;font-weight:bold">${expLabel}</td></tr>
               </table>
-              <a href="${cert.fileUrl}" style="display:inline-block;background:#e8622a;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;margin-top:8px">View Document →</a>
+              <a href="${safeUrl(cert.fileUrl)}" style="display:inline-block;background:#e8622a;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;margin-top:8px">View Document →</a>
               <p style="color:#888;font-size:12px;margin-top:24px">Deccan Dental Sleep Center</p>
             </div>
           </div>
