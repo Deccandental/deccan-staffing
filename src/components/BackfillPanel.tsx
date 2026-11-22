@@ -67,7 +67,7 @@ export default function BackfillPanel({ accounts, cards, loans, refreshAll }: {
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="font-semibold text-sm text-slate-700 mb-1">Past statement balance</h3>
+        <h3 className="card-title-sm mb-1">Past statement balance</h3>
         <div className="flex flex-wrap items-end gap-2">
           <div>
             <label className={lbl}>Account, card or loan</label>
@@ -86,7 +86,7 @@ export default function BackfillPanel({ accounts, cards, loans, refreshAll }: {
       </div>
 
       <div className="border-t border-slate-100 pt-3">
-        <h3 className="font-semibold text-sm text-slate-700 mb-1">Net production by month</h3>
+        <h3 className="card-title-sm mb-1">Net production by month</h3>
         <p className="text-xs text-slate-500 mb-2">The official net production figure for any month, past or present. It feeds the production chart and the goal tracking.</p>
         <div className="flex flex-wrap items-end gap-2">
           <div><label className={lbl}>Month</label><MonthSelect value={pMonth} onChange={setPMonth} className="!py-1.5 !px-2 !text-sm" /></div>

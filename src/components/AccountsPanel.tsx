@@ -167,7 +167,7 @@ export default function AccountsPanel({ allBills, latestBalances, refreshAll, fo
 
       {mode && (
         <div className="rounded-xl border border-slate-200 p-4 space-y-3">
-          <h3 className="font-bold text-sm text-slate-700">{mode.id ? "Edit" : "Add"} {mode.kind === "bank" ? "bank account" : "credit card"}</h3>
+          <h3 className="card-title-sm">{mode.id ? "Edit" : "Add"} {mode.kind === "bank" ? "bank account" : "credit card"}</h3>
           <div className="grid gap-3 sm:grid-cols-3">
             <div><label className={lbl}>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder={mode.kind === "bank" ? "e.g. Wells Fargo Checking" : "e.g. Amex 1234"} className={box} /></div>
             {mode.kind === "bank" ? (

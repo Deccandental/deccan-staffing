@@ -162,7 +162,7 @@ function AdminBody() {
 
           <div className="rounded-2xl bg-white shadow px-5 py-4 space-y-3" onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false); }} onDrop={onDrop}
             style={{ outline: dragging ? "2px dashed #e8622a" : "none", background: dragging ? "#fff7ed" : undefined }}>
-            <h2 className="font-bold text-slate-800">Send a document</h2>
+            <h2 className="card-title">Send a document</h2>
             <div className="flex flex-wrap items-center gap-3">
               <label className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-50">
                 Choose PDF
@@ -188,7 +188,7 @@ function AdminBody() {
             </div>
           </div>
 
-          <h2 className="font-bold text-slate-700 pt-2">Sent documents</h2>
+          <h2 className="card-title pt-2">Sent documents</h2>
           {docs.length === 0 && <p className="text-sm text-slate-400">Nothing sent yet.</p>}
           {docs.map((d) => {
             const mine = assigns.filter((a) => a.doc_id === d.id);

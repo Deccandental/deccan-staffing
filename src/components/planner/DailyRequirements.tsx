@@ -40,7 +40,7 @@ export default function DailyRequirements({ dentistCount, assignments }: Props) 
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
-      <h2 className="mb-2 text-xl font-bold" style={{ color: "#5a5a5a" }}>Staffing Requirements</h2>
+      <h2 className="section-heading mb-2">Staffing Requirements</h2>
       <p className="text-xs text-gray-400 mb-5">Assigned / Required for this day</p>
 
       <div className="space-y-3">

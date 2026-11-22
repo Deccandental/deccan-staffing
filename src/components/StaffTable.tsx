@@ -3,7 +3,7 @@ import { employees } from "../data/employees";
 export default function StaffTable() {
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
-      <h2 className="mb-6 text-2xl font-bold">
+      <h2 className="section-heading mb-6">
         Staff Directory
       </h2>
 

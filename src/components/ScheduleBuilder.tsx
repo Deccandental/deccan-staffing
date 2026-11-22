@@ -502,7 +502,7 @@ export default function ScheduleBuilder() {
           {selectedDate ? (
             <div className="grid gap-6 lg:grid-cols-2">
               <div className="rounded-2xl bg-white p-6 shadow">
-                <h3 className="text-lg font-bold mb-1">
+                <h3 className="card-title mb-1">
                   {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
                 </h3>
                 <p className="text-sm text-slate-400 mb-4">Select which dentists are working today</p>
@@ -611,7 +611,7 @@ export default function ScheduleBuilder() {
           <div className="rounded-2xl bg-white p-6 shadow">
             <div className="flex items-center justify-between mb-2">
               <div>
-                <h2 className="text-2xl font-bold">{formatMonthYear(year, month)} — Schedule Review</h2>
+                <h2 className="section-heading">{formatMonthYear(year, month)} — Schedule Review</h2>
                 <p className="text-slate-500 mt-1">{completedDays} of {totalDays} days fully staffed{warningDays > 0 ? ` · ${warningDays} days have warnings` : ""}</p>
               </div>
               <PrintSchedule year={year} month={month} schedule={schedule} />

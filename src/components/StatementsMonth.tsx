@@ -1040,7 +1040,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged, sectio
       {/* ---------------- Add statement ---------------- */}
       {addOpen && modal(
         <>
-          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Add a statement</h2>{closeX(() => setAddOpen(false))}</div>
+          <div className="flex items-center justify-between"><h2 className="section-heading m-0">Add a statement</h2>{closeX(() => setAddOpen(false))}</div>
           {fileBox(aFile, setAFile, "add-file")}
           <div>
             <label htmlFor="add-vendor" className={lbl}>Vendor</label>
@@ -1116,7 +1116,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged, sectio
       {/* ---------------- Mark paid ---------------- */}
       {payFor && payCalc && modal(
         <>
-          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>{pEditing ? "Edit payment" : "Mark paid"}</h2>{closeX(() => setPayFor(null))}</div>
+          <div className="flex items-center justify-between"><h2 className="section-heading m-0">{pEditing ? "Edit payment" : "Mark paid"}</h2>{closeX(() => setPayFor(null))}</div>
           <p className="text-sm" style={{ color: "#4a4a4a" }}><strong style={{ color: INK }}>{payFor.account_name}</strong>{payFor.invoice_number ? ` · Invoice #${payFor.invoice_number}` : ""} · billed <strong style={{ color: INK }}>{money(payFor.amount)}</strong>{payCalc.prior > 0 && ` · ${money(payCalc.prior)} already paid`}</p>
           <div className="flex gap-3">
             <div className="flex-1"><label htmlFor="pay-date" className={lbl}>Date paid</label><input id="pay-date" type="date" value={pDate} onChange={(e) => setPDate(e.target.value)} className={inputCls} style={inputBorder} /></div>
@@ -1179,7 +1179,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged, sectio
       {/* ---------------- Edit invoice ---------------- */}
       {editInv && modal(
         <>
-          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Edit invoice</h2>{closeX(() => setEditInv(null))}</div>
+          <div className="flex items-center justify-between"><h2 className="section-heading m-0">Edit invoice</h2>{closeX(() => setEditInv(null))}</div>
           <p className="text-xs" style={{ color: "#5f5f5f" }}>The PDF stays as filed.{editInv.paid ? " If it was paid by check, that check on the register is updated too (unless it has already cleared)." : ""}</p>
           <div>
             <label htmlFor="ed-vendor" className={lbl}>Vendor</label>
@@ -1227,7 +1227,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged, sectio
         const into = data.sources.find((x) => x.id === mergeDlg.intoId);
         return modal(
           <>
-            <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Merge vendors</h2>{closeX(() => setMergeDlg(null))}</div>
+            <div className="flex items-center justify-between"><h2 className="section-heading m-0">Merge vendors</h2>{closeX(() => setMergeDlg(null))}</div>
             <p className="text-sm" style={{ color: "#4a4a4a" }}>Everything filed under <strong style={{ color: INK }}>{from?.name}</strong> moves to the vendor you keep, and <strong style={{ color: INK }}>{from?.name}</strong> is removed from your list. Statements and PDFs aren’t deleted.</p>
             <div>
               <label htmlFor="merge-into" className={lbl}>Keep this vendor</label>
@@ -1248,7 +1248,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged, sectio
       {/* ---------------- Edit statement ---------------- */}
       {editStmt && modal(
         <>
-          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>Edit statement</h2>{closeX(() => setEditStmt(null))}</div>
+          <div className="flex items-center justify-between"><h2 className="section-heading m-0">Edit statement</h2>{closeX(() => setEditStmt(null))}</div>
           <p className="text-sm" style={{ color: "#4a4a4a" }}><strong style={{ color: INK }}>{editStmt.account_name}</strong>. The PDF stays as filed.{isAcctKind(editStmt) ? " Changing the balance or month updates Cash Flow too." : ""}</p>
           <div className="flex gap-3">
             <div className="flex-1 min-w-0">
@@ -1270,7 +1270,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged, sectio
       {/* ---------------- Account statement ---------------- */}
       {acctDlg && modal(
         <>
-          <div className="flex items-center justify-between"><h2 className="m-0" style={{ fontFamily: "Poppins, sans-serif", fontWeight: 700, fontSize: 22 }}>File statement</h2>{closeX(() => setAcctDlg(null))}</div>
+          <div className="flex items-center justify-between"><h2 className="section-heading m-0">File statement</h2>{closeX(() => setAcctDlg(null))}</div>
           <p className="text-sm" style={{ color: "#4a4a4a" }}><strong style={{ color: INK }}>{acctDlg.name}</strong> · {mlabel(month)}</p>
           {fileBox(sFile, setSFile, "acct-file")}
           <div>

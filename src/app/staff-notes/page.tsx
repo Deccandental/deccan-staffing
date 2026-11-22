@@ -168,7 +168,7 @@ function StaffNotesBody({ identity }: { identity: AppIdentity }) {
               {/* Everyone, with their most recent note so the list itself
                   shows who hasn't been spoken to in a while. */}
               <div className="rounded-2xl bg-white shadow p-3">
-                <h2 className="font-bold text-slate-700 text-sm px-1 mb-2">Staff</h2>
+                <h2 className="card-title-sm px-1 mb-2">Staff</h2>
                 <div className="space-y-0.5">
                   {staff.map((e) => {
                     const last = notes.filter((n) => n.employeeId === e.id).sort((a, b) => b.noteDate.localeCompare(a.noteDate))[0];
@@ -199,7 +199,7 @@ function StaffNotesBody({ identity }: { identity: AppIdentity }) {
                   <>
                     <div className="rounded-2xl bg-white shadow p-5">
                       <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
-                        <h2 className="font-bold text-slate-700">{selected.name}</h2>
+                        <h2 className="card-title">{selected.name}</h2>
                         {!showForm && (
                           <button onClick={() => startAdd()} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>
                             + Add Note
@@ -282,7 +282,7 @@ function StaffNotesBody({ identity }: { identity: AppIdentity }) {
                     </div>
 
                     <div className="rounded-2xl bg-white shadow p-5">
-                      <h3 className="font-bold text-slate-700 text-sm mb-3">History</h3>
+                      <h3 className="card-title-sm mb-3">History</h3>
                       {personNotes.length === 0 ? (
                         <p className="text-sm text-slate-400">Nothing recorded for {selected.name} yet.</p>
                       ) : (

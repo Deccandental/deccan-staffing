@@ -23,7 +23,7 @@ export default function DentistSelector({
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
-      <h2 className="mb-2 text-2xl font-bold">
+      <h2 className="section-heading mb-2">
         Dentists Working
       </h2>
 

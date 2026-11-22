@@ -591,7 +591,7 @@ function PayrollPageBody() {
                     correction, or a bonus paid out between cycles. Tagging
                     one to a programme records it there too. */}
                 <div className="mt-6 rounded-2xl bg-white shadow p-5">
-                  <h2 className="font-bold text-slate-700 mb-1">Off-Cycle Payment</h2>
+                  <h2 className="card-title mb-1">Off-Cycle Payment</h2>
                   <p className="text-sm text-slate-500 mb-3">An adjustment or bonus paid outside a normal pay period, with its own date.</p>
                   <div className="grid gap-3 sm:grid-cols-5">
                     <div>
@@ -863,7 +863,7 @@ function GrowthBonusPanel() {
       )}
 
       <div className="rounded-xl bg-white shadow-sm p-4 space-y-3">
-        <h2 className="font-bold text-slate-700 text-lg">{QUARTER_LABELS[quarter]} {year} Bonus</h2>
+        <h2 className="card-title">{QUARTER_LABELS[quarter]} {year} Bonus</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <label className="block text-xs text-slate-400 mb-0.5">Net Production ({year})</label>
@@ -926,7 +926,7 @@ function GrowthBonusPanel() {
       </div>
 
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
-        <h2 className="px-4 pt-3 font-bold text-slate-700 text-sm">{QUARTER_LABELS[quarter]} {year} — Bonus Split</h2>
+        <h2 className="card-title-sm px-4 pt-3">{QUARTER_LABELS[quarter]} {year} — Bonus Split</h2>
         <p className="px-4 pt-1 text-xs text-slate-400">"Hours" auto-fills from Payroll once that's in use for a period — you can also type a number directly (e.g. for quarters before Payroll was tracked). Days are calculated from hours ÷ 8.</p>
 
         {totalOwed > 0 && (
@@ -1007,7 +1007,7 @@ function GrowthBonusPanel() {
       </div>
 
       <div className="rounded-xl bg-white shadow-sm p-4">
-        <h2 className="font-bold text-slate-700 mb-2 text-sm">Payment log ({year})</h2>
+        <h2 className="card-title-sm mb-2">Payment log ({year})</h2>
         {payments.length === 0 ? <p className="text-sm text-slate-400">No payments logged yet.</p> : (
           <div className="space-y-1 text-sm max-h-64 overflow-y-auto">
             {payments.map((p) => {

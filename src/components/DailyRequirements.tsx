@@ -7,7 +7,7 @@ export default function DailyRequirements({
 }: Props) {
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
-      <h2 className="mb-6 text-2xl font-bold">
+      <h2 className="section-heading mb-6">
         Daily Requirements
       </h2>
 

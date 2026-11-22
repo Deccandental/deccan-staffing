@@ -157,7 +157,7 @@ export default function UpdateNumbersFlow({
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ background: "rgba(15,23,42,0.45)" }}>
       <div className="w-full bg-white rounded-2xl shadow-xl p-5 my-6" style={{ maxWidth: 560 }} role="dialog" aria-modal="true" aria-label="Update numbers">
         <div className="flex items-center justify-between gap-3 mb-3">
-          <h2 className="font-bold text-slate-800" style={{ fontSize: 18 }}>Update Numbers</h2>
+          <h2 className="card-title">Update Numbers</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none" aria-label="Close">✕</button>
         </div>
 
@@ -317,7 +317,7 @@ function StepForm({ step, position, total, latestBalances, statements, review, a
       </div>
 
       <div className="flex items-center gap-2 mt-3">
-        <h3 className="font-bold text-slate-800" style={{ fontSize: 17 }}>{step.name}</h3>
+        <h3 className="card-title">{step.name}</h3>
         <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">{KIND_LABEL[step.kind]}</span>
         {step.institution && <span className="text-[11px] font-semibold rounded-full px-2 py-0.5" style={{ background: "#dbeafe", color: "#1e4e8c" }}>{step.institution}</span>}
       </div>

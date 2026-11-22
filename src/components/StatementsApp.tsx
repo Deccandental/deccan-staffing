@@ -805,7 +805,7 @@ export default function StatementsApp({ forcedTab, embedded }: {
   const payDialog = payFor && (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.35)" }}>
       <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-3">
-        <h3 className="font-bold text-slate-800">{payEditing ? "Edit payment" : "Mark invoice paid"}</h3>
+        <h3 className="card-title">{payEditing ? "Edit payment" : "Mark invoice paid"}</h3>
         <p className="text-sm text-slate-500">{payFor.account_name}{payFor.invoice_number ? ` · #${payFor.invoice_number}` : ""} · {money(payFor.amount)}</p>
         <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">Date paid</label>
@@ -848,7 +848,7 @@ export default function StatementsApp({ forcedTab, embedded }: {
   const editInvDialog = editInv && (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.35)" }}>
       <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-3">
-        <h3 className="font-bold text-slate-800">Edit invoice</h3>
+        <h3 className="card-title">Edit invoice</h3>
         <p className="text-xs text-slate-400">The PDF stays as filed.{editInv.paid ? " If it was paid by check, that check on the register is updated too (unless it has already cleared)." : ""}</p>
         <div>
           <label className="block text-xs font-semibold text-slate-500 mb-1">Vendor</label>
@@ -1064,7 +1064,7 @@ export default function StatementsApp({ forcedTab, embedded }: {
       ) : tab === "package" ? (
       <div className="space-y-4 max-w-4xl">
         <div className="rounded-2xl bg-white shadow px-5 py-4 space-y-3">
-          <h2 className="font-bold text-slate-800">Month-end package for your CPA</h2>
+          <h2 className="card-title">Month-end package for your CPA</h2>
           <p className="text-sm text-slate-500">One download with the check register, the invoices paid, and the statement and invoice PDFs. Statements are the ones covering the month; invoices are the ones paid in the month.</p>
           <div className="flex flex-wrap items-end gap-3">
             <div><label className="block text-xs font-semibold text-slate-500 mb-1">Month</label>

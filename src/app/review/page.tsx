@@ -93,7 +93,7 @@ function ReviewBody({ identity }: { identity: AppIdentity }) {
                   <div key={it.id} className="rounded-2xl bg-white shadow px-5 py-4 space-y-3" style={{ borderLeft: `4px solid ${overdue ? "#dc2626" : "#e8622a"}` }}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
-                        <h2 className="font-bold text-slate-800">{it.doc.title}</h2>
+                        <h2 className="card-title">{it.doc.title}</h2>
                         <p className="text-xs text-slate-400">Sent {fmt(it.doc.created_at)}{it.doc.due_date ? ` · please review by ${fmt(it.doc.due_date)}` : ""}</p>
                       </div>
                       {overdue && <span className="rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ background: "#fee2e2", color: "#991b1b" }}>Past due</span>}
@@ -124,7 +124,7 @@ function ReviewBody({ identity }: { identity: AppIdentity }) {
 
               {done.length > 0 && (
                 <div className="rounded-2xl bg-white shadow px-5 py-4">
-                  <h2 className="font-bold text-sm text-slate-700 mb-2">Reviewed</h2>
+                  <h2 className="card-title-sm mb-2">Reviewed</h2>
                   {done.map((it) => (
                     <div key={it.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1.5 border-t border-slate-100 first:border-0 text-sm">
                       <span className="flex-1 min-w-0 truncate text-slate-700">{it.doc.title}</span>

@@ -220,7 +220,7 @@ export default function WeeklyUpdatePanel({
       {/* ---------- Bank accounts and credit cards: add, edit, close ---------- */}
       {show("accounts") && (
       <div className={card}>
-        <h2 className="font-bold text-sm text-slate-700 mb-2">Accounts</h2>
+        <h2 className="card-title-sm mb-2">Accounts</h2>
         <AccountsPanel allBills={allBills} latestBalances={latestBalances} refreshAll={refreshAll} />
       </div>
       )}
@@ -228,7 +228,7 @@ export default function WeeklyUpdatePanel({
       {show("record") && (
       <div className={card}>
         <div className={hdr}>
-          <h2 className="font-bold text-sm text-slate-700">Open Dental &amp; A/R record</h2>
+          <h2 className="card-title-sm">Open Dental &amp; A/R record</h2>
           <span className="text-xs text-slate-400">Enter these on the Overview cards (Update). Past entries can be reviewed or deleted here.</span>
         </div>
 
@@ -300,7 +300,7 @@ export default function WeeklyUpdatePanel({
       {show("goal") && (
       <div className={card}>
         <div className="flex items-center gap-2 flex-wrap">
-          <h2 className="font-bold text-sm text-slate-700 whitespace-nowrap">{goalYear} Goal</h2>
+          <h2 className="card-title-sm whitespace-nowrap">{goalYear} Goal</h2>
           <NumInput onFocus={(e) => e.target.select()} value={goalInput} onChange={(e) => setGoalInput(e.target.value)}
             placeholder="Annual" wrap="w-28" className="w-full rounded border border-slate-200 px-1.5 py-1 text-xs focus:outline-none" />
           <button onClick={handleSaveGoal} className="rounded-lg px-3 py-1 text-xs font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>Save</button>
@@ -365,7 +365,7 @@ export default function WeeklyUpdatePanel({
       {/* Card charges — the recurring charges the near-limit warning is projected from */}
       {show("charges") && (
       <div>
-        <h2 className="font-bold text-sm text-slate-700 mb-1">Card Charges</h2>
+        <h2 className="card-title-sm mb-1">Card Charges</h2>
         <CardChargesPanel cards={cards} charges={charges} refreshAll={refreshAll} />
       </div>
       )}
@@ -373,7 +373,7 @@ export default function WeeklyUpdatePanel({
       {/* Backfill — past statement balances and past net production */}
       {show("backfill") && (
       <div className={card}>
-        <h2 className="font-bold text-sm text-slate-700 mb-2">Backfill Past Months</h2>
+        <h2 className="card-title-sm mb-2">Backfill Past Months</h2>
         <BackfillPanel accounts={cashAccounts} cards={cards} loans={loans} refreshAll={refreshAll} />
       </div>
       )}

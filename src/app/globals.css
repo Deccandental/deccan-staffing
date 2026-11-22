@@ -88,3 +88,20 @@ input[type="number"] {
   color: var(--text-muted);
   max-width: 48rem;
 }
+
+/* ── Headings inside pages ───────────────────────────────────────────────
+   Three levels below the page title, used everywhere:
+   .section-heading  a heading that sits directly on the page
+   .card-title       the heading of a white card or panel
+   .card-title-sm    a compact heading inside a dense card or list */
+.section-heading,
+.card-title,
+.card-title-sm {
+  font-family: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-strong);
+}
+.section-heading { font-size: 20px; line-height: 28px; }
+.card-title      { font-size: 17px; line-height: 24px; }
+.card-title-sm   { font-size: 14px; line-height: 20px; }
