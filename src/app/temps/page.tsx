@@ -216,11 +216,11 @@ function TempsPageBody() {
 
       <Sidebar />
 
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <div className="flex items-start justify-between mb-6">
           <div>
-            <h1 className="text-2xl lg:text-3xl font-bold" style={{ color: "#5a5a5a" }}>Temp Staff</h1>
-            <p className="mt-1 text-gray-400 text-sm">{temps.length} temp{temps.length !== 1 ? "s" : ""} in your roster</p>
+            <h1 className="page-title">Temp Staff</h1>
+            <p className="page-subtitle">{temps.length} temp{temps.length !== 1 ? "s" : ""} in your roster</p>
           </div>
           {!showForm && (
             <button onClick={() => setShowForm(true)} className="rounded-xl px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition flex items-center gap-2" style={{ backgroundColor: "#e8622a" }}>

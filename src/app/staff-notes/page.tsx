@@ -124,12 +124,12 @@ function StaffNotesBody({ identity }: { identity: AppIdentity }) {
   const input = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none";
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <header className="mb-4">
-          <h1 className="text-2xl font-bold">Staff Notes</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="page-title">Staff Notes</h1>
+          <p className="page-subtitle">
             Notes from check-ins, performance reviews and incident reviews. Each entry has a shared note the person can read on their own dashboard, and a private note only managers see.
           </p>
         </header>

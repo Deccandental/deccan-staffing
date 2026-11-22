@@ -208,7 +208,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 
   if (loading) {
     return (
-      <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+      <main className="app-shell">
         <Sidebar />
         <div className="lg:ml-64 pt-24 lg:pt-0 flex items-center justify-center min-h-screen">
           <p className="text-gray-400">Loading staff...</p>
@@ -218,13 +218,13 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   }
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold" style={{ color: "#5a5a5a" }}>Staff Management</h1>
-            <p className="mt-1 text-gray-400">{activeCount} team members{archivedCount > 0 ? ` · ${archivedCount} archived` : ""}</p>
+            <h1 className="page-title">Staff Management</h1>
+            <p className="page-subtitle">{activeCount} team members{archivedCount > 0 ? ` · ${archivedCount} archived` : ""}</p>
           </div>
           <div className="flex gap-2">
             <button onClick={() => setActiveTab("staff")} className="rounded-xl px-4 py-2 text-sm font-semibold transition"

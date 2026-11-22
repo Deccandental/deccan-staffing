@@ -66,13 +66,13 @@ function ReviewBody({ identity }: { identity: AppIdentity }) {
   const done = items.filter((i) => i.reviewed_at).sort((a, b) => String(b.reviewed_at).localeCompare(String(a.reviewed_at)));
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <div className="max-w-3xl space-y-4">
           <div>
-            <h1 className="text-2xl font-bold">Documents to review</h1>
-            <p className="text-sm text-slate-500">Open each document, read it, then tick the box and type your initials to confirm.</p>
+            <h1 className="page-title">Documents to review</h1>
+            <p className="page-subtitle">Open each document, read it, then tick the box and type your initials to confirm.</p>
           </div>
 
           {identity.mode !== "staff" && (

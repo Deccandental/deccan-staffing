@@ -149,13 +149,13 @@ function AdminBody() {
 
   const today = todayStr();
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <div className="max-w-4xl space-y-4">
           <div>
-            <h1 className="text-2xl font-bold">Send for review</h1>
-            <p className="text-sm text-slate-500">Send a PDF to staff. Each person opens it with their PIN and confirms with their initials.</p>
+            <h1 className="page-title">Send for review</h1>
+            <p className="page-subtitle">Send a PDF to staff. Each person opens it with their PIN and confirms with their initials.</p>
           </div>
           {error && <p className="text-sm font-semibold text-red-600">⚠️ {error}</p>}
           {msg && <p className="text-sm font-semibold text-slate-700">{msg}</p>}

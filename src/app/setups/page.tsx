@@ -250,11 +250,11 @@ function SetupsBody() {
   const sections = [...groups.filter((g) => visible.some((s) => s.group === g)), ...(visible.some((s) => !s.group) ? [""] : [])];
 
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <header className="mb-4 flex flex-wrap items-center gap-3">
-          <div className="flex-1 min-w-[12rem]"><h1 className="text-2xl font-bold">Set-ups</h1><p className="text-sm text-slate-500 mt-1">Photos of how things are set up, with a numbered index.</p></div>
+          <div className="flex-1 min-w-[12rem]"><h1 className="page-title">Set-ups</h1><p className="page-subtitle">Photos of how things are set up, with a numbered index.</p></div>
           {admin && !open && <button onClick={() => setAddOpen(true)} className="rounded-lg px-4 text-sm font-semibold text-white" style={{ height: 44, background: ORANGE }}>+ Add set-up</button>}
         </header>
 

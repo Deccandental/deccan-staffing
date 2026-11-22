@@ -497,11 +497,11 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   }
 
   return (
-    <main className="min-h-screen" style={{ background: "linear-gradient(160deg, #FDF2E9 0%, #F5EFFA 50%, #EAF3F8 100%)" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-12 lg:ml-64 p-4 lg:px-8 lg:pb-8">
+      <div className="app-content">
         <header className="mb-6 flex items-center justify-between flex-wrap gap-4">
-          <h1 className="text-2xl font-bold flex-shrink-0" style={{ color: "#4A4238" }}>Staff Dashboard</h1>
+          <h1 className="page-title">Staff Dashboard</h1>
           {isManager ? (
             <div className="flex items-center gap-3 flex-wrap">
               <label className="text-xs font-semibold flex-shrink-0" style={{ color: "rgba(74,66,56,0.55)" }}>View staff member</label>

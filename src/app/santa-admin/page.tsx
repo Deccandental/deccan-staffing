@@ -258,10 +258,10 @@ function Step({ n, title, done, children }: { n: number; title: string; done: bo
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="min-h-screen" style={{ background: "#f5f5f5" }}>
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
-        <h1 className="text-2xl font-bold">🎁 Secret Santa Admin</h1>
+      <div className="app-content">
+        <h1 className="page-title">Secret Santa Admin</h1>
         <p className="text-sm text-slate-500 mb-4 max-w-3xl">Staff join and play from <a href="/secret-santa" className="underline font-semibold" style={{ color: ORANGE }}>🎅 Secret Santa</a>. You can play too: the draw is hidden from everyone, including you, until you press Reveal.</p>
         {children}
       </div>

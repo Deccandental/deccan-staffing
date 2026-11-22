@@ -25,11 +25,11 @@ export default function SchedulePage() {
   } = useSchedule();
 
   return (
-    <main className="min-h-screen bg-slate-100">
+    <main className="app-shell">
       <Sidebar />
       <section className="ml-64 space-y-8 p-8">
-        <h1 className="text-4xl font-bold">Monthly Planner</h1>
-        <p className="text-slate-600">Build and manage your monthly staffing schedule.</p>
+        <h1 className="page-title">Monthly Planner</h1>
+        <p className="page-subtitle">Build and manage your monthly staffing schedule.</p>
 
         <DentistSelector
           dentists={dentists}

@@ -96,11 +96,11 @@ function AvailabilityPageBody() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100">
+    <main className="app-shell">
       <Sidebar />
-      <div className="pt-24 lg:pt-0 lg:ml-64 p-4 lg:p-8">
+      <div className="app-content">
         <div className="flex items-center justify-between mb-1">
-          <h1 className="text-3xl font-bold">Staff Availability</h1>
+          <h1 className="page-title">Staff Availability</h1>
           <div className="flex gap-2">
             <a href="/schedule-builder" className="rounded-xl bg-cyan-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700 transition">✓ Done — Back to Schedule Builder →</a>
           </div>
