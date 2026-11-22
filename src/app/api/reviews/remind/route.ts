@@ -1,3 +1,4 @@
+import { todayStr } from "@/lib/today";
 import { NextRequest, NextResponse } from "next/server";
 import { isCron } from "@/lib/routeAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -11,7 +12,7 @@ const EVERY_DAYS = 3;
 export async function GET(req: NextRequest) {
   if (!isCron(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
   const { data: docs } = await supabaseAdmin.from("review_docs").select("id, title, note, due_date").eq("closed", false).not("due_date", "is", null).lte("due_date", today);
   if (!docs || docs.length === 0) return NextResponse.json({ ok: true, reminded: 0 });
   const docById = new Map(docs.map((d: any) => [d.id, d]));

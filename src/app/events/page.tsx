@@ -1,4 +1,5 @@
 "use client";
+import { todayStr as practiceToday } from "@/lib/today";
 
 import { sessionHeaders } from "@/lib/secureData";
 import { useState, useEffect } from "react";
@@ -34,7 +35,7 @@ function EventsPageBody() {
   useEffect(() => { refresh(); }, []);
 
   async function refresh() {
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = practiceToday();
     const [s, e] = await Promise.all([loadStaff(), loadUpcomingEvents(todayStr)]);
     setStaff(s);
     setEvents(e);

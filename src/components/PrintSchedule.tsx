@@ -10,6 +10,8 @@ import { getOverrides } from "@/lib/overrides";
 import { resolveDentistAssistants } from "@/lib/assistantSlots";
 import { secureData as supabase } from "@/lib/secureData";
 import { MonthSchedule } from "@/lib/scheduleStore";
+import { loadLeaveRequests } from "@/lib/leaveStore";
+import { LeaveRequest } from "@/types/leave";
 
 interface Props {
   year: number;
@@ -21,13 +23,14 @@ const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function PrintSchedule({ year, month, schedule }: Props) {
   async function handlePrint() {
-    const [staff, holidays, openTuesdays, tempAssignmentsList, overrides, prefs] = await Promise.all([
+    const [staff, holidays, openTuesdays, tempAssignmentsList, overrides, prefs, leaveRequests] = await Promise.all([
       loadStaff(),
       loadHolidays(),
       getOpenTuesdays(),
       getTempAssignmentsForMonth(year, month),
       getOverrides(),
       loadPrefs(),
+      loadLeaveRequests(),
     ]);
 
     // Load temps
@@ -75,7 +78,9 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
         daySched.frontDeskRequired ?? 2,
         daySched.hygienistsRequired ?? 1,
         daySched.assistantCounts ?? {},
-        daySched.floaterAssistantId ?? null
+        daySched.floaterAssistantId ?? null,
+        leaveRequests,
+        daySched.assistantOverrides ?? {}
       );
 
       // Apply assistant overrides (per-slot, supports more than one assistant per dentist)

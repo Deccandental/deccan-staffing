@@ -1,4 +1,5 @@
 "use client";
+import { todayStr } from "@/lib/today";
 
 import { useState, useEffect, useCallback } from "react";
 import { Employee } from "@/types/employee";
@@ -38,7 +39,7 @@ export default function RetirementPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
-  const [depDate, setDepDate] = useState(new Date().toISOString().slice(0, 10));
+  const [depDate, setDepDate] = useState(todayStr());
   const [depAmount, setDepAmount] = useState("");
   const [depNote, setDepNote] = useState("");
   const [depError, setDepError] = useState("");

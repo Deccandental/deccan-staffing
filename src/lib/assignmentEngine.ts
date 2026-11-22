@@ -5,6 +5,8 @@ import { StaffOverride } from "./overrides";
 import { DentistPrefs } from "./staffStore";
 import { LeaveRequest } from "@/types/leave";
 import { isFullDayLeave } from "./leaveStore";
+import { getDentistSlotOverrides } from "./assistantSlots";
+import type { AssistantOverrides } from "./scheduleStore";
 
 export interface AssignmentWarning {
   severity: "warning" | "error";
@@ -16,7 +18,7 @@ export interface DailyAssignmentsResult extends DailyAssignments {
 }
 
 export function buildDailyAssignments(
-  employees: Employee[],
+  allEmployees: Employee[],
   workingDentistNames: string[],
   date?: string,
   prefs: DentistPrefs = {},
@@ -26,10 +28,14 @@ export function buildDailyAssignments(
   hygienistsRequired: number = 1,
   assistantCounts: Record<number, number> = {},
   floaterAssistantId: number | null = null,
-  leaveRequests: LeaveRequest[] = []
+  leaveRequests: LeaveRequest[] = [],
+  // Assistants the manager picked by hand for specific dentists' slots.
+  assistantOverrides: AssistantOverrides = {}
 ): DailyAssignmentsResult {
   const weekday = date ? getWeekday(date) : null;
   const warnings: AssignmentWarning[] = [];
+  // Archived (former) staff are never scheduled.
+  const employees = allEmployees.filter((e) => !e.archived);
 
   function isUnavailable(emp: Employee): boolean {
     if (!date) return false;
@@ -75,7 +81,8 @@ export function buildDailyAssignments(
     // before, just generalized to any required count (2, 3, ...).
     frontDesk = regularFrontDesk.slice(0, frontDeskRequired);
     const gapAfterRegular = frontDeskRequired - frontDesk.length;
-    if (gapAfterRegular > 0 && karla && isAvailable(karla)) {
+    // Not if she's the day's Floater — she can't be in two places.
+    if (gapAfterRegular > 0 && karla && isAvailable(karla) && karla.id !== floaterAssistantId) {
       frontDesk = [...frontDesk, karla];
       karlaOnFrontDesk = true;
     }
@@ -102,11 +109,22 @@ export function buildDailyAssignments(
   // The Floater is already committed for the day — exclude them from the
   // pool so the engine can't also auto-assign them to a dentist or hygiene.
   if (floaterAssistantId != null) assignedIds.add(floaterAssistantId);
+  // Hand-picked assistants are already committed to their dentist, so the
+  // engine must not also give them to someone else.
+  const handPickedSlots = (dentistId: number, count: number) =>
+    Object.entries(getDentistSlotOverrides(assistantOverrides, dentistId)).filter(([i]) => Number(i) < count);
+  for (const d of employees.filter((e) => e.role === "Dentist")) {
+    for (const [, id] of handPickedSlots(d.id, Math.max(0, assistantCounts[d.id] ?? 1))) if (id != null) assignedIds.add(id);
+  }
   const allAssistants = employees.filter(
     (e) => (e.skills.includes("Assistant") || e.skills.includes("RDA")) && isAvailable(e) && !assignedIds.has(e.id)
   );
 
-  const totalAssistantsNeeded = dentists.reduce((sum, d) => sum + Math.max(0, assistantCounts[d.id] ?? 1), 0);
+  const autoSlots = (d: Employee) => {
+    const total = Math.max(0, assistantCounts[d.id] ?? 1);
+    return Math.max(0, total - handPickedSlots(d.id, total).length);
+  };
+  const totalAssistantsNeeded = dentists.reduce((sum, d) => sum + autoSlots(d), 0);
   if (allAssistants.length < totalAssistantsNeeded) {
     const shortage = totalAssistantsNeeded - allAssistants.length;
     warnings.push({
@@ -120,7 +138,8 @@ export function buildDailyAssignments(
   const dentistAssignments: DentistAssignment[] = [];
 
   for (const dentist of sortedDentists) {
-    const count = Math.max(0, assistantCounts[dentist.id] ?? 1);
+    // Only the slots that weren't hand-picked are filled automatically.
+    const count = autoSlots(dentist);
     const prefIds: number[] = prefs[dentist.id] ?? [];
     const assigned: Employee[] = [];
 
@@ -130,7 +149,7 @@ export function buildDailyAssignments(
       if (candidate) { assigned.push(candidate); assignedIds.add(candidate.id); }
     }
 
-    if (assigned.length < count && drHo && dentist.id === drHo.id && karla && !karlaOnFrontDesk && !assignedIds.has(karla.id)) {
+    if (assigned.length < count && drHo && dentist.id === drHo.id && karla && !karlaOnFrontDesk && !assignedIds.has(karla.id) && isAvailable(karla)) {
       assigned.push(karla);
       assignedIds.add(karla.id);
     }

@@ -1,3 +1,4 @@
+import { todayStr } from "@/lib/today";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { statementsAccess, whoIs, BUCKET } from "@/lib/statementsAuth";
@@ -116,7 +117,7 @@ export async function POST(req: NextRequest) {
 
     if (b.action === "setStatus") {
       if (!STATUSES.has(b.status)) return NextResponse.json({ error: "Bad status." }, { status: 400 });
-      const clearedDate = b.status === "cleared" ? (/^\d{4}-\d{2}-\d{2}$/.test(String(b.clearedDate ?? "")) ? b.clearedDate : new Date().toISOString().slice(0, 10)) : null;
+      const clearedDate = b.status === "cleared" ? (/^\d{4}-\d{2}-\d{2}$/.test(String(b.clearedDate ?? "")) ? b.clearedDate : todayStr()) : null;
       const { error } = await supabaseAdmin.from("check_register").update({ status: b.status, cleared_date: clearedDate }).eq("id", String(b.id));
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
       return NextResponse.json({ data: null });

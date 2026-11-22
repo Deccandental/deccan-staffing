@@ -1,4 +1,5 @@
 "use client";
+import { todayStr as practiceToday } from "@/lib/today";
 
 import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
@@ -195,7 +196,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     if (selectedId == null) return;
     let cancelled = false;
     setLoading(true);
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = practiceToday();
     const yearStart = `${bonusYear}-01-01`;
     const yearEnd = `${bonusYear}-12-31`;
     Promise.all([
@@ -271,7 +272,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
     let cancelled = false;
     (async () => {
       const slots = await loadAllSlots();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = practiceToday();
       const status = computeCheckinStatus(selectedId, slots, today);
       if (!cancelled) {
         setCheckinDue(status.isDue && !status.upcomingSlot);
@@ -304,7 +305,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const missingOrExpiredCertCount = selectedEmployee ? (() => {
     const roles = getApplicableRoles(selectedEmployee);
     if (roles.length === 0) return 0;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = practiceToday();
     const statuses = computeRequiredCertStatuses(roles, requiredTypesForCerts, certs, ceEntriesForCerts, today);
     return statuses.filter((s) => !s.satisfied).length;
   })() : 0;
@@ -720,7 +721,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                 wall of zeros for quarters that were never part of the deal —
                 a friendly "starts on" note replaces it until then. */}
             {canSeeThisPersonsPay && selectedEmployee?.pvBonusEligible &&
-              selectedEmployee.netProductionStartDate && new Date().toISOString().slice(0, 10) < selectedEmployee.netProductionStartDate && (
+              selectedEmployee.netProductionStartDate && practiceToday() < selectedEmployee.netProductionStartDate && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow p-5 flex items-center gap-3">
                 <span className="text-2xl">⏳</span>
                 <div>
@@ -734,7 +735,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               </div>
             )}
             {canSeeThisPersonsPay && selectedEmployee?.pvBonusEligible &&
-              (!selectedEmployee.netProductionStartDate || new Date().toISOString().slice(0, 10) >= selectedEmployee.netProductionStartDate) && (
+              (!selectedEmployee.netProductionStartDate || practiceToday() >= selectedEmployee.netProductionStartDate) && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
                 <div className="p-4 pb-2">
                   <h2 className="font-bold text-slate-700">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
@@ -845,7 +846,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                   {showHygieneCalc ? "Hide" : "Show"} how this is calculated
                 </button>
                 {showHygieneCalc && (() => {
-                  const today = new Date().toISOString().slice(0, 10);
+                  const today = practiceToday();
                   const shown = hygieneRows.filter((r) => r.start <= today || r.patients > 0 || r.paid > 0);
                   let running = hygieneStart;
                   return (

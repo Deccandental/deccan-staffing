@@ -1,3 +1,4 @@
+import { todayStr } from "@/lib/today";
 import { Employee } from "@/types/employee";
 import { loadHoBonusPayoutYear, loadHoBonusPayments } from "@/lib/hoBonus";
 import { loadAllPvBonusQuarters, loadPvBonusPayrollEntries, loadPvBonusPayments, computePvQuarterCalcs, getPvQuarterDateRange } from "@/lib/pvBonus";
@@ -5,6 +6,7 @@ import { loadHygieneBonusEntries, getPayPeriodsInYear, HYGIENE_BONUS_PER_PATIENT
 import { loadPayrollEntriesInRange } from "@/lib/payrollStore";
 import { loadGrowthBonusQuarter, computeQuarterCalc, loadGrowthBonusPayments, getQuarterDateRange } from "@/lib/growthBonus";
 import { loadBonusCarryovers, carryKey } from "@/lib/bonusCarryover";
+import { loadOffCyclePayments } from "@/lib/bonusRouting";
 
 /**
  * What the practice owes in compensation and bonuses right now, so the cash
@@ -48,7 +50,7 @@ function lastEndedQuarter(today: string): { year: number; quarter: 1 | 2 | 3 | 4
   return cur === 1 ? { year: y - 1, quarter: 4 } : { year: y, quarter: (cur - 1) as 1 | 2 | 3 | 4 };
 }
 
-export async function loadCompOwed(staff: Employee[], today: string = new Date().toISOString().slice(0, 10)): Promise<CompOwedResult> {
+export async function loadCompOwed(staff: Employee[], today: string = todayStr()): Promise<CompOwedResult> {
   const items: CompOwedItem[] = [];
   const active = staff.filter((s) => !s.archived);
   const year = Number(today.slice(0, 4));
@@ -60,7 +62,10 @@ export async function loadCompOwed(staff: Employee[], today: string = new Date()
     const [months, payments] = await Promise.all([loadHoBonusPayoutYear(e.id, year), loadHoBonusPayments(e.id)]);
     const counted = months.filter((m) => ym(m.year, m.month) <= thisMonth);
     const earned = counted.reduce((sum, m) => sum + m.production * 0.4, 0);
-    const first = counted.length ? ym(counted[0].year, counted[0].month) : thisMonth;
+    // Each month's production is paid the following month, so this payout
+    // year's payments are the ones dated January onward. (A December payment
+    // belongs to the previous payout year: it pays for November.)
+    const first = `${year}-01`;
     const paid = payments.filter((p) => { const k = p.datePaid.slice(0, 7); return k >= first && k <= thisMonth; }).reduce((sum, p) => sum + p.amount, 0);
     const balance = earned - paid;
     const through = counted.length ? `${MONTHS[counted[counted.length - 1].month - 1]}` : MONTHS[Number(thisMonth.slice(5)) - 1];
@@ -153,16 +158,26 @@ export interface HygienePeriodRow { start: string; label: string; payDate: strin
  * count), earned = patients x $15, and what has been paid against the period.
  */
 export async function hygieneYearDetail(employeeId: number, y: number): Promise<HygienePeriodRow[]> {
-  const [payroll, overrides] = await Promise.all([
+  const [payroll, overrides, offCycle] = await Promise.all([
     loadPayrollEntriesInRange(`${y}-01-01`, `${y}-12-31`),
     loadHygieneBonusEntries(employeeId, `${y}-01-01`, `${y}-12-31`),
+    loadOffCyclePayments(`${y}-01-01`, `${y}-12-31`),
   ]);
   const byStart = new Map(overrides.map((o) => [o.payPeriodStart, o]));
-  return getPayPeriodsInYear(y).map((p) => {
+  const periods = getPayPeriodsInYear(y);
+  // Off-cycle hygiene payments count toward the pay period their date falls in.
+  const offCycleByStart = new Map<string, number>();
+  for (const pay of offCycle) {
+    if (pay.programme !== "hygiene" || pay.employeeId !== employeeId) continue;
+    const period = [...periods].reverse().find((p) => p.start <= pay.paidDate);
+    if (period) offCycleByStart.set(period.start, (offCycleByStart.get(period.start) ?? 0) + pay.amount);
+  }
+  return periods.map((p) => {
     const o = byStart.get(p.start);
     const row = payroll.find((r) => r.personKey === `staff:${employeeId}` && r.payPeriodStart === p.start);
     const patients = o && o.patientCount > 0 ? o.patientCount : row?.hygienePatientCount ?? 0;
-    return { start: p.start, label: p.label, payDate: p.payDate, patients, earned: patients * HYGIENE_BONUS_PER_PATIENT, paid: o?.amountPaid ?? 0 };
+    const paid = (o?.amountPaid ?? 0) + (offCycleByStart.get(p.start) ?? 0);
+    return { start: p.start, label: p.label, payDate: p.payDate, patients, earned: patients * HYGIENE_BONUS_PER_PATIENT, paid };
   });
 }
 

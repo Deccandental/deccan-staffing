@@ -8,7 +8,10 @@ import AccessDenied from "@/components/AccessDenied";
 import { LeaveRequest, LeaveReason } from "@/types/leave";
 import { loadLeaveRequests, updateLeaveStatus, deleteLeaveRequest, countBusinessDays, countLeaveDays, isPaidLeaveReason, leaveHalfOnDate } from "@/lib/leaveStore";
 import { setUnavailable, clearUnavailable } from "@/lib/overrides";
-import { adjustLeaveBalance } from "@/lib/staffStore";
+import { adjustLeaveBalance, loadStaff } from "@/lib/staffStore";
+import { loadHolidays, Holiday } from "@/lib/holidays";
+import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
+import { Employee } from "@/types/employee";
 import { secureData as supabase } from "@/lib/secureData";
 
 const REASON_LABELS: Record<LeaveReason, string> = {
@@ -34,6 +37,11 @@ function LeaveManagePageBody() {
   const [sortField, setSortField] = useState<"date" | "name" | "reason" | "status" | "days">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [staff, setStaff] = useState<Employee[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
+  // Leave only costs days the office is open and this person normally works.
+  const dayCtx = (employeeId: number) => ({ holidays, openTuesdays, schedule: staff.find((e) => e.id === employeeId)?.defaultSchedule });
 
   async function handleSendPayrollSummary() {
     setSendingPayroll(true);
@@ -48,7 +56,10 @@ function LeaveManagePageBody() {
     setSendingPayroll(false);
   }
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    refresh();
+    Promise.all([loadStaff(), loadHolidays(), getOpenTuesdays()]).then(([s, h, ot]) => { setStaff(s); setHolidays(h); setOpenTuesdays(ot); });
+  }, []);
 
   async function refresh() {
     const data = await loadLeaveRequests();
@@ -162,16 +173,30 @@ function LeaveManagePageBody() {
     setProcessing(req.id);
     // Keep whichever halves the request already had, so editing the dates
     // doesn't quietly turn a 2.5 day request back into 3 days.
-    const totalDays = countLeaveDays(editForm.startDate, editForm.endDate, req.startsMidday, req.endsMidday);
-    if (req.status === "approved") {
-      await removeFromAvailability(req);
-    }
+    const totalDays = countLeaveDays(editForm.startDate, editForm.endDate, req.startsMidday, req.endsMidday, dayCtx(req.employeeId));
+    // Paid hours follow the new length, and for an approved request the
+    // balance is corrected by the difference — otherwise a later cancel
+    // refunds hours that were never deducted.
+    const oldHours = req.paidHours ?? req.totalDays * 8;
+    const newHours = totalDays * 8;
     const { error } = await supabase.from("leave_requests").update({
       start_date: editForm.startDate,
       end_date: editForm.endDate,
       total_days: totalDays,
+      paid_hours: isPaidLeaveReason(req.reason) ? newHours : req.paidHours ?? null,
     }).eq("id", req.id);
-    if (error) console.error("handleSaveEdit error:", error);
+    if (error) {
+      console.error("handleSaveEdit error:", error);
+      alert("Couldn't save the new dates. Nothing was changed.");
+      setProcessing(null);
+      return;
+    }
+    if (req.status === "approved") {
+      await removeFromAvailability(req);
+      if (isPaidLeaveReason(req.reason) && newHours !== oldHours) {
+        await adjustLeaveBalance(req.employeeId, req.reason as "pto" | "sick", -(newHours - oldHours));
+      }
+    }
     if (req.status === "approved") {
       await applyToAvailability({ ...req, startDate: editForm.startDate, endDate: editForm.endDate });
     }
@@ -347,7 +372,7 @@ function LeaveManagePageBody() {
                                   </div>
                                 </div>
                                 {editForm.startDate && editForm.endDate && (
-                                  <p className="text-xs text-gray-500">📅 {countLeaveDays(editForm.startDate, editForm.endDate, req.startsMidday, req.endsMidday)} working days</p>
+                                  <p className="text-xs text-gray-500">📅 {countLeaveDays(editForm.startDate, editForm.endDate, req.startsMidday, req.endsMidday, dayCtx(req.employeeId))} working days</p>
                                 )}
                                 <div className="flex gap-2">
                                   <button onClick={() => handleSaveEdit(req)} disabled={processing === req.id}

@@ -18,12 +18,19 @@ export function resolveDentistAssistants(
 ): (Employee | null)[] {
   const count = Math.max(0, assistantCounts[dentistId] ?? 1);
   const slotOverrides = getDentistSlotOverrides(overrides, dentistId);
+  // Hand-picked slots show who was picked; the remaining slots take the
+  // engine's picks in order. The engine (given the overrides) only fills the
+  // non-picked slots and never reuses a hand-picked person, so nobody can
+  // appear with two dentists. Anyone hand-picked here is skipped regardless.
+  const picked = new Set(Object.values(slotOverrides).filter((v): v is number => v != null));
+  const auto = autoAssigned.filter((e) => !picked.has(e.id));
+  let next = 0;
   return Array.from({ length: count }, (_, i) => {
     if (i in slotOverrides) {
       const id = slotOverrides[i];
       return id != null ? staff.find((e) => e.id === id) ?? null : null;
     }
-    return autoAssigned[i] ?? null;
+    return auto[next++] ?? null;
   });
 }
 

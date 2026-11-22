@@ -1,4 +1,5 @@
 "use client";
+import { todayStr as practiceToday } from "@/lib/today";
 
 import { useState, useEffect, useMemo } from "react";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
@@ -60,7 +61,7 @@ async function loadTemps(): Promise<TempStaff[]> {
 
 export default function PublicCalendar() {
   const today = new Date();
-  const todayStr = today.toISOString().split("T")[0];
+  const todayStr = practiceToday();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [staff, setStaff] = useState<Employee[]>([]);
@@ -121,7 +122,7 @@ export default function PublicCalendar() {
       const assignments = buildDailyAssignments(
         staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday, frontDeskRequired, hygienistsRequired,
-        daySched.assistantCounts ?? {}, daySched.floaterAssistantId ?? null, leaveRequests
+        daySched.assistantCounts ?? {}, daySched.floaterAssistantId ?? null, leaveRequests, daySched.assistantOverrides ?? {}
       );
 
       const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);

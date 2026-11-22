@@ -30,9 +30,10 @@ function daysInMonth(y: number, m: number): number {
 }
 
 export function getPayPeriods(refDate: Date): { last: PayPeriod; next: PayPeriod } {
-  const y = refDate.getUTCFullYear();
-  const m = refDate.getUTCMonth() + 1; // 1-indexed
-  const day = refDate.getUTCDate();
+  // The calendar date in California, not UTC: at 4:30pm Pacific on Dec 15 it
+  // is already Dec 16 in UTC, which flipped "last period" a day early.
+  const [y, m, day] = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" })
+    .format(refDate).split("-").map(Number); // m is 1-indexed
 
   if (day <= 15) {
     const prevMonth = m === 1 ? 12 : m - 1;
@@ -71,8 +72,10 @@ export function getPayPeriods(refDate: Date): { last: PayPeriod; next: PayPeriod
 export function getLookaheadWindow(nextPeriodEnd: string): { start: string; end: string; label: string } {
   const [y, m, d] = nextPeriodEnd.split("-").map(Number);
   const startDate = new Date(Date.UTC(y, m - 1, d + 1));
-  const endDate = new Date(Date.UTC(y, m - 1, d));
-  endDate.setUTCMonth(endDate.getUTCMonth() + 3);
+  // Three months on, capped at the target month's last day (Nov 30 + 3
+  // months = Feb 28, not Mar 2).
+  const lastDay = new Date(Date.UTC(y, m + 3, 0)).getUTCDate(); // last day of month index m+2
+  const endDate = new Date(Date.UTC(y, m + 2, Math.min(d, lastDay)));
   const start = ymd(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, startDate.getUTCDate());
   const end = ymd(endDate.getUTCFullYear(), endDate.getUTCMonth() + 1, endDate.getUTCDate());
   return { start, end, label: "Next 3 Months" };

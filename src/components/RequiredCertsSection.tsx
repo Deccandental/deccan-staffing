@@ -1,4 +1,5 @@
 "use client";
+import { todayStr } from "@/lib/today";
 
 import { useState } from "react";
 import { Employee } from "@/types/employee";
@@ -47,7 +48,7 @@ export function RequiredCertsSection({
   const [loggingTypeId, setLoggingTypeId] = useState<string | null>(null);
   const [ceCourseName, setCeCourseName] = useState("");
   const [ceHours, setCeHours] = useState("");
-  const [ceDate, setCeDate] = useState(new Date().toISOString().slice(0, 10));
+  const [ceDate, setCeDate] = useState(todayStr());
   const [ceFile, setCeFile] = useState<File | null>(null);
   const [ceDelivery, setCeDelivery] = useState<CeDelivery>("live");
   const [ceProvider, setCeProvider] = useState("");
@@ -56,7 +57,7 @@ export function RequiredCertsSection({
   const [ceUploading, setCeUploading] = useState(false);
   const [ceError, setCeError] = useState<string | null>(null);
   const [completingTypeId, setCompletingTypeId] = useState<string | null>(null);
-  const [completionDate, setCompletionDate] = useState(new Date().toISOString().slice(0, 10));
+  const [completionDate, setCompletionDate] = useState(todayStr());
   const [completionError, setCompletionError] = useState<string | null>(null);
   // CE details on the quick completion form. BLS is the certificate where CE
   // credit matters most, and it is updated almost exclusively through this
@@ -78,7 +79,7 @@ export function RequiredCertsSection({
   const roles = getApplicableRoles(employee);
   if (roles.length === 0) return null;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
   const CE_KINDS = new Set(["ce_hours", "one_time_ce", "total_ce_hours"]);
   const allStatuses = computeRequiredCertStatuses(roles, requiredTypes, certs, ceEntries, today);
   const statuses = filter === "ce" ? allStatuses.filter((s) => CE_KINDS.has(s.type.kind))

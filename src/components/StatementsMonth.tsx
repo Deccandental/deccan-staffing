@@ -1,4 +1,5 @@
 "use client";
+import { todayStr } from "@/lib/today";
 
 import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
@@ -211,7 +212,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged, sectio
   // Scheduled bills, so a new statement can be matched to one already expected (finance only).
   useEffect(() => {
     if (!finance || !addOpen) return;
-    const t = new Date().toISOString().slice(0, 10);
+    const t = todayStr();
     loadRecurringBills().then(setBills).catch(() => {});
     loadBillPayments(addDays(t, -75), addDays(t, 150)).then(setBillPayments).catch(() => {});
   }, [finance, addOpen]);
@@ -358,7 +359,7 @@ export default function StatementsMonth({ finance, onAuthLost, onChanged, sectio
 
   // ---------------- Add a statement ----------------
   const vendorByName = (name: string) => data?.sources.find((s) => s.name.trim().toLowerCase() === name.trim().toLowerCase());
-  const defaultDate = () => (data && month !== data.currentMonth ? `${month}-01` : data?.today ?? new Date().toISOString().slice(0, 10));
+  const defaultDate = () => (data && month !== data.currentMonth ? `${month}-01` : data?.today ?? todayStr());
   function applyVendor(name: string) {
     setAVendor(name);
     const s = vendorByName(name);

@@ -1,5 +1,8 @@
 "use client";
+import { todayStr as practiceToday } from "@/lib/today";
 
+import { loadHolidays, Holiday } from "@/lib/holidays";
+import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { sessionHeaders } from "@/lib/secureData";
 import { useState, useEffect, useMemo } from "react";
 import { Sidebar } from "@/components/Sidebar";
@@ -59,6 +62,9 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
   const [calYear, setCalYear] = useState(today0.getFullYear());
   const [calMonth, setCalMonth] = useState(today0.getMonth() + 1);
 
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
+
   const [form, setForm] = useState({
     employeeId: !isManager ? String(identity.employeeId ?? "") : "",
     employeeEmail: !isManager ? (identity.employeeEmail ?? "") : "",
@@ -69,8 +75,10 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
 
   useEffect(() => {
     async function load() {
-      const [s, r, o] = await Promise.all([loadStaff(), loadLeaveRequests(), getOverrides()]);
+      const [s, r, o, h, ot] = await Promise.all([loadStaff(), loadLeaveRequests(), getOverrides(), loadHolidays(), getOpenTuesdays()]);
       setStaff(s);
+      setHolidays(h);
+      setOpenTuesdays(ot);
       setRequests(r);
       setOverrides(o);
     }
@@ -87,7 +95,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
   }, [view]);
 
   async function refresh() {
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = practiceToday();
     const [r, o, ev] = await Promise.all([loadLeaveRequests(), getOverrides(), loadUpcomingEvents(todayStr)]);
     setRequests(r);
     setOverrides(o);
@@ -95,7 +103,9 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
   }
 
   const selectedEmployee = staff.find((e) => e.id === Number(form.employeeId));
-  const totalDays = form.startDate && form.endDate ? countLeaveDays(form.startDate, form.endDate, form.startsMidday, form.endsMidday) : 0;
+  // Only days the office is open and this person normally works cost leave.
+  const dayCtx = { holidays, openTuesdays, schedule: selectedEmployee?.defaultSchedule };
+  const totalDays = form.startDate && form.endDate ? countLeaveDays(form.startDate, form.endDate, form.startsMidday, form.endsMidday, dayCtx) : 0;
 
   const balanceWarning = useMemo(() => {
     if (!selectedEmployee || !isPaidLeaveReason(form.reason) || !form.paidHours) return "";
@@ -193,7 +203,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
   function handleDateChange(field: "startDate" | "endDate", value: string) {
     const updated = { ...form, [field]: value };
     if (updated.startDate && updated.endDate) {
-      const days = countLeaveDays(updated.startDate, updated.endDate, updated.startsMidday, updated.endsMidday);
+      const days = countLeaveDays(updated.startDate, updated.endDate, updated.startsMidday, updated.endsMidday, dayCtx);
       updated.paidHours = computeDefaultPaidHours(days);
       setNoticeWarning(validateNoticePeriod(updated.startDate, days) ?? "");
     }
@@ -211,7 +221,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
         updated.endsMidday = field === "endsMidday";
       }
       const days = updated.startDate && updated.endDate
-        ? countLeaveDays(updated.startDate, updated.endDate, updated.startsMidday, updated.endsMidday)
+        ? countLeaveDays(updated.startDate, updated.endDate, updated.startsMidday, updated.endsMidday, dayCtx)
         : 0;
       updated.paidHours = computeDefaultPaidHours(days);
       return updated;
@@ -225,6 +235,14 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
     if (!form.employeeEmail) { setError("This person doesn't have an email on file — add one on the Staff page before submitting."); return; }
     if (!form.startDate || !form.endDate) { setError("Please select start and end dates."); return; }
     if (form.endDate < form.startDate) { setError("End date must be after start date."); return; }
+    if (totalDays <= 0) { setError("Those dates don't include any of your working days, so there's nothing to request."); return; }
+    const overlapping = requests.find((r) =>
+      r.employeeId === Number(form.employeeId) && (r.status === "pending" || r.status === "approved") &&
+      r.startDate <= form.endDate && r.endDate >= form.startDate);
+    if (overlapping) {
+      setError(`This overlaps a ${overlapping.status} request (${overlapping.startDate} to ${overlapping.endDate}). Cancel or change that one first.`);
+      return;
+    }
 
     setIsSubmitting(true);
     try {

@@ -80,8 +80,8 @@ export async function recordBonusPayment(opts: {
     if (programme === "growth" || programme === "pv") {
       const table = programme === "growth" ? "growth_bonus_payments" : "pv_bonus_payments";
       if (amount <= 0) {
-        await supabase.from(table).delete().eq("source_key", sourceKey);
-        return { ok: true };
+        const { error } = await supabase.from(table).delete().eq("source_key", sourceKey);
+        return error ? { ok: false, error: error.message } : { ok: true };
       }
       const payload: Record<string, unknown> = {
         employee_id: employeeId, amount, notes, source_key: sourceKey,
@@ -100,9 +100,13 @@ export async function recordBonusPayment(opts: {
 
     if (programme === "hygiene") {
       // Hygiene is stored per pay period, which lines up with payroll
-      // exactly. An off-cycle payment has no period, so it falls back to
-      // treating the payment date as a single-day period.
-      const start = opts.payPeriodStart ?? paidDate;
+      // exactly. An off-cycle payment has no period: it is NOT copied here
+      // (it used to be filed under its own date as a fake one-day "period",
+      // which the Hygiene sheet never looked at, so it was never counted).
+      // The off-cycle record itself is counted toward the period its date
+      // falls in — see hygieneYearDetail.
+      if (!opts.payPeriodStart) return { ok: true };
+      const start = opts.payPeriodStart;
       const end = opts.payPeriodEnd ?? paidDate;
       // Saving payroll with the bonus left blank must not wipe an amount
       // already recorded on the Hygiene tab for this period.
@@ -125,8 +129,8 @@ export async function recordBonusPayment(opts: {
     // single monthly figure — writing the month would overwrite whatever
     // was paid earlier in it.
     if (amount <= 0) {
-      await supabase.from("ho_bonus_payments").delete().eq("source_key", sourceKey);
-      return { ok: true };
+      const { error } = await supabase.from("ho_bonus_payments").delete().eq("source_key", sourceKey);
+      return error ? { ok: false, error: error.message } : { ok: true };
     }
     const { error } = await supabase.from("ho_bonus_payments").upsert({
       employee_id: employeeId, date_paid: paidDate, amount, notes, source_key: sourceKey,
@@ -189,18 +193,25 @@ export async function addOffCyclePayment(opts: {
       sourceKey: `offcycle:${data.id}`,
       notes: opts.notes ?? "Off-cycle payment",
     });
-    if (!linked.ok) return { ok: false, error: `Payment saved, but linking to ${PROGRAMME_LABELS[opts.programme]} failed: ${linked.error}` };
+    if (!linked.ok) {
+      // Undo the off-cycle row so a retry doesn't leave a duplicate behind.
+      await supabase.from("off_cycle_payments").delete().eq("id", data.id);
+      return { ok: false, error: `Couldn't record it against ${PROGRAMME_LABELS[opts.programme]}, so nothing was saved: ${linked.error}` };
+    }
   }
   return { ok: true };
 }
 
-export async function deleteOffCyclePayment(id: string, programme: BonusProgramme | "none"): Promise<void> {
-  if (programme !== "none") {
-    await recordBonusPayment({
-      programme, employeeId: 0, amount: 0, paidDate: new Date().toISOString().slice(0, 10),
-      sourceKey: `offcycle:${id}`,
-    });
+export async function deleteOffCyclePayment(id: string, programme: BonusProgramme | "none"): Promise<{ ok: boolean; error?: string }> {
+  // Remove the programme's linked payment first (Ho, growth, PV). Hygiene
+  // has nothing linked — the off-cycle row is its own record. Only if that
+  // worked is the off-cycle row removed, so the two never drift apart.
+  if (programme === "growth" || programme === "pv" || programme === "ho") {
+    const table = programme === "growth" ? "growth_bonus_payments" : programme === "pv" ? "pv_bonus_payments" : "ho_bonus_payments";
+    const { error: unlinkError } = await supabase.from(table).delete().eq("source_key", `offcycle:${id}`);
+    if (unlinkError) { console.error("deleteOffCyclePayment unlink error:", unlinkError); return { ok: false, error: unlinkError.message }; }
   }
   const { error } = await supabase.from("off_cycle_payments").delete().eq("id", id);
-  if (error) console.error("deleteOffCyclePayment error:", error);
+  if (error) { console.error("deleteOffCyclePayment error:", error); return { ok: false, error: error.message }; }
+  return { ok: true };
 }

@@ -1,3 +1,4 @@
+import { todayStr } from "@/lib/today";
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
       const ids = (waiting ?? []).map((a: any) => a.doc_id);
       if (ids.length === 0) return NextResponse.json({ pending: 0, overdue: 0 });
       const { data: docs } = await supabaseAdmin.from("review_docs").select("id, due_date").in("id", ids).eq("closed", false);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayStr();
       return NextResponse.json({ pending: (docs ?? []).length, overdue: (docs ?? []).filter((d: any) => d.due_date && d.due_date < today).length });
     }
 
