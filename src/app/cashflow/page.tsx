@@ -174,7 +174,7 @@ function ScheduledBillsPanel({ cashAccounts, allBills, allPayments, stmtOcc, lat
 
       <div className="rounded-2xl bg-white shadow overflow-hidden">
         <div className="flex items-center justify-between p-5 pb-2 flex-wrap gap-2">
-          <h2 className="font-bold text-slate-700">{timelineLabel}</h2>
+          <h2 className="card-title">{timelineLabel}</h2>
           <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} aria-label="Account" className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600">
             <option value="">All accounts</option>
             {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -882,7 +882,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
             <div className="flex items-center gap-2 min-w-0" style={{ flex: "1 1 200px" }}>
               <span className="text-slate-400 text-xs w-3">{isOpen ? "▾" : "▸"}</span>
               <div className="min-w-0">
-                <h3 className="font-bold text-base text-slate-800 truncate">{t.name}</h3>
+                <h3 className="card-title truncate">{t.name}</h3>
                 <span className="text-[11px] font-semibold text-slate-500">{t.tag}</span>
               </div>
             </div>
@@ -1021,7 +1021,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
           onClick={(e) => { if (e.target === e.currentTarget) setAddKind(null); }}>
           <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="font-bold text-lg text-slate-800">{addKind === "bank" ? "Add a bank account" : addKind === "card" ? "Add a credit card" : "Add a loan"}</h2>
+              <h2 className="card-title">{addKind === "bank" ? "Add a bank account" : addKind === "card" ? "Add a credit card" : "Add a loan"}</h2>
               <button onClick={() => setAddKind(null)} aria-label="Close" className="text-slate-400 hover:text-slate-700 text-xl leading-none px-2">×</button>
             </div>
             {addKind === "loan" ? (
@@ -1098,7 +1098,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       {/* 2. Needs attention — account first, then the text */}
       <div className="rounded-2xl bg-white shadow px-5 py-3.5">
         <div className="flex items-baseline justify-between gap-2 mb-1">
-          <h2 className="font-bold text-sm text-slate-700">Needs attention</h2>
+          <h2 className="card-title-sm">Needs attention</h2>
           <span className="text-xs text-slate-400">Most urgent first · each also appears in its own card below</span>
         </div>
         {transferMsg && <p className="text-xs font-semibold text-emerald-700 pb-1">✓ {transferMsg}</p>}
@@ -1234,7 +1234,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
           <div key={c.title} className="rounded-2xl bg-white shadow px-5 py-4 space-y-2" style={{ flex: "1 1 520px", minWidth: 0 }}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-sm text-slate-800">{c.title}</h3>
+                <h3 className="card-title-sm">{c.title}</h3>
                 <button onClick={() => togglePractice(c.id)} className="text-xs font-semibold text-orange-500 hover:underline">{practiceOpen === c.id ? "Close" : "Update"}</button>
               </div>
               <UpdatedStamp when={c.when} warnings={c.warns.map((w) => w.text)} />
@@ -1415,7 +1415,7 @@ export default function CashFlowPage() {
                 onClick={(e) => { if (e.target === e.currentTarget) setManage(null); }}>
                 <div className="w-full max-w-4xl rounded-2xl bg-white p-5 shadow-xl space-y-3">
                   <div className="flex items-center justify-between">
-                    <h2 className="font-bold text-lg text-slate-800">
+                    <h2 className="card-title">
                       {manage === "accounts" ? "Bank accounts and credit cards" : manage === "debt" ? "Loans & debt" : manage === "charges" ? "Card charges" : manage === "goal" ? "Annual production goal" : manage === "backfill" ? "Backfill past months" : "Open Dental & A/R record"}
                     </h2>
                     <button onClick={() => setManage(null)} aria-label="Close" className="text-slate-400 hover:text-slate-700 text-xl leading-none px-2">×</button>

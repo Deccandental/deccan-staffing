@@ -71,7 +71,7 @@ export default function CardChargesPanel({ cards, charges, refreshAll }: {
         return (
           <div key={card.id} className="rounded-2xl bg-white shadow px-4 py-3">
             <div className="flex items-baseline justify-between gap-2 mb-1.5 flex-wrap">
-              <h2 className="font-bold text-sm text-slate-700">{card.name}</h2>
+              <h2 className="card-title-sm">{card.name}</h2>
               <span className="text-xs text-slate-500">{list.filter((c) => c.active).length} active · ${formatMoney(monthly)}/mo</span>
             </div>
 

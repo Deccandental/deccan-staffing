@@ -226,7 +226,7 @@ function CertForm({
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow max-w-2xl">
-      <h2 className="text-lg font-bold mb-4">
+      <h2 className="card-title mb-4">
         {editingId ? "Edit" : form.ownerType === "business" ? "Add Business License" : "Add Certification"}
       </h2>
       {error && <p className="mb-3 text-sm text-red-500">{error}</p>}
@@ -487,7 +487,7 @@ function ManageRequiredTypesPanel({
 
   return (
     <div className="rounded-2xl bg-white p-5 shadow">
-      <h3 className="font-bold text-slate-700 mb-3">Add a Required Certificate Type</h3>
+      <h3 className="card-title mb-3">Add a Required Certificate Type</h3>
       <div className="grid gap-2 sm:grid-cols-4 mb-2">
         <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Title" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none sm:col-span-2" />
         <select value={newKind} onChange={(e) => setNewKind(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none bg-white">
@@ -518,7 +518,7 @@ function ManageRequiredTypesPanel({
       <button onClick={handleAdd} className="rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition mb-4" style={{ backgroundColor: "#e8622a" }}>+ Add Required Type</button>
       {error && <p className="text-sm text-red-600 mb-3">⚠️ {error}</p>}
 
-      <h3 className="font-bold text-slate-700 mb-2 mt-6">Required Certificate Types</h3>
+      <h3 className="card-title mb-2 mt-6">Required Certificate Types</h3>
       <div className="space-y-1 mb-6">
         {groups.map((group) => (
           <div key={group.title} className="rounded-lg bg-slate-50 p-3">
@@ -579,7 +579,7 @@ function ManageRequiredTypesPanel({
         ))}
       </div>
 
-      <h3 className="font-bold text-slate-700 mb-2">Optional Certificates</h3>
+      <h3 className="card-title mb-2">Optional Certificates</h3>
       <p className="text-xs text-slate-400 mb-2">Titles currently in use that aren't tracked as a requirement for any role.</p>
       <div className="space-y-1">
         {optionalTitles.length === 0 ? (

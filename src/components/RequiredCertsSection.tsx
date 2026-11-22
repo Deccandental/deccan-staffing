@@ -535,7 +535,7 @@ export function RequiredCertsSection({
       {!bare && (
         <div className="flex items-center gap-2 mb-3">
           <span style={{ fontSize: 18 }}>📋</span>
-          <h3 className="font-bold" style={{ color: "#4A4238" }}>Certifications & CE — {employee.name}</h3>
+          <h3 className="card-title">Certifications & CE — {employee.name}</h3>
         </div>
       )}
       <div className="space-y-2">

@@ -467,7 +467,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
             {submitted ? (
               <div className="rounded-2xl bg-white p-8 shadow text-center">
                 <div className="text-5xl mb-4">✅</div>
-                <h2 className="text-xl font-bold mb-2" style={{ color: "#5a5a5a" }}>Request Submitted!</h2>
+                <h2 className="section-heading mb-2">Request Submitted!</h2>
                 <p className="text-gray-400 mb-6 text-sm">Your request has been sent to Dr. Nanjapa for approval.</p>
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
                   <button onClick={() => { setSubmitted(false); setForm({ ...form, startDate: "", endDate: "", notes: "", startsMidday: false, endsMidday: false, paidHours: 0 }); }}
@@ -477,7 +477,7 @@ function LeavePageBody({ identity, logout }: { identity: AppIdentity; logout: ()
               </div>
             ) : (
               <div className="rounded-2xl bg-white p-5 lg:p-8 shadow space-y-5">
-                <h2 className="text-lg font-bold" style={{ color: "#5a5a5a" }}>Submit a Leave Request</h2>
+                <h2 className="card-title">Submit a Leave Request</h2>
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Your Name</label>
                   {!isManager ? (

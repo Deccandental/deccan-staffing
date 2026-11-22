@@ -468,7 +468,7 @@ export default function DebtPanel({
   return (
     <div className="rounded-2xl bg-white shadow p-3">
       <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-        <h2 className="font-bold text-slate-700 text-sm">
+        <h2 className="card-title-sm">
           Debt <span className="font-normal text-xs text-slate-400">· set up and edit rates, payments and where each is paid from here; update balances and statements on the Overview cards</span>
         </h2>
         <div className="flex items-center gap-2">

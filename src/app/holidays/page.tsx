@@ -87,7 +87,7 @@ function HolidaysPageBody() {
           <div className="space-y-4">
 
             <div className="rounded-2xl bg-white p-6 shadow">
-              <h2 className="text-lg font-bold mb-4" style={{ color: "#5a5a5a" }}>Add Holiday or Closure</h2>
+              <h2 className="card-title mb-4">Add Holiday or Closure</h2>
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Date</label>
@@ -120,7 +120,7 @@ function HolidaysPageBody() {
             </div>
 
             <div className="rounded-2xl bg-white p-6 shadow">
-              <h2 className="text-lg font-bold mb-1" style={{ color: "#5a5a5a" }}>Open Tuesdays</h2>
+              <h2 className="card-title mb-1">Open Tuesdays</h2>
               <p className="text-xs text-gray-400 mb-4">Mark specific Tuesdays when the office is open</p>
               <div className="space-y-3">
                 <div>
@@ -205,7 +205,7 @@ function HolidaysPageBody() {
           <div className="space-y-4">
             <div className="rounded-2xl bg-white shadow overflow-hidden">
               <div className="px-6 py-4" style={{ borderBottom: "1px solid #f5f5f5" }}>
-                <h2 className="text-lg font-bold" style={{ color: "#5a5a5a" }}>All Holidays & Closures</h2>
+                <h2 className="card-title">All Holidays & Closures</h2>
                 <p className="text-xs text-gray-400 mt-0.5">{holidays.length} day{holidays.length !== 1 ? "s" : ""} marked</p>
               </div>
               <div>

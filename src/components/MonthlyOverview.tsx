@@ -38,7 +38,7 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
       <div className="flex items-center justify-between mb-5">
-        <h3 className="text-lg font-bold">{formatMonthYear(year, month)}</h3>
+        <h3 className="card-title">{formatMonthYear(year, month)}</h3>
         <div className="flex items-center gap-4 text-xs text-slate-500">
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-green-400" /> Ready</span>
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-amber-400" /> Warning</span>

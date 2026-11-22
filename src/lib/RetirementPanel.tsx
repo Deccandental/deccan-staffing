@@ -194,7 +194,7 @@ export default function RetirementPanel() {
           </div>
 
           <div className="rounded-xl bg-white shadow-sm p-4 space-y-2">
-            <h3 className="font-bold text-sm text-slate-700">Deposits into the plan</h3>
+            <h3 className="card-title-sm">Deposits into the plan</h3>
             <div className="flex flex-wrap items-end gap-2">
               <div><label className="block text-xs text-slate-500 mb-1">Date</label>
                 <input type="date" value={depDate} onChange={(e) => setDepDate(e.target.value)} className={`${entry} !text-sm !py-1.5`} /></div>

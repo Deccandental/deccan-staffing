@@ -132,7 +132,7 @@ function EventsPageBody() {
 
         {showForm && (
           <div className="mb-6 rounded-2xl bg-white p-6 shadow max-w-2xl">
-            <h2 className="text-lg font-bold mb-4">{editingId ? "Edit Event" : "New Event"}</h2>
+            <h2 className="card-title mb-4">{editingId ? "Edit Event" : "New Event"}</h2>
             {error && <p className="mb-3 text-sm text-red-500">{error}</p>}
 
             <div className="grid gap-4 sm:grid-cols-3 mb-4">

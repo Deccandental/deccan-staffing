@@ -191,7 +191,7 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
       {isAdmin && showAdmin && (
         <div className="rounded-xl bg-white shadow p-4">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-            <h3 className="font-bold text-slate-700 text-sm">{requirement.cycleLabel} — Compliance</h3>
+            <h3 className="card-title-sm">{requirement.cycleLabel} — Compliance</h3>
             <button onClick={handleNotifyNow} disabled={notifying} className="text-xs font-semibold text-orange-500 hover:underline disabled:opacity-50">
               {notifying ? "Sending…" : "Notify Everyone Pending Now"}
             </button>
@@ -260,7 +260,7 @@ function DocumentPanel({ doc, identity, staff }: { doc: PolicyDocument; identity
 
       {myEmployeeId != null && signing && !mySignature && (doc.restrictedToEmployeeId == null || doc.restrictedToEmployeeId === myEmployeeId) && (
         <div ref={signFormRef} className="rounded-xl shadow p-4 space-y-3 print:hidden border-2" style={{ background: "#fff7ed", borderColor: "#e8622a" }}>
-          <h3 className="font-bold text-slate-700 text-base">✍️ Sign {doc.title}</h3>
+          <h3 className="card-title">✍️ Sign {doc.title}</h3>
           {!allChecked && <p className="text-xs text-amber-600">Please check every section above before signing ({checked.size} of {requiredSectionIdxs.length} initialed).</p>}
           <div>
             <label className="block text-xs text-slate-400 mb-0.5">Full Name</label>

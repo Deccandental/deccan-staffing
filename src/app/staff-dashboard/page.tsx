@@ -594,7 +594,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                     {changingPin && (
                       <div className="max-w-sm mx-auto mt-4 rounded-2xl bg-white p-5 shadow text-left">
                         <div className="flex items-center justify-between mb-3">
-                          <h3 className="text-sm font-bold" style={{ color: "#4A4238" }}>Change my PIN</h3>
+                          <h3 className="card-title-sm">Change my PIN</h3>
                           <button onClick={() => setChangingPin(false)} className="text-xs text-slate-400 hover:underline">Close</button>
                         </div>
                         <ChangePinForm
@@ -748,7 +748,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               <div className="lg:col-span-3 rounded-2xl bg-white shadow p-5 flex items-center gap-3">
                 <span className="text-2xl">⏳</span>
                 <div>
-                  <h2 className="font-bold text-slate-700">💰 Net Production Based Bonus</h2>
+                  <h2 className="card-title">💰 Net Production Based Bonus</h2>
                   <p className="text-sm text-slate-500 mt-1">
                     Your bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of net production) starts on{" "}
                     <strong>{new Date(selectedEmployee.netProductionStartDate + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</strong>.
@@ -761,7 +761,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               (!selectedEmployee.netProductionStartDate || practiceToday() >= selectedEmployee.netProductionStartDate) && (
               <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
                 <div className="p-4 pb-2">
-                  <h2 className="font-bold text-slate-700">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
+                  <h2 className="card-title">💰 {bonusYear} Net Production Based Bonus ({selectedEmployee.netProductionBonusPercent ?? 30}% of Income)</h2>
                 </div>
                 <div className="overflow-x-auto">
                   {(() => {
@@ -851,7 +851,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
 
             {canSeeThisPersonsPay && isHygienist && (
               <div className="lg:col-span-3 rounded-2xl bg-white p-4 shadow">
-                <h2 className="font-bold text-slate-700 mb-2">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
+                <h2 className="card-title mb-2">🦷 {bonusYear} Hygiene Bonus (${HYGIENE_BONUS_PER_PATIENT}/patient)</h2>
                 <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
                   <span className="text-slate-500">
                     {Math.abs(hygieneStart) > 0.5 && <>Brought forward ${formatMoney(hygieneStart)} {"\u00b7"} </>}
@@ -1372,7 +1372,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
               return (
                 <div className="lg:col-span-3 rounded-2xl bg-white shadow overflow-hidden">
                   <div className="p-4 pb-2">
-                    <h2 className="font-bold text-slate-700">{"\ud83d\udcb5"} {bonusYear} Compensation {"\u2014"} 40% of Production, paid the following month</h2>
+                    <h2 className="card-title">{"\ud83d\udcb5"} {bonusYear} Compensation {"\u2014"} 40% of Production, paid the following month</h2>
                   </div>
                   <div className="px-4 py-3 text-sm" style={{ background: net > 0.005 ? "#FAEEDA" : net < -0.005 ? "#FCEBEB" : "#f1f5f9" }}>
                     {net > 0.005 ? (

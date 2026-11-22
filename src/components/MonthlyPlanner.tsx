@@ -36,7 +36,7 @@ export default function MonthlyPlanner({ selectedDate, onSelectDate }: Props) {
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Monthly Planner</h2>
+          <h2 className="section-heading">Monthly Planner</h2>
           <p className="mt-1 text-sm text-slate-500">
             Select an open day to manage staffing. Tuesdays and weekends are closed.
           </p>

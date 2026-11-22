@@ -158,7 +158,7 @@ function AvailabilityPageBody() {
               return (
                 <div key={label} className="rounded-2xl bg-white shadow overflow-hidden">
                   <div className="px-6 py-4 border-b flex items-center gap-3">
-                    <h2 className="text-lg font-bold">{label}</h2>
+                    <h2 className="card-title">{label}</h2>
                     <span className="rounded-full bg-slate-100 text-slate-500 text-xs font-semibold px-2 py-0.5">{members.length}</span>
                   </div>
                   <div className="overflow-x-auto">

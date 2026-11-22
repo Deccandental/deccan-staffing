@@ -172,7 +172,7 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
           <div className="max-w-3xl space-y-4">
             {myStatus && (
               <div className="rounded-2xl bg-white shadow p-5">
-                <h2 className="font-bold text-slate-700 mb-2">Your Status</h2>
+                <h2 className="card-title mb-2">Your Status</h2>
                 {myStatus.upcomingSlot ? (
                   <p className="text-sm text-blue-800">📅 You have a check-in scheduled for <strong>{fmtDate(myStatus.upcomingSlot.date)}</strong> at {myStatus.upcomingSlot.time}.</p>
                 ) : myStatus.isDue ? (
@@ -184,7 +184,7 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
             )}
 
             <div className="rounded-2xl bg-white shadow p-5">
-              <h2 className="font-bold text-slate-700 mb-3">Available Slots</h2>
+              <h2 className="card-title mb-3">Available Slots</h2>
               {openSlots.length === 0 ? (
                 <p className="text-sm text-slate-400">No open slots right now{isAdmin ? " — add some below." : " — check back soon, or ask Dr. Nanjapa to open some up."}</p>
               ) : (
@@ -229,7 +229,7 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
             {isAdmin && (
               <>
                 <div className="rounded-2xl bg-white shadow p-5">
-                  <h2 className="font-bold text-slate-700 mb-3">Create New Slots</h2>
+                  <h2 className="card-title mb-3">Create New Slots</h2>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <div>
                       <label className="block text-sm text-slate-800 font-semibold mb-1">Date</label>
@@ -253,7 +253,7 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
                     claimed — open slots only list from today onwards — so it
                     gets recorded as finished in one step instead. */}
                 <div className="rounded-2xl bg-white shadow p-5">
-                  <h2 className="font-bold text-slate-700 mb-1">Log a Past Check-In</h2>
+                  <h2 className="card-title mb-1">Log a Past Check-In</h2>
                   <p className="text-sm text-slate-500 mb-3">For a check-in that already happened, including impromptu ones that were never booked.</p>
                   <div className="grid gap-3 sm:grid-cols-4">
                     <div>
@@ -288,7 +288,7 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
                 </div>
 
                 <div className="rounded-2xl bg-white shadow p-5">
-                  <h2 className="font-bold text-slate-700 mb-3">Everyone — Due Status</h2>
+                  <h2 className="card-title mb-3">Everyone — Due Status</h2>
                   <div className="space-y-1">
                     {staff.map((emp) => {
                       const status = computeCheckinStatus(emp.id, slots, today);
@@ -309,7 +309,7 @@ function CheckinsPageBody({ identity }: { identity: AppIdentity }) {
                 </div>
 
                 <div className="rounded-2xl bg-white shadow p-5">
-                  <h2 className="font-bold text-slate-700 mb-3">All Slots</h2>
+                  <h2 className="card-title mb-3">All Slots</h2>
                   <div className="space-y-2 max-h-96 overflow-y-auto">
                     {slots.length === 0 ? <p className="text-sm text-slate-400">No slots created yet.</p> : slots.map((slot) => (
                       <div key={slot.id} className="rounded-lg bg-slate-50 p-3">

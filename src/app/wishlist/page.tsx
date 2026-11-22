@@ -171,7 +171,7 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
 
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="rounded-2xl bg-white shadow p-4">
-                <h2 className="font-bold text-slate-700 mb-1">Priority List</h2>
+                <h2 className="card-title mb-1">Priority List</h2>
                 <p className="text-xs text-slate-400 mb-3">{isAdmin ? "Press and drag a card to reorder." : "Ordered by leadership — only admins can reorder."}</p>
                 {priorityOrder.length === 0 ? (
                   <p className="text-sm text-slate-400">Nothing on the wishlist yet.</p>
@@ -215,7 +215,7 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
               </div>
 
               <div className="rounded-2xl bg-white shadow p-4">
-                <h2 className="font-bold text-slate-700 mb-1">🔥 Most Wanted</h2>
+                <h2 className="card-title mb-1">🔥 Most Wanted</h2>
                 <p className="text-xs text-slate-400 mb-3">Ranked by everyone's picks — #1 counts for more than #5.</p>
                 {mostWanted.length === 0 ? (
                   <p className="text-sm text-slate-400">Nothing on the wishlist yet.</p>
@@ -268,7 +268,7 @@ function WishlistPageBody({ identity }: { identity: AppIdentity }) {
 
             {purchasedItems.length > 0 && (
               <div className="rounded-2xl bg-white shadow p-4 mt-4">
-                <h2 className="font-bold text-slate-700 mb-1">✓ Bought</h2>
+                <h2 className="card-title mb-1">✓ Bought</h2>
                 <p className="text-xs text-slate-400 mb-3">Granted wishes. Votes were freed up when each was marked bought.</p>
                 <div className="space-y-2">
                   {purchasedItems.map((item) => (

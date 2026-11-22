@@ -120,7 +120,7 @@ function Detail({ setup, admin, groups, onBack, onChanged }: { setup: Setup; adm
             <input value={group} onChange={(e) => setGroup(e.target.value)} list="setup-groups" placeholder="Group (optional)" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm w-48" />
           </>
         ) : (
-          <div className="flex-1 min-w-[12rem]"><h2 className="text-xl font-bold">{setup.title}</h2>{setup.group && <p className="text-sm text-slate-500">{setup.group}</p>}</div>
+          <div className="flex-1 min-w-[12rem]"><h2 className="section-heading">{setup.title}</h2>{setup.group && <p className="text-sm text-slate-500">{setup.group}</p>}</div>
         )}
         {!editing && (
           <label className="flex items-center gap-2 text-sm font-semibold cursor-pointer select-none" style={{ minHeight: 44 }}>
@@ -144,7 +144,7 @@ function Detail({ setup, admin, groups, onBack, onChanged }: { setup: Setup; adm
         </div>
 
         <div className="rounded-xl bg-white border border-slate-200 p-3">
-          <h3 className="font-bold mb-2">Index</h3>
+          <h3 className="card-title mb-2">Index</h3>
           {shown.length === 0 && <p className="text-sm text-slate-400">{editing ? "Nothing yet. Tap the photo to add the first number." : "No index has been added."}</p>}
           <ol className="space-y-1.5">
             {shown.map((it, i) => (
@@ -207,7 +207,7 @@ function AddDialog({ groups, onClose, onAdded }: { groups: string[]; onClose: ()
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ background: "rgba(0,0,0,.45)" }} onClick={onClose}>
       <div className="bg-white rounded-2xl p-5 w-full max-w-md mt-10 space-y-3" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold">Add a set-up</h2>
+        <h2 className="card-title">Add a set-up</h2>
         <div><label htmlFor="su-title" className="block text-sm font-semibold mb-1">Title</label>
           <input id="su-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Crown prep tray" className="w-full rounded-lg border border-slate-300 px-3" style={{ height: 44 }} /></div>
         <div><label htmlFor="su-group" className="block text-sm font-semibold mb-1">Group (optional)</label>
@@ -272,7 +272,7 @@ function SetupsBody() {
             )}
             {sections.map((g) => (
               <section key={g || "none"} className="mb-6">
-                {(groups.length > 0) && <h2 className="font-bold text-slate-700 mb-2">{g || "Ungrouped"}</h2>}
+                {(groups.length > 0) && <h2 className="card-title mb-2">{g || "Ungrouped"}</h2>}
                 <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                   {visible.filter((s) => s.group === g).map((s) => (
                     <button key={s.id} onClick={() => setOpenId(s.id)} className="text-left rounded-xl bg-white border border-slate-200 overflow-hidden hover:shadow-md transition">

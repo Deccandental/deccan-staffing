@@ -20,12 +20,12 @@ export default function DailyAssignments({ selectedDate, assignments = EMPTY }: 
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
-      <h2 className="mb-1 text-2xl font-bold">Daily Assignments</h2>
+      <h2 className="section-heading mb-1">Daily Assignments</h2>
       <p className="mb-6 text-slate-500">{dateLabel}</p>
 
       <div className="space-y-4">
         <section className="rounded-xl border p-4">
-          <h3 className="mb-3 font-semibold">Dentist / Assistant Pairings</h3>
+          <h3 className="card-title mb-3">Dentist / Assistant Pairings</h3>
           {assignments.dentists.length === 0 ? (
             <p className="text-sm text-slate-400">No dentists selected.</p>
           ) : (
@@ -43,7 +43,7 @@ export default function DailyAssignments({ selectedDate, assignments = EMPTY }: 
         </section>
 
         <section className="rounded-xl border p-4">
-          <h3 className="mb-3 font-semibold">Front Desk</h3>
+          <h3 className="card-title mb-3">Front Desk</h3>
           {assignments.frontDesk.length === 0 ? (
             <p className="text-sm text-slate-400">None available</p>
           ) : assignments.frontDesk.map((e) => (
@@ -52,7 +52,7 @@ export default function DailyAssignments({ selectedDate, assignments = EMPTY }: 
         </section>
 
         <section className="rounded-xl border p-4">
-          <h3 className="mb-3 font-semibold">Hygienist/Assisted Hygiene</h3>
+          <h3 className="card-title mb-3">Hygienist/Assisted Hygiene</h3>
           {assignments.hygienists.length === 0 ? (
             <p className="text-sm text-slate-400">None available</p>
           ) : assignments.hygienists.map((e) => (

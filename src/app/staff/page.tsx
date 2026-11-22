@@ -262,7 +262,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 
             {(adding || editing) && (
               <div className="rounded-2xl bg-white p-6 shadow space-y-5">
-                <h2 className="text-xl font-bold" style={{ color: "#5a5a5a" }}>{editing ? "Edit Employee" : "Add Employee"}</h2>
+                <h2 className="section-heading">{editing ? "Edit Employee" : "Add Employee"}</h2>
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>

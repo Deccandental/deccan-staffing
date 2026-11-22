@@ -345,7 +345,7 @@ export default function DailyAssignmentPanel({
   return (
     <div className="rounded-2xl bg-white p-6 shadow">
       <div className="mb-5">
-        <h2 className="text-2xl font-bold">Daily Assignments</h2>
+        <h2 className="section-heading">Daily Assignments</h2>
         <p className="mt-1 text-slate-500">{dateLabel || "Select a day"}</p>
       </div>
 
@@ -481,7 +481,7 @@ export default function DailyAssignmentPanel({
       )}
 
       <section className="mb-4 rounded-xl border p-4">
-        <h3 className="mb-3 font-semibold text-slate-700">Dentist / Assistant Pairings</h3>
+        <h3 className="card-title mb-3">Dentist / Assistant Pairings</h3>
         {assignments.dentists.length === 0 ? (
           <p className="text-sm text-slate-400">No dentists selected.</p>
         ) : (
@@ -607,7 +607,7 @@ export default function DailyAssignmentPanel({
       </section>
 
       <section className="mb-4 rounded-xl border p-4">
-        <h3 className="mb-3 font-semibold text-slate-700">Front Desk</h3>
+        <h3 className="card-title mb-3">Front Desk</h3>
         {assignments.frontDesk.length === 0 && !(tempsByRole["Front Desk"]?.length) ? (
           <p className="text-sm text-slate-400">None available</p>
         ) : (
@@ -632,7 +632,7 @@ export default function DailyAssignmentPanel({
       </section>
 
       <section className="mb-4 rounded-xl border p-4">
-        <h3 className="mb-3 font-semibold text-slate-700">Hygienist/Assisted Hygiene</h3>
+        <h3 className="card-title mb-3">Hygienist/Assisted Hygiene</h3>
         {hygSlotCount === 0 && !(tempsByRole["Hygienist"]?.length) ? (
           <p className="text-sm text-slate-400">None needed today</p>
         ) : (
@@ -714,7 +714,7 @@ export default function DailyAssignmentPanel({
       </section>
 
       <section className="mb-4 rounded-xl border p-4">
-        <h3 className="mb-3 font-semibold text-slate-700">Floater</h3>
+        <h3 className="card-title mb-3">Floater</h3>
         {resolvedFloater || floaterSwapping ? (
           <div className="rounded-lg bg-slate-50 px-3 py-2">
             <div className="flex items-center justify-between">

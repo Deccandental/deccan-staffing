@@ -241,7 +241,7 @@ function TempsPageBody() {
 
         {showForm && (
           <div className="rounded-2xl bg-white p-5 lg:p-8 shadow mb-8 max-w-2xl">
-            <h2 className="text-lg font-bold mb-5" style={{ color: "#5a5a5a" }}>{editId ? "Edit Temp" : "Add New Temp"}</h2>
+            <h2 className="card-title mb-5">{editId ? "Edit Temp" : "Add New Temp"}</h2>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-1">Full Name <span className="text-red-400">*</span></label>
@@ -331,7 +331,7 @@ function TempsPageBody() {
         ) : temps.length === 0 ? (
           <div className="rounded-2xl bg-white p-12 text-center shadow">
             <div className="text-5xl mb-4">🔄</div>
-            <h2 className="text-xl font-bold mb-2" style={{ color: "#5a5a5a" }}>No Temp Staff Yet</h2>
+            <h2 className="section-heading mb-2">No Temp Staff Yet</h2>
             <p className="text-gray-400 text-sm mb-6">Add temps to your roster so you can quickly fill shifts when needed.</p>
             <button onClick={() => setShowForm(true)} className="rounded-xl px-6 py-3 font-semibold text-white hover:opacity-90" style={{ backgroundColor: "#e8622a" }}>
               + Add Your First Temp

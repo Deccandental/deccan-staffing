@@ -65,7 +65,7 @@ function EventsCalendarBody() {
         <div className="max-w-4xl">
           <div className="flex items-center justify-between mb-4">
             <button onClick={goPrevMonth} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 transition">← Prev</button>
-            <h2 className="text-lg font-bold text-slate-700">{MONTH_NAMES[month - 1]} {year}</h2>
+            <h2 className="card-title">{MONTH_NAMES[month - 1]} {year}</h2>
             <button onClick={goNextMonth} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 transition">Next →</button>
           </div>
 
@@ -107,7 +107,7 @@ function EventsCalendarBody() {
 
           {selectedDate && (
             <div className="mt-4 rounded-2xl bg-white p-5 shadow">
-              <h3 className="font-bold text-slate-700 mb-3">
+              <h3 className="card-title mb-3">
                 {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
               </h3>
               {selectedEvents.length === 0 ? (
