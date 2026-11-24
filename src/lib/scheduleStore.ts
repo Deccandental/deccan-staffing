@@ -1,4 +1,5 @@
 import { secureData as supabase } from "./secureData";
+import { requestOdSync } from "./openDental/clientSync";
 
 // A dentist's assistant override value: either the legacy shape (a single
 // assistant id, or null for "explicitly none" — slot 0 only), or the new
@@ -25,6 +26,9 @@ export type DaySchedule = {
   // Floater is assigned that day. Purely additive on top of the per-dentist
   // assistantCounts/assistantOverrides mechanism above.
   floaterAssistantId?: number | null;
+  // One-off note for what the Floater does that day ("help Jansten too"),
+  // shown on the Staff Schedules blockout in Open Dental.
+  floaterNote?: string;
 };
 export type MonthSchedule = Record<string, DaySchedule>;
 
@@ -41,10 +45,10 @@ export async function loadSchedule(year: number, month: number): Promise<MonthSc
 // fills empty days with defaults, and must never do that after a failed load.
 export async function loadScheduleOrNull(year: number, month: number): Promise<MonthSchedule | null> {
   const key = monthKey(year, month);
-  const { data, error } = await supabase
-    .from("schedules")
-    .select("date, dentists, front_desk_required, hygienists_required, assistant_overrides, hygienist_overrides, assistant_counts, floater_assistant_id")
-    .like("date", `${key}-%`);
+  const cols = "date, dentists, front_desk_required, hygienists_required, assistant_overrides, hygienist_overrides, assistant_counts, floater_assistant_id";
+  let { data, error } = await supabase.from("schedules").select(`${cols}, floater_note`).like("date", `${key}-%`);
+  // Until the floater_note column has been added to the database, load without it.
+  if (error) ({ data, error } = await supabase.from("schedules").select(cols).like("date", `${key}-%`));
   if (error) { console.error("loadSchedule error:", error); return null; }
   const schedule: MonthSchedule = {};
   for (const row of data ?? []) {
@@ -56,6 +60,7 @@ export async function loadScheduleOrNull(year: number, month: number): Promise<M
       hygienistOverrides: row.hygienist_overrides ?? {},
       assistantCounts: row.assistant_counts ?? {},
       floaterAssistantId: row.floater_assistant_id ?? null,
+      floaterNote: (row as any).floater_note ?? "",
     };
   }
   return schedule;
@@ -80,6 +85,7 @@ export async function saveDaySchedule(
     { onConflict: "date" }
   );
   if (error) console.error("saveDaySchedule error:", error);
+  else requestOdSync(date);
 }
 
 // Saves a day's defaults only if nothing is saved for that date yet — an
@@ -95,7 +101,16 @@ export async function saveDefaultDayIfMissing(date: string, dentists: string[], 
   if (error) console.error("saveDefaultDayIfMissing error:", error);
 }
 
+// Saves only the day's floater note, leaving the rest of the day as it is.
+export async function saveFloaterNote(date: string, note: string): Promise<boolean> {
+  const { error } = await supabase.from("schedules").update({ floater_note: note.trim() || null }).eq("date", date);
+  if (error) { console.error("saveFloaterNote error:", error); return false; }
+  requestOdSync(date);
+  return true;
+}
+
 export async function deleteDaySchedule(date: string): Promise<void> {
   const { error } = await supabase.from("schedules").delete().eq("date", date);
   if (error) console.error("deleteDaySchedule error:", error);
+  else requestOdSync(date);
 }

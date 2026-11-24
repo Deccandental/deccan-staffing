@@ -81,6 +81,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Staff Notes", href: "/staff-notes", icon: "notes", permission: "canManageStaffNotes" },
       { label: "Temp Staff", href: "/temps", icon: "swap", permission: "canAdmin" },
       { label: "Holidays & Closures", href: "/holidays", icon: "sun", permission: "canAdmin" },
+      { label: "Open Dental", href: "/open-dental", icon: "clinic", permission: "canAdmin" },
       { label: "Manage Leave", href: "/leave/manage", icon: "shield", permission: "canManageLeave" },
       { label: "Events", href: "/events", icon: "pin", permission: "canManageEvents" },
       { label: "Send for Review", href: "/review-admin", icon: "send", permission: "canAdmin" },

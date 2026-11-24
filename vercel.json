@@ -15,6 +15,10 @@
     {
       "path": "/api/reviews/remind",
       "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/opendental/sync",
+      "schedule": "17 10 * * *"
     }
   ]
 }

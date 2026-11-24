@@ -1,4 +1,5 @@
 import { secureData as supabase } from "./secureData";
+import { requestOdSync } from "./openDental/clientSync";
 
 export interface StaffOverride {
   employeeId: number;
@@ -25,11 +26,13 @@ export async function setUnavailable(employeeId: number, date: string, reason: S
     employee_id: employeeId, date, reason, half_day: halfDay ?? null,
   }, { onConflict: "employee_id,date" });
   if (error) console.error("setUnavailable error:", error);
+  else requestOdSync(date);
 }
 
 export async function clearUnavailable(employeeId: number, date: string): Promise<void> {
   const { error } = await supabase.from("overrides").delete().eq("employee_id", employeeId).eq("date", date);
   if (error) console.error("clearUnavailable error:", error);
+  else requestOdSync(date);
 }
 
 export async function isUnavailable(employeeId: number, date: string): Promise<boolean> {

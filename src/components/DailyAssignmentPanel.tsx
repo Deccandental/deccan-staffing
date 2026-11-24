@@ -10,6 +10,8 @@ import { TempStaff } from "@/app/temps/page";
 import { TempAssignment, getTempAssignments, addTempAssignment, removeTempAssignment } from "@/lib/tempAssignments";
 import { secureData as supabase } from "@/lib/secureData";
 import { isOnApprovedLeave } from "@/lib/assistantSlots";
+import { saveFloaterNote } from "@/lib/scheduleStore";
+import { requestOdSync } from "@/lib/openDental/clientSync";
 
 interface Props {
   selectedDate: string;
@@ -23,6 +25,8 @@ interface Props {
   onHygienistOverrideChange?: (overrides: Record<number, number | null>) => void;
   floaterAssistantId?: number | null;
   onFloaterChange?: (assistantId: number | null) => void;
+  floaterNote?: string;
+  onFloaterNoteChange?: (note: string) => void;
   onTempAssignmentsChange?: (date: string, assignments: TempAssignment[]) => void;
   frontDeskRequired?: number;
   leaveRequests?: { employeeId: number; status: string; isPartialDay?: boolean; startDate: string; endDate: string }[];
@@ -50,6 +54,7 @@ export default function DailyAssignmentPanel({
   assistantCounts = {}, onAssistantCountChange,
   hygienistsRequired, hygienistOverrides = {}, onHygienistOverrideChange,
   floaterAssistantId = null, onFloaterChange,
+  floaterNote = "", onFloaterNoteChange,
   onTempAssignmentsChange,
   frontDeskRequired = 2,
   leaveRequests = [],
@@ -59,6 +64,9 @@ export default function DailyAssignmentPanel({
   const [floaterId, setFloaterId] = useState<number | null>(floaterAssistantId);
   const [swapping, setSwapping] = useState<{ dentistId: number; slotIndex: number } | null>(null);
   const [floaterSwapping, setFloaterSwapping] = useState(false);
+  const [noteDraft, setNoteDraft] = useState(floaterNote);
+  const [noteSaved, setNoteSaved] = useState(floaterNote);
+  const [noteStatus, setNoteStatus] = useState<"" | "saving" | "saved" | "error">("");
   const [hygSwapping, setHygSwapping] = useState<number | null>(null);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [temps, setTemps] = useState<TempStaff[]>([]);
@@ -269,8 +277,18 @@ export default function DailyAssignmentPanel({
     setSelectedDentistId(null);
   }
 
+  async function saveNote() {
+    const note = noteDraft.trim();
+    if (note === noteSaved.trim()) return;
+    setNoteStatus("saving");
+    const ok = await saveFloaterNote(selectedDate, note);
+    setNoteStatus(ok ? "saved" : "error");
+    if (ok) { setNoteSaved(note); onFloaterNoteChange?.(note); }
+  }
+
   async function handleRemoveTemp(id: string) {
     await removeTempAssignment(id);
+    requestOdSync(selectedDate);
     const updated = await getTempAssignments(selectedDate);
     setTempAssignments(updated);
     onTempAssignmentsChange?.(selectedDate, updated);
@@ -757,6 +775,22 @@ export default function DailyAssignmentPanel({
             + Add Floater for the day
           </button>
         )}
+        <div className="mt-3">
+          <label className="block text-xs font-medium text-slate-400 mb-1">
+            Note for the day <span className="font-normal">(shown in Open Dental, e.g. &ldquo;help Jansten too&rdquo;)</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <input value={noteDraft} maxLength={80}
+              onChange={(e) => { setNoteDraft(e.target.value); setNoteStatus(""); }}
+              onBlur={saveNote}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              placeholder="Optional"
+              className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none" />
+            {noteStatus === "saving" && <span className="text-xs text-slate-400">Saving…</span>}
+            {noteStatus === "saved" && <span className="text-xs text-green-600">Saved</span>}
+            {noteStatus === "error" && <span className="text-xs text-red-500">Couldn&apos;t save</span>}
+          </div>
+        </div>
       </section>
     </div>
   );

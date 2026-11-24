@@ -4,7 +4,7 @@ import { getSessionToken } from "./secureData";
 
 export type DentistPrefs = Record<number, number[]>;
 
-function rowToEmployee(row: any): Employee {
+export function rowToEmployee(row: any): Employee {
   // Handle default_schedule being either a string or an object
   let defaultSchedule = row.default_schedule;
   if (typeof defaultSchedule === "string") {
