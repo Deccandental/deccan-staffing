@@ -55,18 +55,20 @@ export async function POST(req: NextRequest) {
   }
 
   // Sync status for approved leave.
-  let sync: { state: "synced" | "pending" | "error" | "off"; message?: string } = { state: "off" };
+  let sync: { state: "synced" | "pending" | "error" | "attention" | "off"; message?: string } = { state: "off" };
   if (configured && settings.enabled && r.status === "approved") {
     const [{ data: dayRows }, { data: recs }] = await Promise.all([
       supabaseAdmin.from("od_sync_days").select("date, status, message, synced_at").gte("date", r.startDate).lte("date", r.endDate),
       supabaseAdmin.from("od_blockouts").select("date, kind, employee_id").gte("date", r.startDate).lte("date", r.endDate),
     ]);
     const err = (dayRows ?? []).find((d: any) => d.status === "error");
+    const flagged = (dayRows ?? []).find((d: any) => d.status === "edited_in_od" || d.status === "deleted_in_od" || d.status === "skipped_manual");
     const reviewedAt = r.reviewedAt ?? "";
     const stale = (dayRows ?? []).length === 0 || (dayRows ?? []).some((d: any) => d.synced_at < reviewedAt);
     const today = new Date().toISOString().slice(0, 10);
     const allPast = r.endDate < today;
     if (err) sync = { state: "error", message: err.message ?? "Sync failed." };
+    else if (flagged && !isProvider) sync = { state: "attention", message: "The Staff Schedules note for one of these days was typed, edited or deleted in Open Dental — see the Open Dental page." };
     else if (stale && !allPast) sync = { state: "pending" };
     else sync = { state: "synced", message: isProvider
       ? `${(recs ?? []).filter((x: any) => x.kind === "provider" && x.employee_id === r.employeeId).length} provider blockout(s) in Open Dental`

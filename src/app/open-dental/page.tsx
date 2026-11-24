@@ -32,6 +32,7 @@ interface SetupData {
 interface Preview { isOpen: boolean; staffLines: string[]; blockouts: { kind: string; start: string; stop: string; operatoryNums: number[]; note: string }[] }
 
 const ORANGE = "#e8622a";
+const STATUS_LABEL: Record<string, string> = { edited_in_od: "Edited in Open Dental. ", deleted_in_od: "Deleted in Open Dental. ", skipped_manual: "Typed by hand. ", error: "" };
 const PROVIDER_ROLES = new Set(["Dentist", "Hygienist"]);
 const ROLE_ORDER = ["Dentist", "Hygienist", "RDA", "Assistant", "Front Desk"];
 
@@ -58,6 +59,17 @@ function OpenDentalPageBody() {
   const [previewDate, setPreviewDate] = useState(todayStr());
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewErr, setPreviewErr] = useState("");
+  const [forcing, setForcing] = useState<string | null>(null);
+
+  async function useAppVersion(date: string, status: string) {
+    const what = status === "deleted_in_od" ? "put the Staff Schedules note back on" : "replace the Staff Schedules note on";
+    if (!confirm(`This will ${what} ${date} in Open Dental, exactly as the staffing app has it. Anything typed into that note in Open Dental will be lost. Continue?`)) return;
+    setForcing(date);
+    const r = await syncOdNow({ from: date, to: date, force: true });
+    if (!r.ok) alert(r.errors?.[0]?.message ?? r.error ?? r.skipped ?? "Couldn't update Open Dental.");
+    setForcing(null);
+    load();
+  }
 
   async function load() {
     try {
@@ -158,12 +170,24 @@ function OpenDentalPageBody() {
             </div>
             {syncMsg && <p className="mt-2 text-sm text-slate-500">{syncMsg}</p>}
             {data.problemDays.length > 0 && (
-              <div className="mt-4 space-y-1">
+              <div className="mt-4 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Days that need attention</p>
                 {data.problemDays.map((d) => (
-                  <p key={d.date} className={`text-xs ${d.status === "error" ? "text-red-600" : "text-amber-700"}`}>
-                    <b>{d.date}</b> — {d.message}
-                  </p>
+                  <div key={d.date} className={`rounded-lg px-3 py-2 text-xs ${d.status === "error" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-800"}`}>
+                    <b>{new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</b>
+                    {" — "}{STATUS_LABEL[d.status] ?? ""}{d.message}
+                    {(d.status === "edited_in_od" || d.status === "deleted_in_od") && (
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        <button onClick={() => { setPreviewDate(d.date); }} className="rounded border border-amber-300 bg-white px-2 py-0.5 font-semibold hover:bg-amber-100">
+                          Preview the app&apos;s version
+                        </button>
+                        <button onClick={() => useAppVersion(d.date, d.status)} disabled={forcing === d.date}
+                          className="rounded border border-amber-300 bg-white px-2 py-0.5 font-semibold hover:bg-amber-100 disabled:opacity-50">
+                          {forcing === d.date ? "Updating…" : d.status === "deleted_in_od" ? "Put the app's note back" : "Use the staffing app's version"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}

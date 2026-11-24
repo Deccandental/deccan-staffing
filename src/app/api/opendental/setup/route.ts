@@ -5,6 +5,7 @@ import { odConfigured, listProviders, listOperatories, listBlockoutTypes } from 
 import { loadOdSettings } from "@/lib/openDental/sync";
 import { loadStaffLinks, loadStaffForOd } from "@/lib/openDental/dayPlan";
 import { defaultDisplayName } from "@/lib/openDental/staffNote";
+import { todayStr } from "@/lib/today";
 
 // The Open Dental setup page: settings, how each staff member maps to Open
 // Dental, and (when the keys are in) Open Dental's own lists to pick from.
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
   const [settings, links, staff] = await Promise.all([loadOdSettings(), loadStaffLinks(), loadStaffForOd()]);
   const { data: errorDays } = await supabaseAdmin.from("od_sync_days").select("date, status, message, synced_at")
-    .neq("status", "ok").order("date").limit(60);
+    .neq("status", "ok").gte("date", todayStr()).order("date").limit(60);
   const { data: lastSync } = await supabaseAdmin.from("od_sync_days").select("synced_at").order("synced_at", { ascending: false }).limit(1);
 
   let od: { providers: any[]; operatories: any[]; blockoutTypes: any[] } | null = null;

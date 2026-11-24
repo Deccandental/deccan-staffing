@@ -21,6 +21,11 @@ export class OdError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 
+/** Open Dental answers 404, or 400 "...not found", for a ScheduleNum that no longer exists. */
+export function isNotFound(e: OdError): boolean {
+  return e.status === 404 || (e.status === 400 && /not found|does not exist|invalid schedulenum/i.test(e.message));
+}
+
 async function od<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
   if (!odConfigured()) throw new OdError("Open Dental keys are not set up yet.", 0);
   let res: Response;
@@ -140,7 +145,7 @@ export async function updateBlockout(scheduleNum: number, b: BlockoutInput): Pro
 /** Deletes a blockout; one that is already gone counts as deleted. */
 export async function deleteBlockout(scheduleNum: number): Promise<void> {
   try { await od("DELETE", `/schedules/${scheduleNum}/Blockout`); }
-  catch (e) { if (e instanceof OdError && e.status === 404) return; throw e; }
+  catch (e) { if (e instanceof OdError && isNotFound(e)) return; throw e; }
 }
 
 // ---- appointments (read-only, free) -----------------------------------------

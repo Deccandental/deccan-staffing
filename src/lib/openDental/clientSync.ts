@@ -29,7 +29,7 @@ function flush() {
 }
 
 /** Runs a sync now and waits for the answer (used by Retry / Sync now buttons). */
-export async function syncOdNow(body: { from: string; to: string } | { all: true }): Promise<{ ok: boolean; skipped?: string; changes?: number; errors?: { date: string; message: string }[]; error?: string }> {
+export async function syncOdNow(body: { from: string; to: string; force?: boolean } | { all: true }): Promise<{ ok: boolean; skipped?: string; changes?: number; errors?: { date: string; message: string }[]; flagged?: { date: string; status: string; message?: string }[]; error?: string }> {
   try {
     const res = await fetch("/api/opendental/sync", { method: "POST", headers: sessionHeaders(), body: JSON.stringify(body) });
     return await res.json();

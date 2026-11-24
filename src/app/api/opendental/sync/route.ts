@@ -6,6 +6,9 @@ import { syncRange, syncUpcoming, SyncResult } from "@/lib/openDental/sync";
 //   GET  — the nightly scheduled job: syncs today through the next ~2 months.
 //   POST — after someone changes the schedule or leave: { from, to } for just
 //          those dates, or { all: true } for the whole upcoming window.
+//          { from, to, force: true } (admins) rewrites the Staff Schedules
+//          note exactly as the app has it, even if it was edited or deleted
+//          in Open Dental.
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
@@ -18,7 +21,7 @@ function summarize(out: { skipped?: string; results: SyncResult[] }) {
     skipped: out.skipped,
     days: out.results.length,
     changes: out.results.reduce((n, r) => n + r.changes, 0),
-    manualDays: out.results.filter((r) => r.status === "skipped_manual").map((r) => r.date),
+    flagged: out.results.filter((r) => r.status !== "ok" && r.status !== "error").map((r) => ({ date: r.date, status: r.status, message: r.message })),
     errors: errors.map((r) => ({ date: r.date, message: r.message })),
   };
 }
@@ -49,7 +52,11 @@ export async function POST(req: NextRequest) {
     }
     const spanDays = (Date.parse(to) - Date.parse(from)) / 86400000;
     if (spanDays > 130) return NextResponse.json({ ok: false, error: "Too many days at once." }, { status: 400 });
-    return NextResponse.json(summarize(await syncRange(from, to)));
+    const force = body?.force === true;
+    if (force && (!hasPerm(session, "admin") || from !== to)) {
+      return NextResponse.json({ ok: false, error: "Only an admin can overwrite a day, one day at a time." }, { status: 403 });
+    }
+    return NextResponse.json(summarize(await syncRange(from, to, { force })));
   } catch (e: any) {
     console.error("Open Dental sync failed:", e);
     return NextResponse.json({ ok: false, error: e?.message ?? "Sync failed." }, { status: 500 });

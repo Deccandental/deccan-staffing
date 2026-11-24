@@ -5,12 +5,19 @@
 // compares them with the blockouts the app created before (od_blockouts).
 // It then creates, updates or deletes only those. Blockouts typed by hand in
 // Open Dental are never edited or deleted.
+//
+// The team may also edit the app's Staff Schedules note in Open Dental:
+//   - lines they ADD are kept (at the bottom) when the app updates the note;
+//   - if they CHANGE or remove one of the app's lines, the app stops updating
+//     that day's note and flags it on the Open Dental page;
+//   - if they DELETE the note, it stays deleted.
+// An admin can override either with "Use the staffing app's version".
 import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { todayStr } from "@/lib/today";
-import { odConfigured, OdError, createBlockout, updateBlockout, deleteBlockout, listBlockouts, BlockoutInput } from "./client";
+import { odConfigured, OdError, OdBlockout, createBlockout, updateBlockout, deleteBlockout, listBlockouts, BlockoutInput } from "./client";
 import { buildDayPlans, eachDate, DayPlan, StaffLink } from "./dayPlan";
-import { buildStaffNoteLines, staffNoteSpan, providerSpan, providerNote, STAFF_NOTE_TITLE, DayTimes } from "./staffNote";
+import { buildStaffNoteLines, staffNoteSpan, providerSpan, providerNote, STAFF_NOTE_TITLE, DayTimes, splitLines, mergeStaffNote } from "./staffNote";
 
 export interface OdSettings {
   enabled: boolean;
@@ -68,70 +75,131 @@ export function desiredBlockouts(plan: DayPlan, s: OdSettings, links: Map<number
   return out;
 }
 
-export interface SyncResult { date: string; status: "ok" | "error" | "skipped_manual"; message?: string; changes: number }
+export interface SyncResult { date: string; status: "ok" | "error" | "skipped_manual" | "edited_in_od" | "deleted_in_od"; message?: string; changes: number }
 
 async function setDayStatus(date: string, status: SyncResult["status"], message?: string) {
   await supabaseAdmin.from("od_sync_days").upsert({ date, status, message: message ?? null, synced_at: new Date().toISOString() }, { onConflict: "date" });
 }
 
-async function syncOneDay(plan: DayPlan, s: OdSettings, links: Map<number, StaffLink>, existing: any[]): Promise<SyncResult> {
+const sameOps = (a: string, b: number[]) =>
+  String(a ?? "").split(",").map((x) => Number(x.trim())).filter(Boolean).sort().join(",") === [...b].sort().join(",");
+
+/**
+ * Brings one day in Open Dental in line with the app.
+ * `force` (admin's "Use the staffing app's version"): the staff note is
+ * rewritten exactly as the app has it, and put back if it was deleted.
+ */
+async function syncOneDay(plan: DayPlan, s: OdSettings, links: Map<number, StaffLink>, existing: any[], force: boolean): Promise<SyncResult> {
   const desired = desiredBlockouts(plan, s, links);
   const have = new Map(existing.map((r) => [keyOf(r.kind, r.employee_id), r]));
+  const times: DayTimes = { dayStart: s.dayStart, midday: s.midday, dayEnd: s.dayEnd, rowMinutes: s.rowMinutes };
   let changes = 0;
-  let skippedManual = false;
+  const flags: { status: SyncResult["status"]; message: string }[] = [];
 
-  // Don't add a second Staff Schedules note to a day the team already filled in by hand.
-  if (desired.some((d) => d.kind === "staff") && !have.has(keyOf("staff", null))) {
-    const theirs = (await listBlockouts(plan.date)).some((b) =>
-      String(b.operatories ?? "").split(",").map((x) => Number(x.trim())).includes(s.notesOperatoryNum!) &&
-      String(b.Note ?? "").trim().toLowerCase().startsWith(STAFF_NOTE_TITLE.toLowerCase())
-    );
-    if (theirs) skippedManual = true;
-  }
+  // What's on this day in Open Dental right now — read only when needed.
+  let odDay: OdBlockout[] | null = null;
+  const inOd = async () => (odDay ??= await listBlockouts(plan.date));
+  const findInOd = async (num: number) => (await inOd()).find((b) => Number(b.ScheduleNum) === num) ?? null;
 
-  for (const d of desired) {
-    if (d.kind === "staff" && skippedManual) continue;
-    const key = keyOf(d.kind, d.employeeId);
-    const rec = have.get(key);
-    have.delete(key);
-    const hash = hashOf(d.input);
-    if (rec && rec.content_hash === hash) continue;
-    let scheduleNum: number;
-    if (rec) {
-      try { await updateBlockout(Number(rec.schedule_num), d.input); scheduleNum = Number(rec.schedule_num); }
-      catch (e) {
-        // Someone deleted it in Open Dental; put it back.
-        if (!(e instanceof OdError) || (e.status !== 404 && e.status !== 400)) throw e;
-        scheduleNum = await createBlockout(d.input);
-      }
-    } else {
-      scheduleNum = await createBlockout(d.input);
-    }
-    changes++;
-    const row = { date: plan.date, kind: d.kind, employee_id: d.employeeId, schedule_num: scheduleNum, content_hash: hash, synced_at: new Date().toISOString() };
+  async function record(rec: any, d: Desired, scheduleNum: number, extra: Record<string, unknown> = {}) {
+    const row = { date: plan.date, kind: d.kind, employee_id: d.employeeId, schedule_num: scheduleNum, content_hash: hashOf(d.input), synced_at: new Date().toISOString(), deleted_in_od: false, ...extra };
     const { error } = rec
       ? await supabaseAdmin.from("od_blockouts").update(row).eq("id", rec.id)
       : await supabaseAdmin.from("od_blockouts").insert(row);
     if (error) throw new Error(`Saved in Open Dental but couldn't record it here: ${error.message}`);
   }
 
+  for (const d of desired) {
+    const key = keyOf(d.kind, d.employeeId);
+    const rec = have.get(key);
+    have.delete(key);
+    const hash = hashOf(d.input);
+
+    if (d.kind === "staff") {
+      const desiredLines = splitLines(d.input.note);
+      if (!rec) {
+        // Don't add a second note to a day the team already filled in by hand.
+        const theirs = (await inOd()).some((b) => sameOps(b.operatories, [s.notesOperatoryNum!]) &&
+          String(b.Note ?? "").trim().toLowerCase().startsWith(STAFF_NOTE_TITLE.toLowerCase()));
+        if (theirs) {
+          flags.push({ status: "skipped_manual", message: "A hand-made Staff Schedules blockout is already on this day, so the app left the Notes column alone. Delete it in Open Dental if you'd like the app to take this day over." });
+          continue;
+        }
+        await record(null, d, await createBlockout(d.input), { last_note: d.input.note });
+        changes++;
+        continue;
+      }
+      if (rec.deleted_in_od && !force) {
+        flags.push({ status: "deleted_in_od", message: "The Staff Schedules note was deleted in Open Dental, so the app is leaving this day alone." });
+        continue;
+      }
+      if (rec.content_hash === hash && !rec.deleted_in_od && !force) continue; // nothing new to write
+
+      const current = rec.deleted_in_od ? null : await findInOd(Number(rec.schedule_num));
+      if (!current) {
+        if (force) { await record(rec, d, await createBlockout(d.input), { last_note: d.input.note }); changes++; }
+        else {
+          await supabaseAdmin.from("od_blockouts").update({ deleted_in_od: true }).eq("id", rec.id);
+          flags.push({ status: "deleted_in_od", message: "The Staff Schedules note was deleted in Open Dental, so the app is leaving this day alone." });
+        }
+        continue;
+      }
+      if (force) {
+        await updateBlockout(Number(rec.schedule_num), d.input);
+        await record(rec, d, Number(rec.schedule_num), { last_note: d.input.note });
+        changes++;
+        continue;
+      }
+      const merge = mergeStaffNote(splitLines(current.Note), rec.last_note ? splitLines(rec.last_note) : null, desiredLines);
+      if (merge.action === "conflict") {
+        const parts = [
+          merge.theirs.length ? `Open Dental has: ${merge.theirs.join(" · ")}` : "",
+          merge.ours.length ? `the app had: ${merge.ours.join(" · ")}` : "",
+        ].filter(Boolean).join("; ");
+        flags.push({ status: "edited_in_od", message: `Someone changed the Staff Schedules note in Open Dental (${parts}). The app hasn't overwritten it. Update the Schedule Builder to match, or use the staffing app's version.` });
+        continue;
+      }
+      if (merge.action === "write") {
+        const input = { ...d.input, ...staffNoteSpan(merge.lines.length, times), note: merge.lines.join("\n") };
+        await updateBlockout(Number(rec.schedule_num), input);
+        changes++;
+      }
+      await record(rec, d, Number(rec.schedule_num), { last_note: d.input.note });
+      continue;
+    }
+
+    // Provider blockouts follow approved leave strictly: changed or deleted in Open Dental, they're put back.
+    if (rec) {
+      const current = await findInOd(Number(rec.schedule_num));
+      const intact = current && rec.content_hash === hash &&
+        String(current.StartTime).slice(0, 5) === d.input.start && String(current.StopTime).slice(0, 5) === d.input.stop &&
+        sameOps(current.operatories, d.input.operatoryNums);
+      if (intact) continue;
+      if (current) await updateBlockout(Number(rec.schedule_num), d.input);
+      await record(rec, d, current ? Number(rec.schedule_num) : await createBlockout(d.input));
+    } else {
+      await record(null, d, await createBlockout(d.input));
+    }
+    changes++;
+  }
+
   // Anything the app made earlier that's no longer wanted (leave cancelled, day closed...).
   for (const rec of have.values()) {
-    await deleteBlockout(Number(rec.schedule_num));
+    if (!rec.deleted_in_od) await deleteBlockout(Number(rec.schedule_num));
     await supabaseAdmin.from("od_blockouts").delete().eq("id", rec.id);
     changes++;
   }
 
-  return skippedManual
-    ? { date: plan.date, status: "skipped_manual", message: "A hand-made Staff Schedules blockout is already on this day, so the app left the Notes column alone.", changes }
-    : { date: plan.date, status: "ok", changes };
+  const order: SyncResult["status"][] = ["edited_in_od", "deleted_in_od", "skipped_manual"];
+  const top = flags.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))[0];
+  return top ? { date: plan.date, status: top.status, message: top.message, changes } : { date: plan.date, status: "ok", changes };
 }
 
 /**
  * Syncs every date in [from, to] (past dates are left alone).
  * Returns per-date results; a failure on one date doesn't stop the others.
  */
-export async function syncRange(from: string, to: string): Promise<{ skipped?: string; results: SyncResult[] }> {
+export async function syncRange(from: string, to: string, opts: { force?: boolean } = {}): Promise<{ skipped?: string; results: SyncResult[] }> {
   if (!odConfigured()) return { skipped: "Open Dental keys are not set up yet.", results: [] };
   const s = await loadOdSettings();
   if (!s.enabled) return { skipped: "Open Dental sync is turned off.", results: [] };
@@ -146,7 +214,7 @@ export async function syncRange(from: string, to: string): Promise<{ skipped?: s
   const results: SyncResult[] = [];
   for (const plan of plans) {
     try {
-      const r = await syncOneDay(plan, s, links, (recs ?? []).filter((x) => x.date === plan.date));
+      const r = await syncOneDay(plan, s, links, (recs ?? []).filter((x) => x.date === plan.date), !!opts.force);
       await setDayStatus(plan.date, r.status, r.message);
       results.push(r);
     } catch (e: any) {

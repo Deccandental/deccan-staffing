@@ -16,7 +16,7 @@ interface Info {
   isProvider: boolean;
   booked: { date: string; count: number }[] | null;
   bookedError: string | null;
-  sync: { state: "synced" | "pending" | "error" | "off"; message?: string };
+  sync: { state: "synced" | "pending" | "error" | "attention" | "off"; message?: string };
 }
 
 const fmt = (ymd: string) => new Date(ymd + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -74,8 +74,9 @@ export default function OdLeaveInfo({ requestId, startDate, endDate, status }: {
           {info.sync.state === "synced" && <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700">✓ On the Open Dental schedule</span>}
           {info.sync.state === "pending" && <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">Not yet synced to Open Dental</span>}
           {info.sync.state === "error" && <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">Open Dental sync failed</span>}
+          {info.sync.state === "attention" && <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">Check the Open Dental page</span>}
           {info.sync.message && <span className="text-xs text-gray-400">{info.sync.message}</span>}
-          {info.sync.state !== "synced" && (
+          {(info.sync.state === "pending" || info.sync.state === "error") && (
             <button onClick={retry} disabled={retrying}
               className="rounded-lg border border-gray-200 px-3 py-1 text-xs font-semibold text-gray-500 hover:bg-gray-50 disabled:opacity-50">
               {retrying ? "Syncing…" : "↻ Retry"}

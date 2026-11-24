@@ -101,3 +101,46 @@ export function providerSpan(half: "AM" | "PM" | null, t: DayTimes): { start: st
   if (half === "PM") return { start: t.midday, stop: t.dayEnd };
   return { start: t.dayStart, stop: t.dayEnd };
 }
+
+// ---- keeping the team's edits -------------------------------------------------
+
+export const splitLines = (note: string) => String(note ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+/** a minus b, one-for-one (a line appearing twice in a and once in b leaves one), keeping a's order. */
+export function linesMinus(a: string[], b: string[]): string[] {
+  const left = new Map<string, number>();
+  for (const l of b) left.set(l, (left.get(l) ?? 0) + 1);
+  const out: string[] = [];
+  for (const l of a) {
+    const n = left.get(l) ?? 0;
+    if (n > 0) left.set(l, n - 1); else out.push(l);
+  }
+  return out;
+}
+const containsAll = (hay: string[], needles: string[]) => linesMinus(needles, hay).length === 0;
+
+export type MergeResult =
+  | { action: "none" }                                   // Open Dental already shows everything it should
+  | { action: "write"; lines: string[] }                 // safe to update; the team's added lines are kept
+  | { action: "conflict"; theirs: string[]; ours: string[] }; // someone changed or removed one of the app's lines
+
+/**
+ * Decides how to update the Staff Schedules note given what Open Dental shows now
+ * (`current`), what the app wrote last time (`lastApp`) and what it wants now (`desired`).
+ * Lines the team added are kept at the bottom. If they changed or removed one
+ * of the app's own lines, the app doesn't overwrite it; the day gets flagged.
+ */
+export function mergeStaffNote(current: string[], lastApp: string[] | null, desired: string[]): MergeResult {
+  const base = lastApp ?? desired;
+  const sameLines = (a: string[], b: string[]) => linesMinus(a, b).length === 0 && linesMinus(b, a).length === 0;
+  if (containsAll(current, base)) {
+    // The app's last version is all still there (plus anything the team added).
+    if (sameLines(base, desired)) return { action: "none" };
+    return { action: "write", lines: [...desired, ...linesMinus(current, base)] };
+  }
+  // Someone edited the app's lines. If they've already made it match what the
+  // app wants now (and no outdated app line is left), there's nothing to do.
+  const outdated = linesMinus(base, desired);
+  if (containsAll(current, desired) && linesMinus(outdated, current).length === outdated.length) return { action: "none" };
+  return { action: "conflict", theirs: linesMinus(current, base), ours: linesMinus(base, current) };
+}

@@ -172,7 +172,7 @@ async function main() {
   console.log("approved leave for a hygienist");
   db.leave_requests.push({ id: "l1", employee_id: 5, employee_name: "Jantsen Lee", start_date: monday, end_date: wednesday, starts_midday: false, ends_midday: true, status: "approved", reason: "pto", total_days: 2.5, submitted_at: "x" });
   r = await syncRange(monday, wednesday);
-  check("note lists them out", staffBlk()?.Note.includes(`JANTSEN OUT ${md(monday)}-${md(wednesday)}`) && !staffBlk()?.Note.includes("HYG/"), staffBlk()?.Note);
+  check("note lists them out", !!staffBlk()?.Note.includes(`JANTSEN OUT ${md(monday)}-${md(wednesday)}`) && !staffBlk()?.Note.includes("HYG/"), staffBlk()?.Note);
   const prov = od.blockouts.filter((b) => b.operatories === "3");
   check("provider blockout on each open day, on their column", prov.length === 2 && prov.every((b) => b.BlockoutType === 6), prov);
   const wed = prov.find((b) => b.SchedDate === wednesday);
@@ -184,7 +184,7 @@ async function main() {
   db.leave_requests[0].status = "cancelled";
   r = await syncRange(monday, wednesday);
   check("provider blockouts removed", od.blockouts.filter((b) => b.operatories === "3").length === 0, od.blockouts);
-  check("note back to normal", staffBlk()?.Note.includes("HYG/ JANTSEN") && !staffBlk()?.Note.includes("OUT"), staffBlk()?.Note);
+  check("note back to normal", !!staffBlk()?.Note.includes("HYG/ JANTSEN") && !staffBlk()?.Note.includes("OUT"), staffBlk()?.Note);
   check("records match Open Dental", db.od_blockouts.length === od.blockouts.length, { db: db.od_blockouts.length, od: od.blockouts.length });
 
   console.log("day already has a hand-made note");
@@ -193,11 +193,57 @@ async function main() {
   check("left alone", r.results[0]?.status === "skipped_manual" && od.blockouts.filter((b) => b.SchedDate === nextMonday).length === 1, r);
   check("hand-made one untouched", od.blockouts.find((b) => b.ScheduleNum === 1)?.Note === "Staff Schedules\nFront Desk:\nARI");
 
-  console.log("someone deleted the app's note in Open Dental");
-  od.blockouts = od.blockouts.filter((b) => !(b.operatories === "99" && b.SchedDate === monday));
+  console.log("merge rules");
+  const M = note.mergeStaffNote;
+  check("unchanged -> none", M(["A", "B"], ["A", "B"], ["A", "B"]).action === "none");
+  check("added line kept", JSON.stringify(M(["A", "B", "late start"], ["A", "B"], ["A", "C"])) === JSON.stringify({ action: "write", lines: ["A", "C", "late start"] }));
+  check("cancelled leave line removed", JSON.stringify(M(["T", "X OUT 1/2", "A"], ["T", "X OUT 1/2", "A"], ["T", "A"])) === JSON.stringify({ action: "write", lines: ["T", "A"] }));
+  check("changed line -> conflict", M(["A", "CHO/UNIQUE"], ["A", "CHO/MARGOT"], ["A", "CHO/MARGOT", "Z"]).action === "conflict");
+  check("team already made it match -> none", M(["A", "CHO/UNIQUE"], ["A", "CHO/MARGOT"], ["A", "CHO/UNIQUE"]).action === "none");
+
+  console.log("the team adds a line in Open Dental");
+  const setNote = (text: string) => { const b = staffBlk()!; b.Note = text; };
+  setNote(staffBlk()!.Note + "\nDr. Chopra late start 9am");
   db.schedules[0].floater_note = "lab day";
   r = await syncRange(monday, monday);
-  check("re-created", staffBlk()?.Note.includes("FLOAT/ MARGOT (lab day)") === true, staffBlk());
+  check("app's change made, their line kept", staffBlk()?.Note === "Staff Schedules\nFront Desk:\nARI/KETKI\nAC/UNIQUE\nHYG/ JANTSEN\nFLOAT/ MARGOT (lab day)\nDr. Chopra late start 9am", staffBlk()?.Note);
+  check("taller to fit the extra line", staffBlk()?.StopTime === "08:10:00", staffBlk()?.StopTime);
+  check("status ok", r.results[0]?.status === "ok", r.results[0]);
+
+  console.log("the team changes an assignment in Open Dental");
+  setNote(staffBlk()!.Note.replace("AC/UNIQUE", "AC/MARGOT"));
+  const before = staffBlk()!.Note;
+  db.schedules[0].floater_note = "sterilization";
+  r = await syncRange(monday, monday);
+  check("not overwritten", staffBlk()?.Note === before, staffBlk()?.Note);
+  check("flagged with the difference", r.results[0]?.status === "edited_in_od" && /AC\/MARGOT/.test(r.results[0]?.message ?? "") && /AC\/UNIQUE/.test(r.results[0]?.message ?? ""), r.results[0]);
+  check("flag saved for the setup page", db.od_sync_days.find((d) => d.date === monday)?.status === "edited_in_od");
+
+  console.log("admin: use the staffing app's version");
+  r = await syncRange(monday, monday, { force: true });
+  check("rewritten exactly", staffBlk()?.Note === "Staff Schedules\nFront Desk:\nARI/KETKI\nAC/UNIQUE\nHYG/ JANTSEN\nFLOAT/ MARGOT (sterilization)", staffBlk()?.Note);
+  check("flag cleared", r.results[0]?.status === "ok" && db.od_sync_days.find((d) => d.date === monday)?.status === "ok");
+
+  console.log("the team deletes the note in Open Dental");
+  od.blockouts = od.blockouts.filter((b) => !(b.operatories === "99" && b.SchedDate === monday));
+  db.schedules[0].floater_note = "front desk at lunch";
+  r = await syncRange(monday, monday);
+  check("stays deleted", !staffBlk() && r.results[0]?.status === "deleted_in_od", r.results[0]);
+  db.schedules[0].floater_note = "something else";
+  r = await syncRange(monday, monday);
+  check("still deleted on later syncs", !staffBlk() && r.results[0]?.status === "deleted_in_od");
+  r = await syncRange(monday, monday, { force: true });
+  check("admin can put it back", staffBlk()?.Note.includes("(something else)") === true, staffBlk());
+
+  console.log("a provider blockout deleted in Open Dental comes back");
+  db.leave_requests[0].status = "approved";
+  await syncRange(monday, monday);
+  const provNum = od.blockouts.find((b) => b.operatories === "3" && b.SchedDate === monday)?.ScheduleNum;
+  od.blockouts = od.blockouts.filter((b) => b.ScheduleNum !== provNum);
+  r = await syncRange(monday, monday);
+  check("re-created", od.blockouts.some((b) => b.operatories === "3" && b.SchedDate === monday), od.blockouts);
+  db.leave_requests[0].status = "cancelled";
+  await syncRange(monday, wednesday);
 
   console.log("past dates are never touched");
   r = await syncRange(addDays(todayPacific, -10), addDays(todayPacific, -1));

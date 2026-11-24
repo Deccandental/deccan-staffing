@@ -9,6 +9,9 @@
 --
 -- Only blockouts the app created are ever changed or removed: every one is
 -- recorded in od_blockouts with the ScheduleNum Open Dental gave it.
+-- Lines the team adds to the staff note in Open Dental are kept; if they
+-- change one of the app's lines, the app stops updating that day's note and
+-- flags it; if they delete the note, it stays deleted.
 --
 -- All four tables are read and written only by server routes (service role);
 -- the public key has no access (see 20261122_02_lock_down_public_key.sql).
@@ -48,6 +51,11 @@ create table if not exists public.od_blockouts (
   employee_id integer,
   schedule_num bigint not null,
   content_hash text not null,
+  -- For the staff note: the lines the app wrote last time. Lines the team
+  -- adds in Open Dental are anything beyond these, and are kept.
+  last_note text,
+  -- The team deleted this note in Open Dental: it stays deleted.
+  deleted_in_od boolean not null default false,
   synced_at timestamptz not null default now()
 );
 create unique index if not exists od_blockouts_unique
@@ -56,7 +64,7 @@ create unique index if not exists od_blockouts_unique
 -- Result of the most recent sync of each date.
 create table if not exists public.od_sync_days (
   date text primary key,
-  status text not null check (status in ('ok', 'error', 'skipped_manual')),
+  status text not null check (status in ('ok', 'error', 'skipped_manual', 'edited_in_od', 'deleted_in_od')),
   message text,
   synced_at timestamptz not null default now()
 );
