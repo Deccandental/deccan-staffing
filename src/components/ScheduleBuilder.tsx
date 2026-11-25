@@ -1,7 +1,10 @@
 "use client";
 
 import OdBlockoutPanel from "@/components/OdBlockoutPanel";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { sessionHeaders } from "@/lib/secureData";
+import { syncOdNow } from "@/lib/openDental/clientSync";
+import { todayStr } from "@/lib/today";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -46,6 +49,40 @@ export default function ScheduleBuilder() {
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
+  // Open Dental: each day's status for the calendar, and the "send this month" button.
+  const [od, setOd] = useState<{ configured: boolean; enabled: boolean; statuses: Record<string, string> } | null>(null);
+  const [odSending, setOdSending] = useState(false);
+  const [odMsg, setOdMsg] = useState("");
+  // How much to send: the month on screen, or a number of days from today.
+  const [odRange, setOdRange] = useState<"month" | "14" | "30" | "60" | "90">("month");
+  const loadOdMonth = useCallback(async () => {
+    try {
+      const res = await fetch("/api/opendental/day", { method: "POST", headers: sessionHeaders(), body: JSON.stringify({ date: `${year}-${String(month).padStart(2, "0")}-01`, action: "month" }) });
+      const json = await res.json();
+      setOd(json.ok ? { configured: json.configured, enabled: json.enabled, statuses: json.statuses ?? {} } : null);
+    } catch { setOd(null); }
+  }, [year, month]);
+  useEffect(() => { setOdMsg(""); loadOdMonth(); }, [loadOdMonth]);
+
+  async function sendMonthToOd() {
+    const mm = String(month).padStart(2, "0");
+    let from = `${year}-${mm}-01`;
+    let to = `${year}-${mm}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;
+    if (odRange !== "month") {
+      from = todayStr();
+      const end = new Date(`${from}T12:00:00Z`);
+      end.setUTCDate(end.getUTCDate() + Number(odRange));
+      to = end.toISOString().slice(0, 10);
+    }
+    setOdSending(true);
+    setOdMsg("");
+    const r = await syncOdNow({ from, to });
+    setOdSending(false);
+    setOdMsg(r.skipped ? r.skipped
+      : r.ok ? (r.flagged?.length ? `Sent. ${r.flagged.length} day${r.flagged.length === 1 ? "" : "s"} need a look (marked OD!).` : "Sent to Open Dental.")
+      : `Some days didn't send: ${r.errors?.[0]?.message ?? r.error ?? "unknown error"}`);
+    loadOdMonth();
+  }
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
@@ -491,94 +528,125 @@ export default function ScheduleBuilder() {
                 </span>
                 {saving && <span className="ml-3 text-xs text-cyan-500">💾 Saving...</span>}
               </div>
-              <button onClick={applyDefaults} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">↺ Re-apply Defaults</button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {odMsg && <span className="text-xs text-slate-500">{odMsg}</span>}
+                {od?.configured && od.enabled ? (
+                  <div className="flex items-center rounded-lg border text-xs font-semibold" style={{ borderColor: "#c4b5fd", background: "#f5f3ff" }}>
+                    <button onClick={sendMonthToOd} disabled={odSending}
+                      title="Days before today are left alone"
+                      className="px-3 py-1.5 transition disabled:opacity-50" style={{ color: "#6d28d9" }}>
+                      {odSending ? "Sending…" : "↗ Send to Open Dental:"}
+                    </button>
+                    <select value={odRange} onChange={(e) => setOdRange(e.target.value as typeof odRange)} disabled={odSending}
+                      className="rounded-r-lg border-l bg-white px-2 py-1.5 text-xs" style={{ borderColor: "#c4b5fd", color: "#6d28d9" }}>
+                      <option value="month">{formatMonthYear(year, month)}</option>
+                      <option value="14">Next 2 weeks</option>
+                      <option value="30">Next 30 days</option>
+                      <option value="60">Next 60 days</option>
+                      <option value="90">Next 90 days</option>
+                    </select>
+                  </div>
+                ) : od?.configured ? (
+                  <a href="/open-dental" className="text-xs font-semibold hover:underline" style={{ color: "#6d28d9" }}>Open Dental sync is off — set up</a>
+                ) : null}
+                <button onClick={applyDefaults} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">↺ Re-apply Defaults</button>
+              </div>
             </div>
             <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
               <div className="h-full rounded-full bg-cyan-500 transition-all" style={{ width: `${totalDays > 0 ? (completedDays / totalDays) * 100 : 0}%` }} />
             </div>
           </div>
 
-          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} dayAssignments={monthAssignments} dayEvents={dayEvents} />
+          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} dayAssignments={monthAssignments} dayEvents={dayEvents} odStatuses={od?.configured && od.enabled ? od.statuses : undefined} />
 
           {selectedDate ? (
             <div className="grid gap-6 lg:grid-cols-2">
-              <div className="rounded-2xl bg-white p-6 shadow">
-                <h3 className="card-title mb-1">
-                  {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-                </h3>
-                <p className="text-sm text-slate-400 mb-4">Select which dentists are working today</p>
+              {/* Left: who works today, then the Open Dental blockout right under it (the staffing plan on the right is the tall one). */}
+              <div className="space-y-6">
+                <div className="rounded-2xl bg-white p-6 shadow">
+                  <h3 className="card-title mb-1">
+                    {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+                  </h3>
+                  <p className="text-sm text-slate-400 mb-4">Select which dentists are working today</p>
 
-                <div className="mb-3 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-600">Front Desk Required</div>
-                    <div className="text-xs text-slate-400">How many front desk staff needed today</div>
+                  <div className="mb-3 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-600">Front Desk Required</div>
+                      <div className="text-xs text-slate-400">How many front desk staff needed today</div>
+                    </div>
+                    <div className="flex gap-2">
+                      {[1, 2, 3].map((n) => (
+                        <button key={n} onClick={() => setFrontDeskRequired(n)}
+                          className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
+                          style={frontDeskRequired === n ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    {[1, 2, 3].map((n) => (
-                      <button key={n} onClick={() => setFrontDeskRequired(n)}
-                        className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
-                        style={frontDeskRequired === n ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
-                        {n}
-                      </button>
-                    ))}
+
+                  <div className="mb-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-600">Hygienists Required</div>
+                      <div className="text-xs text-slate-400">How many hygienists needed today</div>
+                    </div>
+                    <div className="flex gap-2">
+                      {[0, 1, 2].map((n) => (
+                        <button key={n} onClick={() => setHygienistsRequired(n)}
+                          className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
+                          style={hygienistsRequired === n ? { backgroundColor: "#059669", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                    👥 {workingDentists.length} dentist{workingDentists.length !== 1 ? "s" : ""} selected
+                    {saving && <span className="ml-2 text-cyan-500">💾 Saving...</span>}
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {allDentists.map((name) => {
+                      const checked = workingDentists.includes(name);
+                      const emp = staff.find((e) => e.name === name);
+                      const dowKey = selectedDate ? getWeekday(selectedDate) : null;
+                      const day = openDays.find((d) => d.date === selectedDate);
+                      const worksToday = emp && dowKey ? (emp.defaultSchedule[dowKey] || (selectedDate ? isInExtraOn(emp.id, selectedDate) : false)) : true;
+                      const hasOverride = emp ? overrides.some((o) => o.employeeId === emp.id && o.date === selectedDate && !o.halfDay && o.reason !== "remote" && o.reason !== "extra") : false;
+                      const unavailable = !worksToday || hasOverride;
+                      return (
+                        <button key={name}
+                          // An unavailable dentist can't be added — but one already
+                          // saved on this day (from before availability changed) can
+                          // always be removed.
+                          onClick={() => { if (unavailable && !checked) return; setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name]); }}
+                          className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
+                            unavailable ? "border-red-100 bg-red-50 opacity-60 cursor-not-allowed"
+                            : checked ? "border-orange-400 bg-orange-50"
+                            : "border-slate-200 hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }} />
+                          <span className="text-sm font-medium">{name}</span>
+                          {unavailable ? (
+                            <span className="ml-auto text-xs text-red-400 font-medium">Unavailable</span>
+                          ) : (
+                            <span className={`ml-auto h-4 w-4 rounded border flex items-center justify-center text-xs ${checked ? "text-white" : "border-slate-300"}`} style={checked ? { backgroundColor: "#e8622a", borderColor: "#e8622a" } : {}}>
+                              {checked ? "✓" : ""}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-
-                <div className="mb-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-600">Hygienists Required</div>
-                    <div className="text-xs text-slate-400">How many hygienists needed today</div>
-                  </div>
-                  <div className="flex gap-2">
-                    {[0, 1, 2].map((n) => (
-                      <button key={n} onClick={() => setHygienistsRequired(n)}
-                        className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
-                        style={hygienistsRequired === n ? { backgroundColor: "#059669", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
-                        {n}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                  👥 {workingDentists.length} dentist{workingDentists.length !== 1 ? "s" : ""} selected
-                  {saving && <span className="ml-2 text-cyan-500">💾 Saving...</span>}
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {allDentists.map((name) => {
-                    const checked = workingDentists.includes(name);
-                    const emp = staff.find((e) => e.name === name);
-                    const dowKey = selectedDate ? getWeekday(selectedDate) : null;
-                    const day = openDays.find((d) => d.date === selectedDate);
-                    const worksToday = emp && dowKey ? (emp.defaultSchedule[dowKey] || (selectedDate ? isInExtraOn(emp.id, selectedDate) : false)) : true;
-                    const hasOverride = emp ? overrides.some((o) => o.employeeId === emp.id && o.date === selectedDate && !o.halfDay && o.reason !== "remote" && o.reason !== "extra") : false;
-                    const unavailable = !worksToday || hasOverride;
-                    return (
-                      <button key={name}
-                        // An unavailable dentist can't be added — but one already
-                        // saved on this day (from before availability changed) can
-                        // always be removed.
-                        onClick={() => { if (unavailable && !checked) return; setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name]); }}
-                        className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
-                          unavailable ? "border-red-100 bg-red-50 opacity-60 cursor-not-allowed"
-                          : checked ? "border-orange-400 bg-orange-50"
-                          : "border-slate-200 hover:bg-slate-50"
-                        }`}
-                      >
-                        <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }} />
-                        <span className="text-sm font-medium">{name}</span>
-                        {unavailable ? (
-                          <span className="ml-auto text-xs text-red-400 font-medium">Unavailable</span>
-                        ) : (
-                          <span className={`ml-auto h-4 w-4 rounded border flex items-center justify-center text-xs ${checked ? "text-white" : "border-slate-300"}`} style={checked ? { backgroundColor: "#e8622a", borderColor: "#e8622a" } : {}}>
-                            {checked ? "✓" : ""}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                <OdBlockoutPanel
+                  date={selectedDate}
+                  canEdit
+                  onChanged={loadOdMonth}
+                  refreshKey={JSON.stringify([schedule[selectedDate] ?? null, monthTempAssignments.filter((ta) => ta.date === selectedDate), overrides.filter((o) => o.date === selectedDate)])}
+                />
               </div>
 
               <DailyAssignmentPanel
@@ -599,11 +667,6 @@ export default function ScheduleBuilder() {
                 onTempAssignmentsChange={handleTempAssignmentsChange}
                 frontDeskRequired={frontDeskRequired}
                 leaveRequests={leaveRequests}
-              />
-              <OdBlockoutPanel
-                date={selectedDate}
-                canEdit
-                refreshKey={JSON.stringify([schedule[selectedDate] ?? null, monthTempAssignments.filter((ta) => ta.date === selectedDate), overrides.filter((o) => o.date === selectedDate)])}
               />
             </div>
           ) : (

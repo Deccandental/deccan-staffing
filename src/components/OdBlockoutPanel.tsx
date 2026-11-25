@@ -47,7 +47,7 @@ function Block({ lines, muted }: { lines: string[]; muted?: boolean }) {
   );
 }
 
-export default function OdBlockoutPanel({ date, refreshKey, canEdit }: { date: string; refreshKey: string; canEdit: boolean }) {
+export default function OdBlockoutPanel({ date, refreshKey, canEdit, onChanged }: { date: string; refreshKey: string; canEdit: boolean; onChanged?: () => void }) {
   const [info, setInfo] = useState<DayInfo | null>(null);
   const [extra, setExtra] = useState("");
   const [overrideText, setOverrideText] = useState<string | null>(null); // null = automatic
@@ -69,7 +69,9 @@ export default function OdBlockoutPanel({ date, refreshKey, canEdit }: { date: s
   useEffect(() => { setMsg(""); call({ date, action: "get" }).then((d) => take(d)); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [date]);
   useEffect(() => {
     const t = setTimeout(() => call({ date, action: "get" }).then((d) => take(d, true)), 1500);
-    return () => clearTimeout(t);
+    // Plan changes are sent to Open Dental a few seconds after saving; check back once that's done.
+    const t2 = setTimeout(() => { call({ date, action: "get" }).then((d) => take(d, true)); onChanged?.(); }, 9000);
+    return () => { clearTimeout(t); clearTimeout(t2); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
@@ -81,12 +83,13 @@ export default function OdBlockoutPanel({ date, refreshKey, canEdit }: { date: s
     setBusy(false);
     if (!d.ok) { setMsg(d.error ?? "Something went wrong."); return; }
     take(d);
+    onChanged?.();
     const s = d.synced;
     setMsg(s?.skipped ? `Saved. ${s.skipped}` : s?.status === "ok" ? "Saved and sent to Open Dental." : s?.message ? `Saved. ${s.message}` : "Saved.");
   }
 
   if (!info) return null;
-  if (!info.ok) return <section className="mb-4 rounded-xl border p-4 text-sm text-red-500">{info.error}</section>;
+  if (!info.ok) return <section className="rounded-2xl bg-white p-6 shadow text-sm text-red-500">{info.error}</section>;
   if (!info.hasBlock) return null;
 
   // What the block will say with the edits on screen (before saving).
@@ -99,7 +102,7 @@ export default function OdBlockoutPanel({ date, refreshKey, canEdit }: { date: s
   const showOd = info.inOd && (editedThere || info.inOd.lines.join("\n") !== info.final.join("\n"));
 
   return (
-    <section className="mb-4 rounded-xl border p-4">
+    <section className="rounded-2xl bg-white p-6 shadow">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h3 className="card-title">Open Dental blockout</h3>
         <span className="text-xs">
