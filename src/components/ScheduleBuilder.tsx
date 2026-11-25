@@ -542,23 +542,6 @@ export default function ScheduleBuilder() {
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {odMsg && <span className="text-xs text-slate-500">{odMsg}</span>}
-                {od?.configured && od.enabled ? (
-                  <div className="flex items-center rounded-lg border text-xs font-semibold" style={{ borderColor: "#c4b5fd", background: "#f5f3ff" }}>
-                    <button onClick={sendMonthToOd} disabled={odSending}
-                      title="Days before today are left alone"
-                      className="px-3 py-1.5 transition disabled:opacity-50" style={{ color: "#6d28d9" }}>
-                      {odSending ? "Sending…" : "↗ Send to Open Dental:"}
-                    </button>
-                    <select value={odRange} onChange={(e) => setOdRange(e.target.value as typeof odRange)} disabled={odSending}
-                      className="rounded-r-lg border-l bg-white px-2 py-1.5 text-xs" style={{ borderColor: "#c4b5fd", color: "#6d28d9" }}>
-                      <option value="month">{formatMonthYear(year, month)}</option>
-                      <option value="14">Next 2 weeks</option>
-                      <option value="30">Next 30 days</option>
-                      <option value="60">Next 60 days</option>
-                      <option value="90">Next 90 days</option>
-                    </select>
-                  </div>
-                ) : null}
                 {od?.configured && (
                   od.ready ? (
                     <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none" style={{ color: "#6d28d9" }}
@@ -570,6 +553,24 @@ export default function ScheduleBuilder() {
                     <a href="/open-dental" className="text-xs font-semibold hover:underline" style={{ color: "#6d28d9" }}>Set up Open Dental first</a>
                   )
                 )}
+                {od?.configured ? (
+                  <div className={`flex items-center rounded-lg border text-xs font-semibold ${od.enabled ? "" : "opacity-50"}`} style={{ borderColor: "#c4b5fd", background: "#f5f3ff" }}>
+                    <button onClick={sendMonthToOd} disabled={odSending || !od.enabled}
+                      title={od.enabled ? "Days before today are left alone" : "Turn Open Dental sync on first"}
+                      className="px-3 py-1.5 transition disabled:opacity-50" style={{ color: "#6d28d9" }}>
+                      {odSending ? "Sending…" : "↗ Send to Open Dental:"}
+                    </button>
+                    <select value={odRange} onChange={(e) => setOdRange(e.target.value as typeof odRange)} disabled={odSending || !od.enabled}
+                      title={od.enabled ? "How much to send" : "Turn Open Dental sync on first"}
+                      className="rounded-r-lg border-l bg-white px-2 py-1.5 text-xs" style={{ borderColor: "#c4b5fd", color: "#6d28d9" }}>
+                      <option value="month">{formatMonthYear(year, month)}</option>
+                      <option value="14">Next 2 weeks</option>
+                      <option value="30">Next 30 days</option>
+                      <option value="60">Next 60 days</option>
+                      <option value="90">Next 90 days</option>
+                    </select>
+                  </div>
+                ) : null}
                 {od?.configured && <a href="/open-dental" title="Open Dental settings" className="text-xs text-slate-400 hover:text-slate-600">⚙</a>}
                 <button onClick={applyDefaults} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">↺ Re-apply Defaults</button>
               </div>
