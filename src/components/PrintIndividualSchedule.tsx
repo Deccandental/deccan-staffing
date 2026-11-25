@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
-import { buildDailyAssignments } from "@/lib/assignmentEngine";
+import { buildDailyAssignments, dayExtras } from "@/lib/assignmentEngine";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { loadHolidays, Holiday } from "@/lib/holidays";
@@ -51,7 +51,7 @@ export default function PrintIndividualSchedule({ year, month, schedule }: Props
         daySched.assistantCounts ?? {},
         daySched.floaterAssistantId ?? null,
         leaveRequests,
-        daySched.assistantOverrides ?? {}
+        daySched.assistantOverrides ?? {}, dayExtras(daySched)
       );
       const dateLabel = new Date(day.date + "T00:00:00").toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric",

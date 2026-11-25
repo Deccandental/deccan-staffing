@@ -29,6 +29,10 @@ export type DaySchedule = {
   // One-off note for what the Floater does that day ("help Jansten too"),
   // shown on the Staff Schedules blockout in Open Dental.
   floaterNote?: string;
+  // Front desk seat index -> who sits there, when picked by hand.
+  frontDeskOverrides?: Record<number, number>;
+  // People doing admin that day (working, but not front desk or assisting).
+  adminIds?: number[];
 };
 export type MonthSchedule = Record<string, DaySchedule>;
 
@@ -46,8 +50,9 @@ export async function loadSchedule(year: number, month: number): Promise<MonthSc
 export async function loadScheduleOrNull(year: number, month: number): Promise<MonthSchedule | null> {
   const key = monthKey(year, month);
   const cols = "date, dentists, front_desk_required, hygienists_required, assistant_overrides, hygienist_overrides, assistant_counts, floater_assistant_id";
-  let { data, error } = await supabase.from("schedules").select(`${cols}, floater_note`).like("date", `${key}-%`);
-  // Until the floater_note column has been added to the database, load without it.
+  let { data, error } = await supabase.from("schedules").select(`${cols}, floater_note, front_desk_overrides, admin_ids`).like("date", `${key}-%`);
+  // If newer columns haven't been added to the database yet, load without them.
+  if (error) ({ data, error } = await supabase.from("schedules").select(`${cols}, floater_note`).like("date", `${key}-%`));
   if (error) ({ data, error } = await supabase.from("schedules").select(cols).like("date", `${key}-%`));
   if (error) { console.error("loadSchedule error:", error); return null; }
   const schedule: MonthSchedule = {};
@@ -61,6 +66,8 @@ export async function loadScheduleOrNull(year: number, month: number): Promise<M
       assistantCounts: row.assistant_counts ?? {},
       floaterAssistantId: row.floater_assistant_id ?? null,
       floaterNote: (row as any).floater_note ?? "",
+      frontDeskOverrides: (row as any).front_desk_overrides ?? {},
+      adminIds: (row as any).admin_ids ?? [],
     };
   }
   return schedule;
@@ -99,6 +106,16 @@ export async function saveDefaultDayIfMissing(date: string, dentists: string[], 
     { onConflict: "date", ignoreDuplicates: true }
   );
   if (error) console.error("saveDefaultDayIfMissing error:", error);
+}
+
+// Saves only who's on the front desk and who's doing admin for the day.
+export async function saveFrontDeskPlan(date: string, frontDeskOverrides: Record<number, number>, adminIds: number[]): Promise<boolean> {
+  const { error } = await supabase.from("schedules").update({
+    front_desk_overrides: frontDeskOverrides, admin_ids: adminIds,
+  }).eq("date", date);
+  if (error) { console.error("saveFrontDeskPlan error:", error); return false; }
+  requestOdSync(date);
+  return true;
 }
 
 // Saves only the day's floater note, leaving the rest of the day as it is.

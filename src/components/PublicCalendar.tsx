@@ -3,7 +3,7 @@ import { todayStr as practiceToday } from "@/lib/today";
 
 import { useState, useEffect, useMemo } from "react";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
-import { buildDailyAssignments } from "@/lib/assignmentEngine";
+import { buildDailyAssignments, dayExtras } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
 import { getOverrides, StaffOverride } from "@/lib/overrides";
 import { loadLeaveRequests } from "@/lib/leaveStore";
@@ -122,7 +122,7 @@ export default function PublicCalendar() {
       const assignments = buildDailyAssignments(
         staff, daySched.dentists, day.date, prefs, overrides,
         day.isTuesday && day.isOpenTuesday, frontDeskRequired, hygienistsRequired,
-        daySched.assistantCounts ?? {}, daySched.floaterAssistantId ?? null, leaveRequests, daySched.assistantOverrides ?? {}
+        daySched.assistantCounts ?? {}, daySched.floaterAssistantId ?? null, leaveRequests, daySched.assistantOverrides ?? {}, dayExtras(daySched)
       );
 
       const tempsForDay = monthTempAssignments.filter((ta) => ta.date === day.date);

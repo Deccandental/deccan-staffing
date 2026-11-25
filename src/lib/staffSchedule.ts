@@ -5,13 +5,13 @@ import { loadLeaveRequests } from "./leaveStore";
 import { getOpenTuesdays } from "./openTuesdays";
 import { loadHolidays } from "./holidays";
 import { loadSchedule, MonthSchedule } from "./scheduleStore";
-import { buildDailyAssignments } from "./assignmentEngine";
+import { buildDailyAssignments, dayExtras } from "./assignmentEngine";
 import { resolveDentistAssistants } from "./assistantSlots";
 import { generateMonth } from "@/utils/calendar";
 
 export interface UpcomingShift {
   date: string;
-  role: "Dentist" | "Assistant" | "Front Desk" | "Hygienist" | "Floater";
+  role: "Dentist" | "Assistant" | "Front Desk" | "Hygienist" | "Floater" | "Admin";
   detail?: string;
 }
 
@@ -82,7 +82,7 @@ export async function loadUpcomingShiftsForEmployee(employeeId: number, daysAhea
           daySched.assistantCounts ?? {},
           daySched.floaterAssistantId ?? null,
           leaveRequests,
-          daySched.assistantOverrides ?? {}
+          daySched.assistantOverrides ?? {}, dayExtras(daySched)
         );
         const ao = daySched.assistantOverrides ?? {};
         const ac = daySched.assistantCounts ?? {};
@@ -105,6 +105,11 @@ export async function loadUpcomingShiftsForEmployee(employeeId: number, daysAhea
         // Front desk?
         if (assignments.frontDesk.some((e) => e.id === employeeId)) {
           shifts.push({ date: dateStr, role: "Front Desk" });
+        }
+
+        // Admin for the day?
+        if (assignments.admin.some((e) => e.id === employeeId)) {
+          shifts.push({ date: dateStr, role: "Admin" });
         }
 
         // Hygienist?
@@ -181,7 +186,7 @@ export async function getScheduledEmployeeIdsInRange(startDate: string, endDate:
           daySched.assistantCounts ?? {},
           daySched.floaterAssistantId ?? null,
           leaveRequests,
-          daySched.assistantOverrides ?? {}
+          daySched.assistantOverrides ?? {}, dayExtras(daySched)
         );
         const ao = daySched.assistantOverrides ?? {};
         const ac = daySched.assistantCounts ?? {};
@@ -191,6 +196,7 @@ export async function getScheduledEmployeeIdsInRange(startDate: string, endDate:
           resolveDentistAssistants(dentist.id, assistants, ac, ao, staff).forEach((a) => { if (a) ids.add(a.id); });
         });
         assignments.frontDesk.forEach((e) => ids.add(e.id));
+        assignments.admin.forEach((e) => ids.add(e.id));
 
         const ho = daySched.hygienistOverrides ?? {};
         const hygSlotCount = daySched.hygienistsRequired ?? 1;

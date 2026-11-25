@@ -15,6 +15,21 @@ export interface AssignmentWarning {
 
 export interface DailyAssignmentsResult extends DailyAssignments {
   warnings: AssignmentWarning[];
+  /** People doing admin work that day: working, but not on the front desk or assisting. */
+  admin: Employee[];
+}
+
+/** Choices made for one day in the Schedule Builder, beyond the dentist/assistant ones. */
+export interface DayExtras {
+  /** Front desk slot index -> who sits there (e.g. Karla covering so Ketki can do admin). */
+  frontDeskPicks?: Record<number, number>;
+  /** Working that day but doing admin, so kept off the front desk and assisting. */
+  adminIds?: number[];
+}
+
+/** Reads a saved day's extras, whatever shape (or absence) they're stored in. */
+export function dayExtras(day: { frontDeskOverrides?: Record<number, number> | null; adminIds?: number[] | null } | null | undefined): DayExtras {
+  return { frontDeskPicks: day?.frontDeskOverrides ?? {}, adminIds: day?.adminIds ?? [] };
 }
 
 export function buildDailyAssignments(
@@ -30,7 +45,8 @@ export function buildDailyAssignments(
   floaterAssistantId: number | null = null,
   leaveRequests: LeaveRequest[] = [],
   // Assistants the manager picked by hand for specific dentists' slots.
-  assistantOverrides: AssistantOverrides = {}
+  assistantOverrides: AssistantOverrides = {},
+  extras: DayExtras = {}
 ): DailyAssignmentsResult {
   const weekday = date ? getWeekday(date) : null;
   const warnings: AssignmentWarning[] = [];
@@ -63,10 +79,19 @@ export function buildDailyAssignments(
   }
 
   const karla = employees.find((e) => e.name.startsWith("Karla"));
-  const regularFrontDesk = employees.filter((e) => e.role === "Front Desk" && isAvailable(e));
+  // Admin for the day: still working, but kept out of every pool below.
+  const admin = employees.filter((e) => (extras.adminIds ?? []).includes(e.id) && isAvailable(e));
+  const adminIds = new Set(admin.map((e) => e.id));
+  // Front desk seats picked by hand (e.g. Karla covering), in seat order.
+  const picks = Object.entries(extras.frontDeskPicks ?? {})
+    .map(([slot, id]) => ({ slot: Number(slot), emp: employees.find((e) => e.id === Number(id)) }))
+    .filter((p): p is { slot: number; emp: Employee } => !!p.emp && p.slot < frontDeskRequired && isAvailable(p.emp) && !adminIds.has(p.emp.id) && p.emp.id !== floaterAssistantId)
+    .sort((a, b) => a.slot - b.slot);
+  const pickedIds = new Set(picks.map((p) => p.emp.id));
+  const regularFrontDesk = employees.filter((e) => e.role === "Front Desk" && isAvailable(e) && !adminIds.has(e.id) && !pickedIds.has(e.id));
 
   let frontDesk: Employee[] = [];
-  let karlaOnFrontDesk = false;
+  let karlaOnFrontDesk = pickedIds.has(karla?.id ?? -1);
 
   if (frontDeskRequired === 1) {
     if (regularFrontDesk.length >= 1) {
@@ -82,7 +107,7 @@ export function buildDailyAssignments(
     frontDesk = regularFrontDesk.slice(0, frontDeskRequired);
     const gapAfterRegular = frontDeskRequired - frontDesk.length;
     // Not if she's the day's Floater — she can't be in two places.
-    if (gapAfterRegular > 0 && karla && isAvailable(karla) && karla.id !== floaterAssistantId) {
+    if (gapAfterRegular > 0 && karla && isAvailable(karla) && karla.id !== floaterAssistantId && !adminIds.has(karla.id) && !pickedIds.has(karla.id)) {
       frontDesk = [...frontDesk, karla];
       karlaOnFrontDesk = true;
     }
@@ -101,11 +126,28 @@ export function buildDailyAssignments(
     }
   }
 
+  if (picks.length > 0) {
+    // Hand-picked seats first (in their seat), the automatic picks fill the rest.
+    const auto = frontDesk.filter((e) => !pickedIds.has(e.id));
+    const seats: Employee[] = [];
+    for (let i = 0; i < Math.max(frontDeskRequired, picks.length); i++) {
+      const p = picks.find((x) => x.slot === i);
+      const next = p ? p.emp : auto.shift();
+      if (next) seats.push(next);
+    }
+    frontDesk = seats.slice(0, frontDeskRequired);
+    karlaOnFrontDesk = !!karla && frontDesk.some((e) => e.id === karla.id);
+    if (frontDesk.length >= frontDeskRequired) {
+      // A pick filled the gap the automatic warning was about.
+      for (let i = warnings.length - 1; i >= 0; i--) if (/front desk/i.test(warnings[i].message)) warnings.splice(i, 1);
+    }
+  }
+
   const dentists = employees.filter(
-    (e) => e.role === "Dentist" && workingDentistNames.includes(e.name) && isAvailable(e)
+    (e) => e.role === "Dentist" && workingDentistNames.includes(e.name) && isAvailable(e) && !adminIds.has(e.id)
   );
 
-  const assignedIds = new Set<number>(frontDesk.map((e) => e.id));
+  const assignedIds = new Set<number>([...frontDesk.map((e) => e.id), ...adminIds]);
   // The Floater is already committed for the day — exclude them from the
   // pool so the engine can't also auto-assign them to a dentist or hygiene.
   if (floaterAssistantId != null) assignedIds.add(floaterAssistantId);
@@ -196,5 +238,5 @@ export function buildDailyAssignments(
     });
   }
 
-  return { dentists: orderedAssignments, frontDesk, hygienists, warnings };
+  return { dentists: orderedAssignments, frontDesk, hygienists, warnings, admin };
 }

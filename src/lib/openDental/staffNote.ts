@@ -12,7 +12,8 @@
 //   AC/UNIQUE
 //   CHO/MARGOT
 //   HYG/ JANTSEN
-//   FRONT/ ARI/KETKI
+//   FRONT/ ARI/KARLA
+//   ADMIN/ KETKI
 //   FLOAT/ KARLA (help Jansten too)
 //   -- OFF TODAY --
 //   PV 11/23-11/27
@@ -41,6 +42,8 @@ export interface DayRoster {
   hygienists: string[];
   floater: string | null;
   floaterNote: string;
+  /** Working that day but doing admin, e.g. "KETKI". */
+  admin?: string[];
 }
 
 export interface DayEvent { date: string; time: string; title: string; mandatory: boolean }
@@ -116,11 +119,12 @@ export function autoLines(c: DayContent, withExtras = false): string[] {
     for (const w of c.warnings) lines.push(plain(`! ${w}`));
   }
   const r = c.roster;
-  if (r && (r.pairs.length || r.hygienists.length || r.frontDesk.length || r.floater)) {
+  if (r && (r.pairs.length || r.hygienists.length || r.frontDesk.length || r.floater || r.admin?.length)) {
     lines.push("-- TEAM --");
     for (const p of r.pairs) lines.push(`${p.dentist}/${p.assistants.length > 0 ? p.assistants.join("/") : " (no assistant)"}`);
     if (r.hygienists.length > 0) lines.push(`HYG/ ${r.hygienists.join("/")}`);
     if (r.frontDesk.length > 0) lines.push(`FRONT/ ${r.frontDesk.join("/")}`);
+    if (r.admin && r.admin.length > 0) lines.push(`ADMIN/ ${r.admin.join("/")}`);
     const note = plain(r.floaterNote);
     if (r.floater) lines.push(`FLOAT/ ${r.floater}${note ? ` (${note})` : ""}`);
     else if (note) lines.push(note);

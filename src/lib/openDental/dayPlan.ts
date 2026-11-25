@@ -5,7 +5,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { rowToEmployee } from "@/lib/staffStore";
 import { rowToLeave, leaveHalfOnDate, isFullDayLeave } from "@/lib/leaveStore";
-import { buildDailyAssignments } from "@/lib/assignmentEngine";
+import { buildDailyAssignments, dayExtras } from "@/lib/assignmentEngine";
 import { resolveDentistAssistants } from "@/lib/assistantSlots";
 import { getWeekday } from "@/lib/dateUtils";
 import { generateMonth } from "@/utils/calendar";
@@ -92,6 +92,7 @@ async function load(from: string, to: string): Promise<Loaded> {
       assistantOverrides: r.assistant_overrides ?? {}, hygienistOverrides: r.hygienist_overrides ?? {},
       assistantCounts: r.assistant_counts ?? {}, floaterAssistantId: r.floater_assistant_id ?? null, floaterNote: r.floater_note ?? "",
       odExtraLines: r.od_extra_lines ?? "", odOverride: r.od_override ?? null,
+      frontDeskOverrides: r.front_desk_overrides ?? {}, adminIds: r.admin_ids ?? [],
     };
   }
   const tempName = new Map(tempRows.map((t) => [t.id, String(t.name ?? "")]));
@@ -153,7 +154,7 @@ function rosterFor(date: string, isOpenTuesday: boolean, d: Loaded): { roster: D
   const a = buildDailyAssignments(
     d.staff, day.dentists, date, d.prefs, d.overrides, isOpenTuesday,
     day.frontDeskRequired ?? 2, day.hygienistsRequired ?? 1, day.assistantCounts ?? {},
-    day.floaterAssistantId ?? null, d.leave, day.assistantOverrides ?? {}
+    day.floaterAssistantId ?? null, d.leave, day.assistantOverrides ?? {}, dayExtras(day)
   );
   const name = (e: Employee) => displayNameFor(e, d.links);
   const temps = d.temps.filter((t) => t.date === date);
@@ -186,6 +187,7 @@ function rosterFor(date: string, isOpenTuesday: boolean, d: Loaded): { roster: D
   for (const t of temps) if (t.role === "Hygienist") hygienists.push(tempLabel(t.name));
 
   a.frontDesk.forEach((x) => working.add(x.id));
+  a.admin.forEach((x) => working.add(x.id));
   const frontDesk = a.frontDesk.map(name);
   for (const t of temps) if (t.role === "Front Desk") frontDesk.push(tempLabel(t.name));
 
@@ -209,7 +211,7 @@ function rosterFor(date: string, isOpenTuesday: boolean, d: Loaded): { roster: D
   }
 
   return {
-    roster: { frontDesk, pairs, hygienists, floater: floaterEmp ? name(floaterEmp) : null, floaterNote: day.floaterNote ?? "" },
+    roster: { frontDesk, pairs, hygienists, floater: floaterEmp ? name(floaterEmp) : null, floaterNote: day.floaterNote ?? "", admin: a.admin.map(name) },
     warnings,
     workingIds: [...working],
   };

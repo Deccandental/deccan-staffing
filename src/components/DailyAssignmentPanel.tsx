@@ -27,12 +27,16 @@ interface Props {
   onFloaterChange?: (assistantId: number | null) => void;
   floaterNote?: string;
   onFloaterNoteChange?: (note: string) => void;
+  /** Front desk seats picked by hand, and who's doing admin today. */
+  frontDeskOverrides?: Record<number, number>;
+  adminIds?: number[];
+  onFrontDeskPlanChange?: (frontDeskOverrides: Record<number, number>, adminIds: number[]) => void;
   onTempAssignmentsChange?: (date: string, assignments: TempAssignment[]) => void;
   frontDeskRequired?: number;
   leaveRequests?: { employeeId: number; status: string; isPartialDay?: boolean; startDate: string; endDate: string }[];
 }
 
-const EMPTY: DailyAssignmentsResult = { dentists: [], frontDesk: [], hygienists: [], warnings: [] };
+const EMPTY: DailyAssignmentsResult = { dentists: [], frontDesk: [], hygienists: [], warnings: [], admin: [] };
 
 const ROLE_COLORS: Record<string, string> = {
   Dentist: "#2563eb", RDA: "#dc2626", Assistant: "#db2777",
@@ -55,6 +59,7 @@ export default function DailyAssignmentPanel({
   hygienistsRequired, hygienistOverrides = {}, onHygienistOverrideChange,
   floaterAssistantId = null, onFloaterChange,
   floaterNote = "", onFloaterNoteChange,
+  frontDeskOverrides = {}, adminIds = [], onFrontDeskPlanChange,
   onTempAssignmentsChange,
   frontDeskRequired = 2,
   leaveRequests = [],
@@ -64,6 +69,8 @@ export default function DailyAssignmentPanel({
   const [floaterId, setFloaterId] = useState<number | null>(floaterAssistantId);
   const [swapping, setSwapping] = useState<{ dentistId: number; slotIndex: number } | null>(null);
   const [floaterSwapping, setFloaterSwapping] = useState(false);
+  const [fdSwapping, setFdSwapping] = useState<number | null>(null);
+  const [addingAdmin, setAddingAdmin] = useState(false);
   const [noteDraft, setNoteDraft] = useState(floaterNote);
   const [noteSaved, setNoteSaved] = useState(floaterNote);
   const [noteStatus, setNoteStatus] = useState<"" | "saving" | "saved" | "error">("");
@@ -626,27 +633,93 @@ export default function DailyAssignmentPanel({
 
       <section className="mb-4 rounded-xl border p-4">
         <h3 className="card-title mb-3">Front Desk</h3>
-        {assignments.frontDesk.length === 0 && !(tempsByRole["Front Desk"]?.length) ? (
-          <p className="text-sm text-slate-400">None available</p>
-        ) : (
-          <div className="space-y-1">
-            {assignments.frontDesk.map((e) => (
-              <div key={e.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: e.color }} />
-                {e.name}
+        {(() => {
+          // Anyone who isn't a dentist, isn't today's floater and isn't on admin can be put on the front desk.
+          const adminSet = new Set(adminIds);
+          const candidates = staff.filter((e) => !e.archived && e.role !== "Dentist" && e.id !== floaterId && !adminSet.has(e.id));
+          const setPick = (slot: number, id: number | null) => {
+            const next = { ...frontDeskOverrides };
+            if (id == null) delete next[slot]; else next[slot] = id;
+            setFdSwapping(null);
+            onFrontDeskPlanChange?.(next, adminIds);
+          };
+          const seats = Array.from({ length: frontDeskRequired }, (_, i) => i);
+          return (
+            <div className="space-y-1">
+              {seats.map((i) => {
+                const e = assignments.frontDesk[i];
+                const picked = i in frontDeskOverrides;
+                return (
+                  <div key={i} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                    {fdSwapping === i ? (
+                      <div className="flex items-center gap-1">
+                        <select autoFocus className="rounded border border-slate-200 px-2 py-1 text-xs" defaultValue={e?.id ?? ""}
+                          onChange={(ev) => setPick(i, ev.target.value ? Number(ev.target.value) : null)}>
+                          <option value="">Automatic</option>
+                          {candidates.map((c) => <option key={c.id} value={c.id}>{c.name}{c.role !== "Front Desk" ? ` (${c.role})` : ""}</option>)}
+                        </select>
+                        <button onClick={() => setFdSwapping(null)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
+                      </div>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: e?.color ?? "#cbd5e1" }} />
+                        {e ? e.name : <span className="text-slate-400">Nobody</span>}
+                        {picked && <span className="text-cyan-400 text-xs">(manual)</span>}
+                      </span>
+                    )}
+                    {fdSwapping !== i && onFrontDeskPlanChange && (
+                      <span className="flex items-center gap-1">
+                        <button onClick={() => setFdSwapping(i)} className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">swap</button>
+                        {picked && <button onClick={() => setPick(i, null)} className="rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-200 hover:text-slate-600 transition">reset</button>}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              {(tempsByRole["Front Desk"] ?? []).map(({ assignment, temp }) => (
+                <div key={assignment.id} className="flex items-center justify-between rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
+                  <span className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-teal-400" />
+                    {temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
+                  </span>
+                  <button onClick={() => handleRemoveTemp(assignment.id)} className="text-xs text-red-400 hover:text-red-600">Remove</button>
+                </div>
+              ))}
+
+              {/* Admin for the day: working, but kept off the front desk and assisting. */}
+              <div className="pt-2">
+                <div className="text-xs font-medium text-slate-400 mb-1">Admin today</div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {staff.filter((e) => adminSet.has(e.id)).map((e) => (
+                    <span key={e.id} className="flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-xs text-indigo-700">
+                      📋 {e.name}
+                      {onFrontDeskPlanChange && (
+                        <button onClick={() => onFrontDeskPlanChange(frontDeskOverrides, adminIds.filter((x) => x !== e.id))} className="ml-0.5 text-indigo-300 hover:text-red-500">✕</button>
+                      )}
+                    </span>
+                  ))}
+                  {onFrontDeskPlanChange && (addingAdmin ? (
+                    <select autoFocus className="rounded border border-slate-200 px-2 py-1 text-xs" defaultValue=""
+                      onBlur={() => setAddingAdmin(false)}
+                      onChange={(ev) => {
+                        const id = Number(ev.target.value);
+                        setAddingAdmin(false);
+                        if (!id) return;
+                        // Someone on admin can't also hold a front desk seat.
+                        const picks = Object.fromEntries(Object.entries(frontDeskOverrides).filter(([, v]) => v !== id)) as Record<number, number>;
+                        onFrontDeskPlanChange(picks, [...adminIds, id]);
+                      }}>
+                      <option value="">Choose…</option>
+                      {staff.filter((e) => !e.archived && e.role !== "Dentist" && !adminSet.has(e.id)).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                    </select>
+                  ) : (
+                    <button onClick={() => setAddingAdmin(true)} className="rounded-full border border-dashed px-2 py-0.5 text-xs text-slate-400 hover:text-slate-600">+ Add</button>
+                  ))}
+                </div>
               </div>
-            ))}
-            {(tempsByRole["Front Desk"] ?? []).map(({ assignment, temp }) => (
-              <div key={assignment.id} className="flex items-center justify-between rounded-lg bg-teal-50 border border-teal-100 px-3 py-2 text-sm">
-                <span className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-teal-400" />
-                  {temp?.name ?? "Unknown"} <span className="text-xs text-teal-500 ml-1">(temp)</span>
-                </span>
-                <button onClick={() => handleRemoveTemp(assignment.id)} className="text-xs text-red-400 hover:text-red-600">Remove</button>
-              </div>
-            ))}
-          </div>
-        )}
+            </div>
+          );
+        })()}
       </section>
 
       <section className="mb-4 rounded-xl border p-4">
