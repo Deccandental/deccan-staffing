@@ -96,7 +96,8 @@ function OpenDentalPageBody() {
   const sortedRows = useMemo(() => [...rows].sort((a, b) =>
     (ROLE_ORDER.indexOf(a.role) + 99) % 99 - (ROLE_ORDER.indexOf(b.role) + 99) % 99 || a.name.localeCompare(b.name)), [rows]);
 
-  const opName = (n: number) => data?.od?.operatories.find((o) => o.operatoryNum === n)?.abbrev || data?.od?.operatories.find((o) => o.operatoryNum === n)?.name || `#${n}`;
+  // Columns are shown by the name given to them in Open Dental (its short abbreviation is only a fallback).
+  const opName = (n: number) => { const o = data?.od?.operatories.find((x) => x.operatoryNum === n); return o?.name || o?.abbrev || `#${n}`; };
 
   function setRow(id: number, patch: Partial<StaffRow>) {
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -193,7 +194,7 @@ function OpenDentalPageBody() {
             )}
           </Card>
 
-          <Card title="Where the blockouts go" sub="The Deccan App blockout goes at the bottom of the Notes column, below your team's own Staff Schedules note (which the app never touches). When a linked doctor or hygienist is out, their own columns are blocked so patients can't be booked with them.">
+          <Card title="Where the blockouts go" sub="The Deccan App blockout goes in the Notes column, just under your team's own Staff Schedules note (which the app never touches), or at the top of the day when there isn't one. When a linked doctor or hygienist is out, their own columns are blocked so patients can't be booked with them.">
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">Notes column</label>
@@ -233,7 +234,7 @@ function OpenDentalPageBody() {
               </div>
             </div>
             <p className="mt-3 text-xs text-slate-400">
-              Create a blockout type in Open Dental just for this (e.g. &ldquo;Deccan App&rdquo;) and give it its own colour, so it stands out. The block ends when the day ends and gets one row per line. Half-day leave blocks from the day start to midday, or midday to the day end.
+              Create a blockout type in Open Dental just for this (e.g. &ldquo;Deccan App&rdquo;) and give it its own colour, so it stands out. The block gets one row per line. Half-day leave blocks from the day start to midday, or midday to the day end.
             </p>
           </Card>
 
@@ -301,11 +302,11 @@ function OpenDentalPageBody() {
                           {od.operatories.filter((o) => o.operatoryNum !== settings.notesOperatoryNum).map((o) => {
                             const on = r.operatoryNums.includes(o.operatoryNum);
                             return (
-                              <button key={o.operatoryNum} type="button"
+                              <button key={o.operatoryNum} type="button" title={o.abbrev ? `${o.name} (${o.abbrev})` : o.name}
                                 onClick={() => setRow(r.id, { operatoryNums: on ? r.operatoryNums.filter((n) => n !== o.operatoryNum) : [...r.operatoryNums, o.operatoryNum] })}
                                 className="rounded-full px-2 py-0.5 text-xs border transition"
                                 style={on ? { background: ORANGE, color: "white", borderColor: ORANGE } : { background: "white", color: "#6b7280", borderColor: "#e5e7eb" }}>
-                                {o.abbrev || o.name}
+                                {o.name || o.abbrev}
                               </button>
                             );
                           })}
