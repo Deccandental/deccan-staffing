@@ -62,7 +62,7 @@ function OpenDentalPageBody() {
   const [forcing, setForcing] = useState<string | null>(null);
 
   async function useAppVersion(date: string, status: string) {
-    const what = status === "deleted_in_od" ? "put the Staff Schedules note back on" : "replace the Staff Schedules note on";
+    const what = status === "deleted_in_od" ? "put the Deccan App blockout back on" : "replace the Deccan App blockout on";
     if (!confirm(`This will ${what} ${date} in Open Dental, exactly as the staffing app has it. Anything typed into that note in Open Dental will be lost. Continue?`)) return;
     setForcing(date);
     const r = await syncOdNow({ from: date, to: date, force: true });
@@ -193,7 +193,7 @@ function OpenDentalPageBody() {
             )}
           </Card>
 
-          <Card title="Where the blockouts go" sub="The Staff Schedules note goes in the Notes column. When a doctor or hygienist is out, their own columns are blocked so patients can't be booked with them.">
+          <Card title="Where the blockouts go" sub="The Deccan App blockout goes at the bottom of the Notes column, below your team's own Staff Schedules note (which the app never touches). When a linked doctor or hygienist is out, their own columns are blocked so patients can't be booked with them.">
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">Notes column</label>
@@ -201,7 +201,7 @@ function OpenDentalPageBody() {
                   (od?.operatories ?? []).map((o) => ({ value: o.operatoryNum, label: o.name })), "Choose a column")}
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Blockout type for the Staff Schedules note</label>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Blockout type for the Deccan App blockout</label>
                 {numSelect(settings.staffBlockoutType, (v) => setSettings({ ...settings, staffBlockoutType: v }),
                   (od?.blockoutTypes ?? []).map((b) => ({ value: b.defNum, label: b.name })), "Choose a type")}
               </div>
@@ -233,7 +233,7 @@ function OpenDentalPageBody() {
               </div>
             </div>
             <p className="mt-3 text-xs text-slate-400">
-              The Staff Schedules note starts when the day starts and gets one row per line. Half-day leave blocks from the day start to midday, or midday to the day end.
+              Create a blockout type in Open Dental just for this (e.g. &ldquo;Deccan App&rdquo;) and give it its own colour, so it stands out. The block ends when the day ends and gets one row per line. Half-day leave blocks from the day start to midday, or midday to the day end.
             </p>
           </Card>
 
@@ -241,17 +241,17 @@ function OpenDentalPageBody() {
             <input type="date" value={previewDate} onChange={(e) => setPreviewDate(e.target.value)}
               className="rounded-xl border border-gray-200 px-3 py-2 text-sm mb-4" />
             {previewErr && <p className="text-sm text-red-500">{previewErr}</p>}
-            {preview && !preview.isOpen && <p className="text-sm text-slate-400">The office is closed that day — no blockouts.</p>}
+            {preview && !preview.isOpen && <p className="text-sm text-slate-400">The office is closed that day (not a holiday), so there&apos;s no blockout.</p>}
             {preview && preview.isOpen && (
               <div className="flex flex-wrap gap-4 items-start">
-                <div className="rounded-sm px-3 py-2 font-mono text-[13px] leading-5 min-w-[220px]" style={{ background: "#f87171", color: "#111" }}>
+                <div className="rounded-sm px-3 py-2 font-mono text-[13px] leading-5 min-w-[240px]" style={{ background: "#c4b5fd", color: "#111" }}>
                   {preview.staffLines.length > 0 ? preview.staffLines.map((l, i) => <div key={i}>{l}</div>) : <div>(nothing to show)</div>}
                 </div>
                 <div className="space-y-2 text-xs text-slate-500">
                   {preview.blockouts.length === 0 && <p>Pick the Notes column and blockout types above to see the exact blockouts.</p>}
                   {preview.blockouts.map((b, i) => (
                     <p key={i}>
-                      <b>{b.kind === "staff" ? "Staff Schedules" : "Provider out"}</b> · {b.start}–{b.stop} · {b.operatoryNums.map(opName).join(", ")}
+                      <b>{b.kind === "staff" ? "Deccan App" : "Provider out"}</b> · {b.start}–{b.stop} · {b.operatoryNums.map(opName).join(", ")}
                       {b.kind === "provider" && <><br />{b.note}</>}
                     </p>
                   ))}
@@ -261,7 +261,7 @@ function OpenDentalPageBody() {
           </Card>
         </div>
 
-        <Card title="Staff in Open Dental" sub="How each person appears in the Staff Schedules note (doctors by initials, everyone else by first name — change any you like). Link doctors and hygienists to their Open Dental provider and pick the columns to block when they're out.">
+        <Card title="Staff in Open Dental" sub="How each person appears in the Deccan App blockout (doctors by initials, everyone else by first name — change any you like). Link doctors and hygienists to their Open Dental provider and pick the columns to block when they're out.">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

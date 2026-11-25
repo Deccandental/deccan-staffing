@@ -68,11 +68,11 @@ export async function POST(req: NextRequest) {
     const today = new Date().toISOString().slice(0, 10);
     const allPast = r.endDate < today;
     if (err) sync = { state: "error", message: err.message ?? "Sync failed." };
-    else if (flagged && !isProvider) sync = { state: "attention", message: "The Staff Schedules note for one of these days was typed, edited or deleted in Open Dental — see the Open Dental page." };
+    else if (flagged && !isProvider) sync = { state: "attention", message: "The Deccan App blockout for one of these days was edited or deleted in Open Dental — see the Open Dental page." };
     else if (stale && !allPast) sync = { state: "pending" };
     else sync = { state: "synced", message: isProvider
       ? `${(recs ?? []).filter((x: any) => x.kind === "provider" && x.employee_id === r.employeeId).length} provider blockout(s) in Open Dental`
-      : "Listed in the Staff Schedules note" };
+      : "Listed in the Deccan App blockout" };
   }
 
   return NextResponse.json({ ok: true, configured, enabled: settings.enabled, isProvider, booked, bookedError, sync });

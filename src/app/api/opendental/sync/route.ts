@@ -6,8 +6,8 @@ import { syncRange, syncUpcoming, SyncResult } from "@/lib/openDental/sync";
 //   GET  — the nightly scheduled job: syncs today through the next ~2 months.
 //   POST — after someone changes the schedule or leave: { from, to } for just
 //          those dates, or { all: true } for the whole upcoming window.
-//          { from, to, force: true } (admins) rewrites the Staff Schedules
-//          note exactly as the app has it, even if it was edited or deleted
+//          { from, to, force: true } (admins) rewrites the Deccan App
+//          blockout exactly as the app has it, even if it was edited or deleted
 //          in Open Dental.
 export const runtime = "nodejs";
 export const maxDuration = 300;

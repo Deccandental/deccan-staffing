@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessionFrom, hasPerm } from "@/lib/routeAuth";
 import { buildDayPlans } from "@/lib/openDental/dayPlan";
-import { buildStaffNoteLines } from "@/lib/openDental/staffNote";
-import { desiredBlockouts, loadOdSettings } from "@/lib/openDental/sync";
+import { buildAppBlockLines } from "@/lib/openDental/staffNote";
+import { desiredBlockouts, loadOdSettings, bookingWarnings } from "@/lib/openDental/sync";
 
 // Shows what the app WOULD write to Open Dental for one day. Writes nothing
 // and doesn't need Open Dental, so it works before the keys are set up.
@@ -18,13 +18,15 @@ export async function POST(req: NextRequest) {
   const date = String(body?.date ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return NextResponse.json({ ok: false, error: "Bad date." }, { status: 400 });
   try {
-    const [{ plans, links }, settings] = await Promise.all([buildDayPlans(date, date), loadOdSettings()]);
+    const [{ plans, links, staff }, settings] = await Promise.all([buildDayPlans(date, date), loadOdSettings()]);
     const plan = plans[0];
-    const staffLines = plan.isOpen && (plan.roster || plan.absences.length > 0) ? buildStaffNoteLines(plan.roster, plan.absences) : [];
-    const blockouts = desiredBlockouts(plan, settings, links).map((d) => ({
+    // Booking checks need Open Dental; without it the preview simply leaves them out.
+    const extra = (await bookingWarnings(plans, links, staff, settings).catch(() => new Map<string, string[]>())).get(date) ?? [];
+    const staffLines = plan.content ? buildAppBlockLines({ ...plan.content, warnings: [...plan.content.warnings, ...extra] }) : [];
+    const blockouts = desiredBlockouts(plan, settings, links, extra).map((d) => ({
       kind: d.kind, start: d.input.start, stop: d.input.stop, operatoryNums: d.input.operatoryNums, note: d.input.note,
     }));
-    return NextResponse.json({ ok: true, date, isOpen: plan.isOpen, staffLines, blockouts });
+    return NextResponse.json({ ok: true, date, isOpen: plan.isOpen || !!plan.content, staffLines, blockouts });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? "Preview failed." }, { status: 500 });
   }

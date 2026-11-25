@@ -66,7 +66,7 @@ export default function OdLeaveInfo({ requestId, startDate, endDate, status }: {
         )
       )}
       {!info.isProvider && status === "pending" && (
-        <div className="text-gray-500">Not linked to an Open Dental provider, so there are no patients to check. Approved leave is listed in the Staff Schedules note.</div>
+        <div className="text-gray-500">Not linked to an Open Dental provider, so there are no patients to check. Approved leave is listed in the Deccan App blockout.</div>
       )}
 
       {status === "approved" && info.enabled && (

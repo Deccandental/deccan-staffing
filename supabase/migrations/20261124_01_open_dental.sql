@@ -1,15 +1,16 @@
 -- Open Dental schedule sync.
 --
 -- The app writes two kinds of blockouts into Open Dental:
---   * one "Staff Schedules" blockout per day in the Notes column, listing who
---     is out and the day's assignments (doctor/assistant pairs, front desk,
---     hygiene), mirroring the blockout the team used to type by hand;
+--   * one "Deccan App" blockout per day at the bottom of the Notes column, in
+--     its own blockout type/colour: warnings, the day's team, who is off,
+--     events, birthdays, holidays and the rest of the month. The team's own
+--     hand-typed Staff Schedules note is left alone;
 --   * a booking-blocking blockout on a doctor's or hygienist's own columns
 --     for each day of their approved leave.
 --
 -- Only blockouts the app created are ever changed or removed: every one is
 -- recorded in od_blockouts with the ScheduleNum Open Dental gave it.
--- Lines the team adds to the staff note in Open Dental are kept; if they
+-- Lines the team adds to the Deccan App blockout in Open Dental are kept; if they
 -- change one of the app's lines, the app stops updating that day's note and
 -- flags it; if they delete the note, it stays deleted.
 --
@@ -21,7 +22,7 @@ create table if not exists public.od_settings (
   id integer primary key default 1 check (id = 1),
   enabled boolean not null default false,
   notes_operatory_num integer,          -- the "Notes" column
-  staff_blockout_type integer,          -- definition.DefNum for the Staff Schedules blockout
+  staff_blockout_type integer,          -- definition.DefNum for the Deccan App blockout (its own colour)
   provider_blockout_type integer,       -- definition.DefNum for a provider's time off
   day_start text not null default '07:00',
   midday text not null default '12:00',
@@ -42,7 +43,7 @@ create table if not exists public.od_staff_links (
 );
 
 -- Every blockout the app has created in Open Dental.
---   kind = 'staff'    the day's Staff Schedules blockout (employee_id null)
+--   kind = 'staff'    the day's Deccan App blockout (employee_id null)
 --   kind = 'provider' a provider's time-off blockout
 create table if not exists public.od_blockouts (
   id uuid primary key default gen_random_uuid(),
@@ -51,7 +52,7 @@ create table if not exists public.od_blockouts (
   employee_id integer,
   schedule_num bigint not null,
   content_hash text not null,
-  -- For the staff note: the lines the app wrote last time. Lines the team
+  -- For the Deccan App blockout: the lines the app wrote last time. Lines the team
   -- adds in Open Dental are anything beyond these, and are kept.
   last_note text,
   -- The team deleted this note in Open Dental: it stays deleted.
@@ -71,6 +72,11 @@ create table if not exists public.od_sync_days (
 
 -- One-off note for the day's floater, e.g. "help Jansten too".
 alter table public.schedules add column if not exists floater_note text;
+
+-- Birthday as "MM-DD" (no year), shown on the Deccan App blockout on the day.
+-- Staff can set or clear their own from their dashboard.
+alter table public.staff add column if not exists birthday text
+  check (birthday is null or birthday ~ '^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
 
 alter table public.od_settings enable row level security;
 alter table public.od_staff_links enable row level security;

@@ -1,17 +1,30 @@
 // Pure formatting for the Open Dental blockouts. No I/O, so it can be
 // tested and previewed without a connection to Open Dental.
 //
-// The "Staff Schedules" note copies the layout the team typed by hand:
+// The app writes its own "Deccan App" blockout in the Notes column, in its
+// own blockout type (so its own colour), separate from the Staff Schedules
+// note the team types by hand. For example:
 //
-//   Staff Schedules
-//   KH OUT 11/23
-//   PV OUT 11/23-11/27
-//   Front Desk:
-//   ARI/KETKI
+//   DECCAN APP - do not edit
+//   -- WARNINGS --
+//   ! 1 temp assistant needed
+//   -- TEAM --
 //   AC/UNIQUE
 //   CHO/MARGOT
 //   HYG/ JANTSEN
+//   FRONT/ ARI/KETKI
 //   FLOAT/ KARLA (help Jansten too)
+//   -- OFF TODAY --
+//   PV 11/23-11/27
+//   KH AM only
+//   -- EVENTS TODAY --
+//   5:30pm Staff meeting - required
+//   -- BIRTHDAYS --
+//   KETKI
+//   -- REST OF DECEMBER --
+//   Off: CHO 12/1-12/3
+//   Event: 12/9 5:30pm Staff meeting - required
+//   Closed: 12/25 Christmas Day
 
 export interface Absence {
   employeeId: number;
@@ -30,34 +43,91 @@ export interface DayRoster {
   floaterNote: string;
 }
 
-export const STAFF_NOTE_TITLE = "Staff Schedules";
+export interface DayEvent { date: string; time: string; title: string; mandatory: boolean }
+
+export interface DayContent {
+  date: string;
+  closedReason: string | null;  // holiday/closure name when the office is closed for it
+  warnings: string[];
+  roster: DayRoster | null;
+  absences: Absence[];
+  events: DayEvent[];
+  birthdays: string[];
+  upcoming: {
+    out: { name: string; from: string; to: string }[];
+    events: DayEvent[];
+    closed: { date: string; name: string }[];
+  };
+}
+
+export const APP_BLOCK_TITLE = "DECCAN APP - do not edit";
+const MONTHS = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
 
 /** "2026-11-23" -> "11/23" */
 export function shortDate(ymd: string): string {
   const [, m, d] = ymd.split("-");
   return `${Number(m)}/${Number(d)}`;
 }
+const range = (from: string, to: string) => (from === to ? shortDate(from) : `${shortDate(from)}-${shortDate(to)}`);
 
-export function absenceLine(a: Absence): string {
-  const when = a.from === a.to ? shortDate(a.from) : `${shortDate(a.from)}-${shortDate(a.to)}`;
-  return `${a.name} OUT${a.half ? ` ${a.half}` : ""} ${when}`;
+/** "17:30" -> "5:30pm", "09:00" -> "9am"; anything else is left as typed. */
+export function shortTime(t: string): string {
+  const m = String(t ?? "").match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return String(t ?? "").trim();
+  const h = Number(m[1]), min = m[2];
+  const suffix = h >= 12 ? "pm" : "am";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}${min === "00" ? "" : `:${min}`}${suffix}`;
 }
 
-export function buildStaffNoteLines(roster: DayRoster | null, absences: Absence[]): string[] {
-  const lines = [STAFF_NOTE_TITLE];
-  for (const a of [...absences].sort((x, y) => x.name.localeCompare(y.name))) lines.push(absenceLine(a));
-  if (roster) {
-    if (roster.frontDesk.length > 0) {
-      lines.push("Front Desk:");
-      lines.push(roster.frontDesk.join("/"));
-    }
-    for (const p of roster.pairs) {
-      lines.push(`${p.dentist}/${p.assistants.length > 0 ? p.assistants.join("/") : " (no assistant)"}`);
-    }
-    if (roster.hygienists.length > 0) lines.push(`HYG/ ${roster.hygienists.join("/")}`);
-    const note = roster.floaterNote.trim();
-    if (roster.floater) lines.push(`FLOAT/ ${roster.floater}${note ? ` (${note})` : ""}`);
+/** Open Dental shows plain text: no em dashes or curly quotes, no line breaks inside a line. */
+export const plain = (t: string) => String(t ?? "")
+  .replace(/[\u2013\u2014]/g, "-").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"')
+  .replace(/[\r\n]+/g, " ").replace(/[^\x20-\x7e]/g, "").replace(/\s+/g, " ").trim();
+
+export function absenceLine(a: Absence): string {
+  if (a.half) return `${a.name} ${a.half} only${a.from !== a.to ? ` (${range(a.from, a.to)})` : ""}`;
+  return a.from === a.to ? a.name : `${a.name} ${range(a.from, a.to)}`;
+}
+
+const eventLine = (e: DayEvent, withDate: boolean) =>
+  plain(`${withDate ? `${shortDate(e.date)} ` : ""}${e.time ? `${shortTime(e.time)} ` : ""}${e.title}${e.mandatory ? " - required" : ""}`);
+
+export function buildAppBlockLines(c: DayContent): string[] {
+  const lines = [APP_BLOCK_TITLE];
+  if (c.closedReason) lines.push(plain(`CLOSED - ${c.closedReason}`));
+  if (c.warnings.length > 0) {
+    lines.push("-- WARNINGS --");
+    for (const w of c.warnings) lines.push(plain(`! ${w}`));
+  }
+  const r = c.roster;
+  if (r && (r.pairs.length || r.hygienists.length || r.frontDesk.length || r.floater)) {
+    lines.push("-- TEAM --");
+    for (const p of r.pairs) lines.push(`${p.dentist}/${p.assistants.length > 0 ? p.assistants.join("/") : " (no assistant)"}`);
+    if (r.hygienists.length > 0) lines.push(`HYG/ ${r.hygienists.join("/")}`);
+    if (r.frontDesk.length > 0) lines.push(`FRONT/ ${r.frontDesk.join("/")}`);
+    const note = plain(r.floaterNote);
+    if (r.floater) lines.push(`FLOAT/ ${r.floater}${note ? ` (${note})` : ""}`);
     else if (note) lines.push(note);
+  }
+  if (c.absences.length > 0) {
+    lines.push("-- OFF TODAY --");
+    for (const a of [...c.absences].sort((x, y) => x.name.localeCompare(y.name))) lines.push(absenceLine(a));
+  }
+  if (c.events.length > 0) {
+    lines.push("-- EVENTS TODAY --");
+    for (const e of c.events) lines.push(eventLine(e, false));
+  }
+  if (c.birthdays.length > 0) {
+    lines.push("-- BIRTHDAYS --");
+    lines.push(c.birthdays.join(", "));
+  }
+  const u = c.upcoming;
+  if (u.out.length || u.events.length || u.closed.length) {
+    lines.push(`-- REST OF ${MONTHS[Number(c.date.slice(5, 7)) - 1]} --`);
+    for (const o of u.out) lines.push(`Off: ${o.name} ${range(o.from, o.to)}`);
+    for (const e of u.events) lines.push(`Event: ${eventLine(e, true)}`);
+    for (const d of u.closed) lines.push(plain(`Closed: ${shortDate(d.date)} ${d.name}`));
   }
   return lines;
 }
@@ -88,10 +158,14 @@ export function fromMinutes(min: number): string {
 
 export interface DayTimes { dayStart: string; midday: string; dayEnd: string; rowMinutes: number }
 
-/** The staff note starts when the day starts and is tall enough to show every line. */
-export function staffNoteSpan(lineCount: number, t: DayTimes): { start: string; stop: string } {
-  const start = toMinutes(t.dayStart);
-  const stop = Math.min(start + Math.max(1, lineCount) * Math.max(5, t.rowMinutes), toMinutes(t.dayEnd));
+/**
+ * The Deccan App block sits at the bottom of the Notes column (ending when
+ * the day ends), so it stays clear of the team's own note at the top. It is
+ * tall enough to show every line, but never starts before the day does.
+ */
+export function appBlockSpan(lineCount: number, t: DayTimes): { start: string; stop: string } {
+  const stop = toMinutes(t.dayEnd);
+  const start = Math.max(toMinutes(t.dayStart), stop - Math.max(1, lineCount) * Math.max(5, t.rowMinutes));
   return { start: fromMinutes(start), stop: fromMinutes(stop) };
 }
 
@@ -125,7 +199,7 @@ export type MergeResult =
   | { action: "conflict"; theirs: string[]; ours: string[] }; // someone changed or removed one of the app's lines
 
 /**
- * Decides how to update the Staff Schedules note given what Open Dental shows now
+ * Decides how to update the Deccan App blockout given what Open Dental shows now
  * (`current`), what the app wrote last time (`lastApp`) and what it wants now (`desired`).
  * Lines the team added are kept at the bottom. If they changed or removed one
  * of the app's own lines, the app doesn't overwrite it; the day gets flagged.

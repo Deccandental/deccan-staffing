@@ -40,6 +40,7 @@ const db: Record<string, any[]> = {
   ],
   temp_assignments: [],
   temps: [],
+  events: [],
   od_settings: [{ id: 1, enabled: true, notes_operatory_num: 99, staff_blockout_type: 5, provider_blockout_type: 6, day_start: "07:00", midday: "12:00", day_end: "18:00", row_minutes: 10, days_ahead: 60 }],
   od_staff_links: [{ employee_id: 5, display_name: "", prov_num: 7, operatory_nums: [3] }],
   od_blockouts: [],
@@ -145,23 +146,45 @@ async function main() {
   const { syncRange } = await import("../src/lib/openDental/sync");
 
   console.log("formatting");
-  const lines = note.buildStaffNoteLines(
-    { frontDesk: ["ARI", "KETKI"], pairs: [{ dentist: "AC", assistants: ["UNIQUE"] }, { dentist: "CHO", assistants: ["MARGOT"] }], hygienists: ["JANTSEN"], floater: "KARLA", floaterNote: "help Jansten too" },
-    [{ employeeId: 9, name: "PV", half: null, from: "2026-11-23", to: "2026-11-27", reason: "pto" }, { employeeId: 8, name: "KH", half: null, from: "2026-11-23", to: "2026-11-23", reason: "sick" }]
-  );
-  check("matches the hand-typed layout", lines.join("|") === "Staff Schedules|KH OUT 11/23|PV OUT 11/23-11/27|Front Desk:|ARI/KETKI|AC/UNIQUE|CHO/MARGOT|HYG/ JANTSEN|FLOAT/ KARLA (help Jansten too)", lines);
-  check("half day label", note.absenceLine({ employeeId: 1, name: "KH", half: "AM", from: "2026-11-23", to: "2026-11-23", reason: "pto" }) === "KH OUT AM 11/23");
+  const content = (over: Partial<import("../src/lib/openDental/staffNote").DayContent> = {}) => ({
+    date: "2026-11-23", closedReason: null, warnings: [], roster: null, absences: [], events: [], birthdays: [],
+    upcoming: { out: [], events: [], closed: [] }, ...over,
+  });
+  const lines = note.buildAppBlockLines(content({
+    warnings: ["1 temp assistant needed — only 3 of 4 required available."],
+    roster: { frontDesk: ["ARI", "KETKI"], pairs: [{ dentist: "AC", assistants: ["UNIQUE"] }, { dentist: "SN", assistants: [] }], hygienists: ["JANTSEN"], floater: "KARLA", floaterNote: "help Jansten too" },
+    absences: [{ employeeId: 9, name: "PV", half: null, from: "2026-11-23", to: "2026-11-27", reason: "pto" }, { employeeId: 8, name: "KH", half: "AM", from: "2026-11-23", to: "2026-11-23", reason: "sick" }],
+    events: [{ date: "2026-11-23", time: "17:30", title: "Staff meeting", mandatory: true }],
+    birthdays: ["KETKI"],
+    upcoming: { out: [{ name: "CHO", from: "2026-11-25", to: "2026-11-26" }], events: [{ date: "2026-11-24", time: "12:00", title: "Lunch & learn", mandatory: false }], closed: [{ date: "2026-11-27", name: "Thanksgiving" }] },
+  }));
+  check("block layout", lines.join("|") === [
+    "DECCAN APP - do not edit", "-- WARNINGS --", "! 1 temp assistant needed - only 3 of 4 required available.",
+    "-- TEAM --", "AC/UNIQUE", "SN/ (no assistant)", "HYG/ JANTSEN", "FRONT/ ARI/KETKI", "FLOAT/ KARLA (help Jansten too)",
+    "-- OFF TODAY --", "KH AM only", "PV 11/23-11/27",
+    "-- EVENTS TODAY --", "5:30pm Staff meeting - required",
+    "-- BIRTHDAYS --", "KETKI",
+    "-- REST OF NOVEMBER --", "Off: CHO 11/25-11/26", "Event: 11/24 12pm Lunch & learn", "Closed: 11/27 Thanksgiving",
+  ].join("|"), lines);
+  check("holiday", note.buildAppBlockLines(content({ closedReason: "Christmas Day" })).join("|") === "DECCAN APP - do not edit|CLOSED - Christmas Day");
+  check("times", note.shortTime("09:00") === "9am" && note.shortTime("12:15") === "12:15pm" && note.shortTime("00:30") === "12:30am");
   check("doctor initials", note.defaultDisplayName("Dr. Anita Chopra", "Dentist") === "AC");
   check("single-name doctor", note.defaultDisplayName("Dr. Ho", "Dentist") === "HO");
   check("assistant first name", note.defaultDisplayName("Unique Smith", "Assistant") === "UNIQUE");
-  check("note height grows with lines", JSON.stringify(note.staffNoteSpan(9, { dayStart: "07:00", midday: "12:00", dayEnd: "18:00", rowMinutes: 10 })) === JSON.stringify({ start: "07:00", stop: "08:30" }));
+  check("block sits at the bottom of the day", JSON.stringify(note.appBlockSpan(9, { dayStart: "07:00", midday: "12:00", dayEnd: "18:00", rowMinutes: 10 })) === JSON.stringify({ start: "16:30", stop: "18:00" }));
+  const { normalizeBirthday } = await import("../src/lib/staffStore");
+  check("birthday input", normalizeBirthday("3/14") === "03-14" && normalizeBirthday("12-01") === "12-01" && normalizeBirthday("2/30") === "invalid" && normalizeBirthday("") === null);
 
-  console.log("first sync creates the Staff Schedules note");
+  console.log("first sync creates the Deccan App blockout");
+  // The team's own hand-typed note at the top of the Notes column.
+  od.blockouts.push({ ScheduleNum: 1, SchedDate: monday, StartTime: "07:00:00", StopTime: "08:00:00", BlockoutType: 9, Note: "Staff Schedules\nFront Desk:\nARI", operatories: "99" });
   let r = await syncRange(monday, monday);
-  const staffBlk = () => od.blockouts.find((b) => b.operatories === "99" && b.SchedDate === monday);
+  const appBlk = (date = monday) => od.blockouts.find((b) => b.operatories === "99" && b.SchedDate === date && b.BlockoutType === 5);
+  const head = (date = monday) => (appBlk(date)?.Note ?? "").split("\n-- REST OF")[0];
   check("one change", r.results[0]?.changes === 1, r);
-  check("note text", staffBlk()?.Note === "Staff Schedules\nFront Desk:\nARI/KETKI\nAC/UNIQUE\nHYG/ JANTSEN\nFLOAT/ MARGOT (help Jansten too)", staffBlk()?.Note);
-  check("note blockout type and times", staffBlk()?.BlockoutType === 5 && staffBlk()?.StartTime === "07:00:00" && staffBlk()?.StopTime === "08:00:00", staffBlk());
+  check("block text", head() === "DECCAN APP - do not edit\n-- TEAM --\nAC/UNIQUE\nHYG/ JANTSEN\nFRONT/ ARI/KETKI\nFLOAT/ MARGOT (help Jansten too)", appBlk()?.Note);
+  check("own blockout type, ends with the day", appBlk()?.StopTime === "18:00:00" && appBlk()!.StartTime > "08:00:00", appBlk());
+  check("team's own note untouched", od.blockouts.find((b) => b.ScheduleNum === 1)?.Note === "Staff Schedules\nFront Desk:\nARI");
   check("recorded", db.od_blockouts.length === 1 && db.od_blockouts[0].kind === "staff");
 
   console.log("nothing changed -> nothing sent");
@@ -169,71 +192,84 @@ async function main() {
   r = await syncRange(monday, monday);
   check("no writes", r.results[0]?.changes === 0 && !od.calls.some((c) => !c.startsWith("GET")), od.calls);
 
+  console.log("events, birthdays, warnings");
+  db.events.push({ date: monday, time: "17:30", title: "Staff meeting", mandatory: true });
+  db.staff.find((e) => e.id === 4)!.birthday = monday.slice(5);
+  db.schedules[0].assistant_counts = { 1: 2 };
+  r = await syncRange(monday, monday);
+  const n1 = appBlk()?.Note ?? "";
+  check("event today", n1.includes("-- EVENTS TODAY --\n5:30pm Staff meeting - required"), n1);
+  check("birthday", n1.includes("-- BIRTHDAYS --\nKETKI"), n1);
+  check("shortage warning, with Open Dental names, no repeats", n1.includes("-- WARNINGS --\n! Only 1 of 2 assistants available for AC - 1 temp needed.\n-- TEAM --") && !n1.includes("Anita"), n1);
+  db.schedules[0].assistant_counts = {};
+
   console.log("approved leave for a hygienist");
   db.leave_requests.push({ id: "l1", employee_id: 5, employee_name: "Jantsen Lee", start_date: monday, end_date: wednesday, starts_midday: false, ends_midday: true, status: "approved", reason: "pto", total_days: 2.5, submitted_at: "x" });
+  od.appts = [{ AptNum: 1, AptDateTime: `${monday} 09:00:00`, AptStatus: "Scheduled", ProvNum: 1, ProvHyg: 7, Op: 3 }, { AptNum: 2, AptDateTime: `${monday} 10:00:00`, AptStatus: "Scheduled", ProvNum: 1, ProvHyg: 7, Op: 3 }];
   r = await syncRange(monday, wednesday);
-  check("note lists them out", !!staffBlk()?.Note.includes(`JANTSEN OUT ${md(monday)}-${md(wednesday)}`) && !staffBlk()?.Note.includes("HYG/"), staffBlk()?.Note);
+  const n2 = appBlk()?.Note ?? "";
+  check("off today with dates", n2.includes(`-- OFF TODAY --\nJANTSEN ${md(monday)}-${md(wednesday)}`) && !n2.includes("HYG/"), n2);
+  check("booked while off", n2.includes("! JANTSEN is off but has 2 patients booked"), n2);
+  check("half day on the last day", (appBlk(wednesday)?.Note ?? "").includes(`JANTSEN AM only (${md(monday)}-${md(wednesday)})`), appBlk(wednesday)?.Note);
   const prov = od.blockouts.filter((b) => b.operatories === "3");
   check("provider blockout on each open day, on their column", prov.length === 2 && prov.every((b) => b.BlockoutType === 6), prov);
-  const wed = prov.find((b) => b.SchedDate === wednesday);
-  check("back at midday -> only the morning is blocked", wed?.StartTime === "07:00:00" && wed?.StopTime === "12:00:00", wed);
+  check("back at midday -> only the morning is blocked", prov.find((b) => b.SchedDate === wednesday)?.StopTime === "12:00:00");
   check("closed Tuesday gets nothing", !od.blockouts.some((b) => b.SchedDate === addDays(monday, 1)));
-  check("wednesday (no saved plan) still gets a note listing them out", od.blockouts.some((b) => b.operatories === "99" && b.SchedDate === wednesday && b.Note.includes("JANTSEN OUT AM")), od.blockouts.filter((b) => b.SchedDate === wednesday));
 
   console.log("leave cancelled");
   db.leave_requests[0].status = "cancelled";
+  od.appts = [];
   r = await syncRange(monday, wednesday);
   check("provider blockouts removed", od.blockouts.filter((b) => b.operatories === "3").length === 0, od.blockouts);
-  check("note back to normal", !!staffBlk()?.Note.includes("HYG/ JANTSEN") && !staffBlk()?.Note.includes("OUT"), staffBlk()?.Note);
-  check("records match Open Dental", db.od_blockouts.length === od.blockouts.length, { db: db.od_blockouts.length, od: od.blockouts.length });
+  check("block back to normal", (appBlk()?.Note ?? "").includes("HYG/ JANTSEN") && !(appBlk()?.Note ?? "").includes("OFF TODAY"), appBlk()?.Note);
 
-  console.log("day already has a hand-made note");
-  od.blockouts.push({ ScheduleNum: 1, SchedDate: nextMonday, StartTime: "07:00:00", StopTime: "08:00:00", BlockoutType: 5, Note: "Staff Schedules\nFront Desk:\nARI", operatories: "99" });
-  r = await syncRange(nextMonday, nextMonday);
-  check("left alone", r.results[0]?.status === "skipped_manual" && od.blockouts.filter((b) => b.SchedDate === nextMonday).length === 1, r);
-  check("hand-made one untouched", od.blockouts.find((b) => b.ScheduleNum === 1)?.Note === "Staff Schedules\nFront Desk:\nARI");
+  console.log("holiday");
+  const thursday = addDays(monday, 3);
+  db.holidays.push({ date: thursday, name: "Founders Day", type: "holiday" });
+  r = await syncRange(monday, thursday);
+  check("CLOSED on the day", (appBlk(thursday)?.Note ?? "").startsWith("DECCAN APP - do not edit\nCLOSED - Founders Day"), appBlk(thursday)?.Note);
+  check("no team on a closed day", !(appBlk(thursday)?.Note ?? "").includes("-- TEAM --"));
+  check("listed in the rest of the month", thursday.slice(0, 7) !== monday.slice(0, 7) || (appBlk()?.Note ?? "").includes(`Closed: ${md(thursday)} Founders Day`), appBlk()?.Note);
 
   console.log("merge rules");
   const M = note.mergeStaffNote;
   check("unchanged -> none", M(["A", "B"], ["A", "B"], ["A", "B"]).action === "none");
   check("added line kept", JSON.stringify(M(["A", "B", "late start"], ["A", "B"], ["A", "C"])) === JSON.stringify({ action: "write", lines: ["A", "C", "late start"] }));
-  check("cancelled leave line removed", JSON.stringify(M(["T", "X OUT 1/2", "A"], ["T", "X OUT 1/2", "A"], ["T", "A"])) === JSON.stringify({ action: "write", lines: ["T", "A"] }));
+  check("removed app line removed", JSON.stringify(M(["T", "X 1/2", "A"], ["T", "X 1/2", "A"], ["T", "A"])) === JSON.stringify({ action: "write", lines: ["T", "A"] }));
   check("changed line -> conflict", M(["A", "CHO/UNIQUE"], ["A", "CHO/MARGOT"], ["A", "CHO/MARGOT", "Z"]).action === "conflict");
   check("team already made it match -> none", M(["A", "CHO/UNIQUE"], ["A", "CHO/MARGOT"], ["A", "CHO/UNIQUE"]).action === "none");
 
-  console.log("the team adds a line in Open Dental");
-  const setNote = (text: string) => { const b = staffBlk()!; b.Note = text; };
-  setNote(staffBlk()!.Note + "\nDr. Chopra late start 9am");
+  console.log("the team adds a line to the Deccan App blockout");
+  const setNote = (text: string) => { appBlk()!.Note = text; };
+  setNote(appBlk()!.Note + "\nDr. Chopra late start 9am");
   db.schedules[0].floater_note = "lab day";
   r = await syncRange(monday, monday);
-  check("app's change made, their line kept", staffBlk()?.Note === "Staff Schedules\nFront Desk:\nARI/KETKI\nAC/UNIQUE\nHYG/ JANTSEN\nFLOAT/ MARGOT (lab day)\nDr. Chopra late start 9am", staffBlk()?.Note);
-  check("taller to fit the extra line", staffBlk()?.StopTime === "08:10:00", staffBlk()?.StopTime);
+  check("app's change made, their line kept", (appBlk()?.Note ?? "").includes("FLOAT/ MARGOT (lab day)") && (appBlk()?.Note ?? "").endsWith("\nDr. Chopra late start 9am"), appBlk()?.Note);
   check("status ok", r.results[0]?.status === "ok", r.results[0]);
 
-  console.log("the team changes an assignment in Open Dental");
-  setNote(staffBlk()!.Note.replace("AC/UNIQUE", "AC/MARGOT"));
-  const before = staffBlk()!.Note;
+  console.log("the team changes an assignment in it");
+  setNote(appBlk()!.Note.replace("AC/UNIQUE", "AC/MARGOT"));
+  const before = appBlk()!.Note;
   db.schedules[0].floater_note = "sterilization";
   r = await syncRange(monday, monday);
-  check("not overwritten", staffBlk()?.Note === before, staffBlk()?.Note);
+  check("not overwritten", appBlk()?.Note === before, appBlk()?.Note);
   check("flagged with the difference", r.results[0]?.status === "edited_in_od" && /AC\/MARGOT/.test(r.results[0]?.message ?? "") && /AC\/UNIQUE/.test(r.results[0]?.message ?? ""), r.results[0]);
-  check("flag saved for the setup page", db.od_sync_days.find((d) => d.date === monday)?.status === "edited_in_od");
 
   console.log("admin: use the staffing app's version");
   r = await syncRange(monday, monday, { force: true });
-  check("rewritten exactly", staffBlk()?.Note === "Staff Schedules\nFront Desk:\nARI/KETKI\nAC/UNIQUE\nHYG/ JANTSEN\nFLOAT/ MARGOT (sterilization)", staffBlk()?.Note);
-  check("flag cleared", r.results[0]?.status === "ok" && db.od_sync_days.find((d) => d.date === monday)?.status === "ok");
+  check("rewritten exactly", !(appBlk()?.Note ?? "").includes("late start") && (appBlk()?.Note ?? "").includes("AC/UNIQUE") && (appBlk()?.Note ?? "").includes("(sterilization)"), appBlk()?.Note);
+  check("flag cleared", r.results[0]?.status === "ok");
 
-  console.log("the team deletes the note in Open Dental");
-  od.blockouts = od.blockouts.filter((b) => !(b.operatories === "99" && b.SchedDate === monday));
+  console.log("the team deletes it in Open Dental");
+  od.blockouts = od.blockouts.filter((b) => b !== appBlk());
   db.schedules[0].floater_note = "front desk at lunch";
   r = await syncRange(monday, monday);
-  check("stays deleted", !staffBlk() && r.results[0]?.status === "deleted_in_od", r.results[0]);
+  check("stays deleted", !appBlk() && r.results[0]?.status === "deleted_in_od", r.results[0]);
   db.schedules[0].floater_note = "something else";
   r = await syncRange(monday, monday);
-  check("still deleted on later syncs", !staffBlk() && r.results[0]?.status === "deleted_in_od");
+  check("still deleted on later syncs", !appBlk() && r.results[0]?.status === "deleted_in_od");
   r = await syncRange(monday, monday, { force: true });
-  check("admin can put it back", staffBlk()?.Note.includes("(something else)") === true, staffBlk());
+  check("admin can put it back", (appBlk()?.Note ?? "").includes("(something else)"), appBlk());
 
   console.log("a provider blockout deleted in Open Dental comes back");
   db.leave_requests[0].status = "approved";

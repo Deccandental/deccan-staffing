@@ -1,12 +1,13 @@
 // Server-only: makes the blockouts in Open Dental match the staffing app.
 //
-// For each date it works out the blockouts that SHOULD exist (one Staff
-// Schedules note in the Notes column, plus one per provider who is out) and
+// For each date it works out the blockouts that SHOULD exist (one Deccan App
+// blockout in the Notes column, plus one per provider who is out) and
 // compares them with the blockouts the app created before (od_blockouts).
 // It then creates, updates or deletes only those. Blockouts typed by hand in
 // Open Dental are never edited or deleted.
 //
-// The team may also edit the app's Staff Schedules note in Open Dental:
+// The team's own hand-typed Staff Schedules note is never touched.
+// The team may also edit the app's Deccan App blockout in Open Dental:
 //   - lines they ADD are kept (at the bottom) when the app updates the note;
 //   - if they CHANGE or remove one of the app's lines, the app stops updating
 //     that day's note and flags it on the Open Dental page;
@@ -15,9 +16,10 @@
 import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { todayStr } from "@/lib/today";
-import { odConfigured, OdError, OdBlockout, createBlockout, updateBlockout, deleteBlockout, listBlockouts, BlockoutInput } from "./client";
-import { buildDayPlans, eachDate, DayPlan, StaffLink } from "./dayPlan";
-import { buildStaffNoteLines, staffNoteSpan, providerSpan, providerNote, STAFF_NOTE_TITLE, DayTimes, splitLines, mergeStaffNote } from "./staffNote";
+import { odConfigured, OdError, OdBlockout, createBlockout, updateBlockout, deleteBlockout, listBlockouts, listAppointments, BlockoutInput } from "./client";
+import { buildDayPlans, eachDate, addDays, DayPlan, StaffLink } from "./dayPlan";
+import type { Employee } from "@/types/employee";
+import { buildAppBlockLines, appBlockSpan, providerSpan, providerNote, DayTimes, splitLines, mergeStaffNote, toMinutes } from "./staffNote";
 
 export interface OdSettings {
   enabled: boolean;
@@ -52,18 +54,16 @@ const keyOf = (kind: string, employeeId: number | null) => `${kind}:${employeeId
 const hashOf = (b: BlockoutInput) => crypto.createHash("sha256").update(JSON.stringify(b)).digest("hex").slice(0, 32);
 
 /** The blockouts a day should have. Exported so the setup page can preview them without writing anything. */
-export function desiredBlockouts(plan: DayPlan, s: OdSettings, links: Map<number, StaffLink>): Desired[] {
-  if (!plan.isOpen) return [];
+export function desiredBlockouts(plan: DayPlan, s: OdSettings, links: Map<number, StaffLink>, extraWarnings: string[] = []): Desired[] {
   const times: DayTimes = { dayStart: s.dayStart, midday: s.midday, dayEnd: s.dayEnd, rowMinutes: s.rowMinutes };
   const out: Desired[] = [];
-  if ((plan.roster || plan.absences.length > 0) && s.notesOperatoryNum && s.staffBlockoutType) {
-    const lines = buildStaffNoteLines(plan.roster, plan.absences);
-    const span = staffNoteSpan(lines.length, times);
+  if (plan.content && s.notesOperatoryNum && s.staffBlockoutType) {
+    const lines = buildAppBlockLines({ ...plan.content, warnings: [...plan.content.warnings, ...extraWarnings] });
     out.push({ kind: "staff", employeeId: null, input: {
-      date: plan.date, ...span, blockoutType: s.staffBlockoutType, operatoryNums: [s.notesOperatoryNum], note: lines.join("\n"),
+      date: plan.date, ...appBlockSpan(lines.length, times), blockoutType: s.staffBlockoutType, operatoryNums: [s.notesOperatoryNum], note: lines.join("\n"),
     } });
   }
-  if (s.providerBlockoutType) {
+  if (plan.isOpen && s.providerBlockoutType) {
     for (const a of plan.absences) {
       const link = links.get(a.employeeId);
       if (!link?.provNum || link.operatoryNums.length === 0) continue;
@@ -71,6 +71,42 @@ export function desiredBlockouts(plan: DayPlan, s: OdSettings, links: Map<number
         date: plan.date, ...providerSpan(a.half, times), blockoutType: s.providerBlockoutType, operatoryNums: link.operatoryNums, note: providerNote(a),
       } });
     }
+  }
+  return out;
+}
+
+/**
+ * Warnings that come from comparing the plan with Open Dental's bookings:
+ * a linked doctor or hygienist who is off, or not on the day's plan, but has
+ * patients booked. Reading appointments is free. Returns date -> warnings.
+ */
+export async function bookingWarnings(plans: DayPlan[], links: Map<number, StaffLink>, staff: Employee[], s: OdSettings): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const providers = staff.filter((e) => !e.archived && links.get(e.id)?.provNum);
+  const open = plans.filter((p) => p.isOpen && p.content);
+  if (!odConfigured() || providers.length === 0 || open.length === 0) return out;
+  // One day past the end in case Open Dental treats dateEnd as exclusive; filtered by date below.
+  const appts = await listAppointments(open[0].date, addDays(open[open.length - 1].date, 1));
+  const midday = toMinutes(s.midday);
+  const { displayNameFor } = await import("./dayPlan");
+  for (const p of open) {
+    const list: string[] = [];
+    for (const e of providers) {
+      const prov = links.get(e.id)!.provNum!;
+      const absence = p.absences.find((a) => a.employeeId === e.id);
+      const booked = appts.filter((a) => {
+        const [d, t = "00:00"] = String(a.AptDateTime ?? "").split(" ");
+        if (d !== p.date || (a.ProvNum !== prov && a.ProvHyg !== prov) || !/^(Scheduled|ASAP)$/i.test(String(a.AptStatus ?? ""))) return false;
+        const m = toMinutes(t.slice(0, 5));
+        return absence?.half === "AM" ? m < midday : absence?.half === "PM" ? m >= midday : true;
+      }).length;
+      if (booked === 0) continue;
+      const who = displayNameFor(e, links);
+      const pts = `${booked} patient${booked === 1 ? "" : "s"} booked`;
+      if (absence) list.push(absence.half ? `${who} is off ${absence.half} but has ${pts} then` : `${who} is off but has ${pts}`);
+      else if (!p.workingIds.includes(e.id)) list.push(`${who} isn't on today's plan but has ${pts}`);
+    }
+    if (list.length) out.set(p.date, list);
   }
   return out;
 }
@@ -89,8 +125,8 @@ const sameOps = (a: string, b: number[]) =>
  * `force` (admin's "Use the staffing app's version"): the staff note is
  * rewritten exactly as the app has it, and put back if it was deleted.
  */
-async function syncOneDay(plan: DayPlan, s: OdSettings, links: Map<number, StaffLink>, existing: any[], force: boolean): Promise<SyncResult> {
-  const desired = desiredBlockouts(plan, s, links);
+async function syncOneDay(plan: DayPlan, s: OdSettings, links: Map<number, StaffLink>, existing: any[], force: boolean, extraWarnings: string[]): Promise<SyncResult> {
+  const desired = desiredBlockouts(plan, s, links, extraWarnings);
   const have = new Map(existing.map((r) => [keyOf(r.kind, r.employee_id), r]));
   const times: DayTimes = { dayStart: s.dayStart, midday: s.midday, dayEnd: s.dayEnd, rowMinutes: s.rowMinutes };
   let changes = 0;
@@ -118,19 +154,12 @@ async function syncOneDay(plan: DayPlan, s: OdSettings, links: Map<number, Staff
     if (d.kind === "staff") {
       const desiredLines = splitLines(d.input.note);
       if (!rec) {
-        // Don't add a second note to a day the team already filled in by hand.
-        const theirs = (await inOd()).some((b) => sameOps(b.operatories, [s.notesOperatoryNum!]) &&
-          String(b.Note ?? "").trim().toLowerCase().startsWith(STAFF_NOTE_TITLE.toLowerCase()));
-        if (theirs) {
-          flags.push({ status: "skipped_manual", message: "A hand-made Staff Schedules blockout is already on this day, so the app left the Notes column alone. Delete it in Open Dental if you'd like the app to take this day over." });
-          continue;
-        }
         await record(null, d, await createBlockout(d.input), { last_note: d.input.note });
         changes++;
         continue;
       }
       if (rec.deleted_in_od && !force) {
-        flags.push({ status: "deleted_in_od", message: "The Staff Schedules note was deleted in Open Dental, so the app is leaving this day alone." });
+        flags.push({ status: "deleted_in_od", message: "The Deccan App blockout was deleted in Open Dental, so the app is leaving this day alone." });
         continue;
       }
       if (rec.content_hash === hash && !rec.deleted_in_od && !force) continue; // nothing new to write
@@ -140,7 +169,7 @@ async function syncOneDay(plan: DayPlan, s: OdSettings, links: Map<number, Staff
         if (force) { await record(rec, d, await createBlockout(d.input), { last_note: d.input.note }); changes++; }
         else {
           await supabaseAdmin.from("od_blockouts").update({ deleted_in_od: true }).eq("id", rec.id);
-          flags.push({ status: "deleted_in_od", message: "The Staff Schedules note was deleted in Open Dental, so the app is leaving this day alone." });
+          flags.push({ status: "deleted_in_od", message: "The Deccan App blockout was deleted in Open Dental, so the app is leaving this day alone." });
         }
         continue;
       }
@@ -156,11 +185,11 @@ async function syncOneDay(plan: DayPlan, s: OdSettings, links: Map<number, Staff
           merge.theirs.length ? `Open Dental has: ${merge.theirs.join(" · ")}` : "",
           merge.ours.length ? `the app had: ${merge.ours.join(" · ")}` : "",
         ].filter(Boolean).join("; ");
-        flags.push({ status: "edited_in_od", message: `Someone changed the Staff Schedules note in Open Dental (${parts}). The app hasn't overwritten it. Update the Schedule Builder to match, or use the staffing app's version.` });
+        flags.push({ status: "edited_in_od", message: `Someone changed the Deccan App blockout in Open Dental (${parts}). The app hasn't overwritten it. Update the Schedule Builder to match, or use the staffing app's version.` });
         continue;
       }
       if (merge.action === "write") {
-        const input = { ...d.input, ...staffNoteSpan(merge.lines.length, times), note: merge.lines.join("\n") };
+        const input = { ...d.input, ...appBlockSpan(merge.lines.length, times), note: merge.lines.join("\n") };
         await updateBlockout(Number(rec.schedule_num), input);
         changes++;
       }
@@ -207,14 +236,18 @@ export async function syncRange(from: string, to: string, opts: { force?: boolea
   if (from < today) from = today;
   if (to < from) return { results: [] };
 
-  const { plans, links } = await buildDayPlans(from, to);
+  const { plans, links, staff } = await buildDayPlans(from, to);
   const { data: recs, error } = await supabaseAdmin.from("od_blockouts").select("*").gte("date", from).lte("date", to);
   if (error) throw new Error(`Couldn't read the sync record: ${error.message}`);
+
+  let booking = new Map<string, string[]>();
+  try { booking = await bookingWarnings(plans, links, staff, s); }
+  catch (e) { console.error("Couldn't check Open Dental bookings:", e); } // the writes below report any connection problem
 
   const results: SyncResult[] = [];
   for (const plan of plans) {
     try {
-      const r = await syncOneDay(plan, s, links, (recs ?? []).filter((x) => x.date === plan.date), !!opts.force);
+      const r = await syncOneDay(plan, s, links, (recs ?? []).filter((x) => x.date === plan.date), !!opts.force, booking.get(plan.date) ?? []);
       await setDayStatus(plan.date, r.status, r.message);
       results.push(r);
     } catch (e: any) {

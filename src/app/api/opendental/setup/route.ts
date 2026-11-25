@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Row minutes must be 5–60 and days ahead 7–120." }, { status: 400 });
   }
   if (settingsRow.enabled && (!settingsRow.notes_operatory_num || !settingsRow.staff_blockout_type)) {
-    return NextResponse.json({ ok: false, error: "Pick the Notes column and the Staff Schedules blockout type before turning the sync on." }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Pick the Notes column and the Deccan App blockout type before turning the sync on." }, { status: 400 });
   }
 
   const links = Array.isArray(body?.links) ? body.links : [];

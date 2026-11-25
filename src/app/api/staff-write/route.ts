@@ -102,11 +102,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ data: null });
       }
       case "updateOwnProfile": {
-        // A person may change only their own name and email. Nothing else can ride along.
+        // A person may change only their own name, email and birthday. Nothing else can ride along.
         if (!Number.isFinite(id) || (!isAdmin && session.employeeId !== id)) return NextResponse.json({ error: "Not permitted." }, { status: 403 });
         const name = String(body.name ?? "").trim();
         if (!name) return NextResponse.json({ error: "Name can't be empty." }, { status: 400 });
-        const { error } = await supabaseAdmin.from("staff").update({ name, email: String(body.email ?? "").trim() }).eq("id", id);
+        const update: Record<string, unknown> = { name, email: String(body.email ?? "").trim() };
+        if ("birthday" in body) {
+          const b = body.birthday;
+          if (b !== null && !(typeof b === "string" && /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(b))) {
+            return NextResponse.json({ error: "Birthday should be month/day, like 03/14." }, { status: 400 });
+          }
+          update.birthday = b;
+        }
+        const { error } = await supabaseAdmin.from("staff").update(update).eq("id", id);
         if (error) return NextResponse.json({ error: error.message }, { status: 400 });
         return NextResponse.json({ data: null });
       }

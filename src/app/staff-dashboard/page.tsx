@@ -5,7 +5,7 @@ import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import ChangePinForm from "@/components/ChangePinForm";
 import { Employee } from "@/types/employee";
-import { loadStaff, updateOwnProfile } from "@/lib/staffStore";
+import { loadStaff, updateOwnProfile, birthdayLabel } from "@/lib/staffStore";
 import { LeaveRequest } from "@/types/leave";
 import { loadLeaveRequests } from "@/lib/leaveStore";
 import {
@@ -167,7 +167,7 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
   const [myNotes, setMyNotes] = useState<StaffNote[]>([]);
   const [showOtherDocs, setShowOtherDocs] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
-  const [profileForm, setProfileForm] = useState({ name: "", email: "" });
+  const [profileForm, setProfileForm] = useState<{ name: string; email: string; birthday?: string }>({ name: "", email: "" });
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [hygieneEntries, setHygieneEntries] = useState<HygieneBonusEntry[]>([]);
@@ -551,6 +551,14 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                     <input value={profileForm.email} onChange={(e) => setProfileForm((f) => ({ ...f, email: e.target.value }))}
                       placeholder="your.email@mydeccandental.com" type="email"
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-center text-sm focus:outline-none" />
+                    {profileForm.birthday !== undefined && (
+                      <div>
+                        <input value={profileForm.birthday} onChange={(e) => setProfileForm((f) => ({ ...f, birthday: e.target.value }))}
+                          placeholder="Birthday MM/DD (optional)" maxLength={5}
+                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-center text-sm focus:outline-none" />
+                        <p className="text-[11px] text-slate-400 mt-1">Month and day only. It shows on the Open Dental schedule on your birthday. Leave blank to keep it private.</p>
+                      </div>
+                    )}
                     {profileError && <p className="text-xs text-red-600">{profileError}</p>}
                     <div className="flex items-center justify-center gap-2">
                       <button onClick={handleSaveProfile} disabled={profileSaving}
@@ -574,12 +582,13 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                     {identity.employeeId === selectedEmployee.id && (
                       <button
                         onClick={() => {
-                          setProfileForm({ name: selectedEmployee.name, email: selectedEmployee.email ?? "" });
+                          setProfileForm({ name: selectedEmployee.name, email: selectedEmployee.email ?? "",
+                            birthday: selectedEmployee.birthday === undefined ? undefined : birthdayLabel(selectedEmployee.birthday) });
                           setProfileError(null);
                           setEditingProfile(true);
                         }}
                         className="text-xs font-semibold mt-1 hover:underline" style={{ color: "#e8622a" }}>
-                        Edit my name or email
+                        Edit my name, email or birthday
                       </button>
                     )}
                     {identity.mode === "staff" && identity.employeeId === selectedEmployee.id && (
