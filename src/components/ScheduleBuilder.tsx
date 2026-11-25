@@ -4,6 +4,7 @@ import OdBlockoutPanel from "@/components/OdBlockoutPanel";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { sessionHeaders } from "@/lib/secureData";
 import { syncOdNow } from "@/lib/openDental/clientSync";
+import { todayStr } from "@/lib/today";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -52,6 +53,8 @@ export default function ScheduleBuilder() {
   const [od, setOd] = useState<{ configured: boolean; enabled: boolean; statuses: Record<string, string> } | null>(null);
   const [odSending, setOdSending] = useState(false);
   const [odMsg, setOdMsg] = useState("");
+  // How much to send: the month on screen, or a number of days from today.
+  const [odRange, setOdRange] = useState<"month" | "14" | "30" | "60" | "90">("month");
   const loadOdMonth = useCallback(async () => {
     try {
       const res = await fetch("/api/opendental/day", { method: "POST", headers: sessionHeaders(), body: JSON.stringify({ date: `${year}-${String(month).padStart(2, "0")}-01`, action: "month" }) });
@@ -63,8 +66,14 @@ export default function ScheduleBuilder() {
 
   async function sendMonthToOd() {
     const mm = String(month).padStart(2, "0");
-    const from = `${year}-${mm}-01`;
-    const to = `${year}-${mm}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;
+    let from = `${year}-${mm}-01`;
+    let to = `${year}-${mm}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;
+    if (odRange !== "month") {
+      from = todayStr();
+      const end = new Date(`${from}T12:00:00Z`);
+      end.setUTCDate(end.getUTCDate() + Number(odRange));
+      to = end.toISOString().slice(0, 10);
+    }
     setOdSending(true);
     setOdMsg("");
     const r = await syncOdNow({ from, to });
@@ -522,12 +531,21 @@ export default function ScheduleBuilder() {
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {odMsg && <span className="text-xs text-slate-500">{odMsg}</span>}
                 {od?.configured && od.enabled ? (
-                  <button onClick={sendMonthToOd} disabled={odSending}
-                    title="Days before today are left alone"
-                    className="rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50"
-                    style={{ borderColor: "#c4b5fd", color: "#6d28d9", background: "#f5f3ff" }}>
-                    {odSending ? "Sending…" : "↗ Send this month to Open Dental"}
-                  </button>
+                  <div className="flex items-center rounded-lg border text-xs font-semibold" style={{ borderColor: "#c4b5fd", background: "#f5f3ff" }}>
+                    <button onClick={sendMonthToOd} disabled={odSending}
+                      title="Days before today are left alone"
+                      className="px-3 py-1.5 transition disabled:opacity-50" style={{ color: "#6d28d9" }}>
+                      {odSending ? "Sending…" : "↗ Send to Open Dental:"}
+                    </button>
+                    <select value={odRange} onChange={(e) => setOdRange(e.target.value as typeof odRange)} disabled={odSending}
+                      className="rounded-r-lg border-l bg-white px-2 py-1.5 text-xs" style={{ borderColor: "#c4b5fd", color: "#6d28d9" }}>
+                      <option value="month">{formatMonthYear(year, month)}</option>
+                      <option value="14">Next 2 weeks</option>
+                      <option value="30">Next 30 days</option>
+                      <option value="60">Next 60 days</option>
+                      <option value="90">Next 90 days</option>
+                    </select>
+                  </div>
                 ) : od?.configured ? (
                   <a href="/open-dental" className="text-xs font-semibold hover:underline" style={{ color: "#6d28d9" }}>Open Dental sync is off — set up</a>
                 ) : null}
