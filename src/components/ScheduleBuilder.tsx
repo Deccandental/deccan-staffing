@@ -543,83 +543,92 @@ export default function ScheduleBuilder() {
 
           {selectedDate ? (
             <div className="grid gap-6 lg:grid-cols-2">
-              <div className="rounded-2xl bg-white p-6 shadow">
-                <h3 className="card-title mb-1">
-                  {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-                </h3>
-                <p className="text-sm text-slate-400 mb-4">Select which dentists are working today</p>
+              {/* Left: who works today, then the Open Dental blockout right under it (the staffing plan on the right is the tall one). */}
+              <div className="space-y-6">
+                <div className="rounded-2xl bg-white p-6 shadow">
+                  <h3 className="card-title mb-1">
+                    {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+                  </h3>
+                  <p className="text-sm text-slate-400 mb-4">Select which dentists are working today</p>
 
-                <div className="mb-3 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-600">Front Desk Required</div>
-                    <div className="text-xs text-slate-400">How many front desk staff needed today</div>
+                  <div className="mb-3 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-600">Front Desk Required</div>
+                      <div className="text-xs text-slate-400">How many front desk staff needed today</div>
+                    </div>
+                    <div className="flex gap-2">
+                      {[1, 2, 3].map((n) => (
+                        <button key={n} onClick={() => setFrontDeskRequired(n)}
+                          className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
+                          style={frontDeskRequired === n ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    {[1, 2, 3].map((n) => (
-                      <button key={n} onClick={() => setFrontDeskRequired(n)}
-                        className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
-                        style={frontDeskRequired === n ? { backgroundColor: "#e8622a", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
-                        {n}
-                      </button>
-                    ))}
+
+                  <div className="mb-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-600">Hygienists Required</div>
+                      <div className="text-xs text-slate-400">How many hygienists needed today</div>
+                    </div>
+                    <div className="flex gap-2">
+                      {[0, 1, 2].map((n) => (
+                        <button key={n} onClick={() => setHygienistsRequired(n)}
+                          className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
+                          style={hygienistsRequired === n ? { backgroundColor: "#059669", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                    👥 {workingDentists.length} dentist{workingDentists.length !== 1 ? "s" : ""} selected
+                    {saving && <span className="ml-2 text-cyan-500">💾 Saving...</span>}
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {allDentists.map((name) => {
+                      const checked = workingDentists.includes(name);
+                      const emp = staff.find((e) => e.name === name);
+                      const dowKey = selectedDate ? getWeekday(selectedDate) : null;
+                      const day = openDays.find((d) => d.date === selectedDate);
+                      const worksToday = emp && dowKey ? (emp.defaultSchedule[dowKey] || (selectedDate ? isInExtraOn(emp.id, selectedDate) : false)) : true;
+                      const hasOverride = emp ? overrides.some((o) => o.employeeId === emp.id && o.date === selectedDate && !o.halfDay && o.reason !== "remote" && o.reason !== "extra") : false;
+                      const unavailable = !worksToday || hasOverride;
+                      return (
+                        <button key={name}
+                          // An unavailable dentist can't be added — but one already
+                          // saved on this day (from before availability changed) can
+                          // always be removed.
+                          onClick={() => { if (unavailable && !checked) return; setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name]); }}
+                          className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
+                            unavailable ? "border-red-100 bg-red-50 opacity-60 cursor-not-allowed"
+                            : checked ? "border-orange-400 bg-orange-50"
+                            : "border-slate-200 hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }} />
+                          <span className="text-sm font-medium">{name}</span>
+                          {unavailable ? (
+                            <span className="ml-auto text-xs text-red-400 font-medium">Unavailable</span>
+                          ) : (
+                            <span className={`ml-auto h-4 w-4 rounded border flex items-center justify-center text-xs ${checked ? "text-white" : "border-slate-300"}`} style={checked ? { backgroundColor: "#e8622a", borderColor: "#e8622a" } : {}}>
+                              {checked ? "✓" : ""}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-
-                <div className="mb-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-600">Hygienists Required</div>
-                    <div className="text-xs text-slate-400">How many hygienists needed today</div>
-                  </div>
-                  <div className="flex gap-2">
-                    {[0, 1, 2].map((n) => (
-                      <button key={n} onClick={() => setHygienistsRequired(n)}
-                        className="rounded-lg px-4 py-1.5 text-sm font-semibold transition"
-                        style={hygienistsRequired === n ? { backgroundColor: "#059669", color: "white" } : { background: "white", color: "#6b7280", border: "1px solid #e5e7eb" }}>
-                        {n}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                  👥 {workingDentists.length} dentist{workingDentists.length !== 1 ? "s" : ""} selected
-                  {saving && <span className="ml-2 text-cyan-500">💾 Saving...</span>}
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {allDentists.map((name) => {
-                    const checked = workingDentists.includes(name);
-                    const emp = staff.find((e) => e.name === name);
-                    const dowKey = selectedDate ? getWeekday(selectedDate) : null;
-                    const day = openDays.find((d) => d.date === selectedDate);
-                    const worksToday = emp && dowKey ? (emp.defaultSchedule[dowKey] || (selectedDate ? isInExtraOn(emp.id, selectedDate) : false)) : true;
-                    const hasOverride = emp ? overrides.some((o) => o.employeeId === emp.id && o.date === selectedDate && !o.halfDay && o.reason !== "remote" && o.reason !== "extra") : false;
-                    const unavailable = !worksToday || hasOverride;
-                    return (
-                      <button key={name}
-                        // An unavailable dentist can't be added — but one already
-                        // saved on this day (from before availability changed) can
-                        // always be removed.
-                        onClick={() => { if (unavailable && !checked) return; setWorkingDentists(checked ? workingDentists.filter((d) => d !== name) : [...workingDentists, name]); }}
-                        className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
-                          unavailable ? "border-red-100 bg-red-50 opacity-60 cursor-not-allowed"
-                          : checked ? "border-orange-400 bg-orange-50"
-                          : "border-slate-200 hover:bg-slate-50"
-                        }`}
-                      >
-                        <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: emp?.color ?? "#888" }} />
-                        <span className="text-sm font-medium">{name}</span>
-                        {unavailable ? (
-                          <span className="ml-auto text-xs text-red-400 font-medium">Unavailable</span>
-                        ) : (
-                          <span className={`ml-auto h-4 w-4 rounded border flex items-center justify-center text-xs ${checked ? "text-white" : "border-slate-300"}`} style={checked ? { backgroundColor: "#e8622a", borderColor: "#e8622a" } : {}}>
-                            {checked ? "✓" : ""}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                <OdBlockoutPanel
+                  date={selectedDate}
+                  canEdit
+                  onChanged={loadOdMonth}
+                  refreshKey={JSON.stringify([schedule[selectedDate] ?? null, monthTempAssignments.filter((ta) => ta.date === selectedDate), overrides.filter((o) => o.date === selectedDate)])}
+                />
               </div>
 
               <DailyAssignmentPanel
@@ -640,12 +649,6 @@ export default function ScheduleBuilder() {
                 onTempAssignmentsChange={handleTempAssignmentsChange}
                 frontDeskRequired={frontDeskRequired}
                 leaveRequests={leaveRequests}
-              />
-              <OdBlockoutPanel
-                date={selectedDate}
-                canEdit
-                onChanged={loadOdMonth}
-                refreshKey={JSON.stringify([schedule[selectedDate] ?? null, monthTempAssignments.filter((ta) => ta.date === selectedDate), overrides.filter((o) => o.date === selectedDate)])}
               />
             </div>
           ) : (

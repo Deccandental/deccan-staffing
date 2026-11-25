@@ -89,7 +89,7 @@ export default function OdBlockoutPanel({ date, refreshKey, canEdit, onChanged }
   }
 
   if (!info) return null;
-  if (!info.ok) return <section className="mb-4 rounded-xl border p-4 text-sm text-red-500">{info.error}</section>;
+  if (!info.ok) return <section className="rounded-2xl bg-white p-6 shadow text-sm text-red-500">{info.error}</section>;
   if (!info.hasBlock) return null;
 
   // What the block will say with the edits on screen (before saving).
@@ -102,7 +102,7 @@ export default function OdBlockoutPanel({ date, refreshKey, canEdit, onChanged }
   const showOd = info.inOd && (editedThere || info.inOd.lines.join("\n") !== info.final.join("\n"));
 
   return (
-    <section className="mb-4 rounded-xl border p-4">
+    <section className="rounded-2xl bg-white p-6 shadow">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h3 className="card-title">Open Dental blockout</h3>
         <span className="text-xs">
