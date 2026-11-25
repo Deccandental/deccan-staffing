@@ -1,5 +1,6 @@
 "use client";
 
+import OdBlockoutPanel from "@/components/OdBlockoutPanel";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
@@ -194,7 +195,7 @@ export default function ScheduleBuilder() {
     const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
     const ac = schedule[selectedDate]?.assistantCounts ?? {};
     const fl = schedule[selectedDate]?.floaterAssistantId ?? null;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId: fl } }));
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId: fl, floaterNote: c[selectedDate]?.floaterNote } }));
     setSaving(true);
     await saveDaySchedule(selectedDate, dentists, fdr, hr, ao, ho, ac, fl);
     setSaving(false);
@@ -208,7 +209,7 @@ export default function ScheduleBuilder() {
     const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
     const ac = schedule[selectedDate]?.assistantCounts ?? {};
     const fl = schedule[selectedDate]?.floaterAssistantId ?? null;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: required, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId: fl } }));
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: required, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId: fl, floaterNote: c[selectedDate]?.floaterNote } }));
     setSaving(true);
     await saveDaySchedule(selectedDate, dentists, required, hr, ao, ho, ac, fl);
     setSaving(false);
@@ -222,7 +223,7 @@ export default function ScheduleBuilder() {
     const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
     const ac = schedule[selectedDate]?.assistantCounts ?? {};
     const fl = schedule[selectedDate]?.floaterAssistantId ?? null;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: required, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId: fl } }));
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: required, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId: fl, floaterNote: c[selectedDate]?.floaterNote } }));
     setSaving(true);
     await saveDaySchedule(selectedDate, dentists, fdr, required, ao, ho, ac, fl);
     setSaving(false);
@@ -236,7 +237,7 @@ export default function ScheduleBuilder() {
     const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
     const ac = schedule[selectedDate]?.assistantCounts ?? {};
     const fl = schedule[selectedDate]?.floaterAssistantId ?? null;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: overridesMap, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId: fl } }));
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: overridesMap, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId: fl, floaterNote: c[selectedDate]?.floaterNote } }));
     setSaving(true);
     await saveDaySchedule(selectedDate, dentists, fdr, hr, overridesMap, ho, ac, fl);
     setSaving(false);
@@ -250,7 +251,7 @@ export default function ScheduleBuilder() {
     const ao = schedule[selectedDate]?.assistantOverrides ?? {};
     const ac = schedule[selectedDate]?.assistantCounts ?? {};
     const fl = schedule[selectedDate]?.floaterAssistantId ?? null;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: overridesMap, assistantCounts: ac, floaterAssistantId: fl } }));
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: overridesMap, assistantCounts: ac, floaterAssistantId: fl, floaterNote: c[selectedDate]?.floaterNote } }));
     setSaving(true);
     await saveDaySchedule(selectedDate, dentists, fdr, hr, ao, overridesMap, ac, fl);
     setSaving(false);
@@ -268,7 +269,7 @@ export default function ScheduleBuilder() {
     const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
     const ac = { ...(schedule[selectedDate]?.assistantCounts ?? {}), [dentistId]: count };
     const fl = schedule[selectedDate]?.floaterAssistantId ?? null;
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: schedule[selectedDate]?.assistantOverrides ?? {}, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId: fl } }));
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: schedule[selectedDate]?.assistantOverrides ?? {}, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId: fl, floaterNote: c[selectedDate]?.floaterNote } }));
     setSaving(true);
     await saveDaySchedule(selectedDate, dentists, fdr, hr, schedule[selectedDate]?.assistantOverrides ?? {}, ho, ac, fl);
     setSaving(false);
@@ -284,7 +285,7 @@ export default function ScheduleBuilder() {
     const ao = schedule[selectedDate]?.assistantOverrides ?? {};
     const ho = schedule[selectedDate]?.hygienistOverrides ?? {};
     const ac = schedule[selectedDate]?.assistantCounts ?? {};
-    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId } }));
+    setSchedule((c) => ({ ...c, [selectedDate]: { dentists, frontDeskRequired: fdr, hygienistsRequired: hr, assistantOverrides: ao, hygienistOverrides: ho, assistantCounts: ac, floaterAssistantId, floaterNote: c[selectedDate]?.floaterNote } }));
     setSaving(true);
     await saveDaySchedule(selectedDate, dentists, fdr, hr, ao, ho, ac, floaterAssistantId);
     setSaving(false);
@@ -590,12 +591,19 @@ export default function ScheduleBuilder() {
                 onAssistantCountChange={handleAssistantCountChange}
                 floaterAssistantId={floaterAssistantId}
                 onFloaterChange={handleFloaterChange}
+                floaterNote={schedule[selectedDate]?.floaterNote ?? ""}
+                onFloaterNoteChange={(note) => setSchedule((c) => (c[selectedDate] ? { ...c, [selectedDate]: { ...c[selectedDate], floaterNote: note } } : c))}
                 hygienistsRequired={hygienistsRequired}
                 hygienistOverrides={hygienistOverrides}
                 onHygienistOverrideChange={handleHygienistOverrideChange}
                 onTempAssignmentsChange={handleTempAssignmentsChange}
                 frontDeskRequired={frontDeskRequired}
                 leaveRequests={leaveRequests}
+              />
+              <OdBlockoutPanel
+                date={selectedDate}
+                canEdit
+                refreshKey={JSON.stringify([schedule[selectedDate] ?? null, monthTempAssignments.filter((ta) => ta.date === selectedDate), overrides.filter((o) => o.date === selectedDate)])}
               />
             </div>
           ) : (

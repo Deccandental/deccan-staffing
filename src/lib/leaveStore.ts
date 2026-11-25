@@ -1,7 +1,7 @@
 import { LeaveRequest, LeaveStatus, LeaveReason } from "@/types/leave";
 import { secureData as supabase } from "./secureData";
 
-function rowToLeave(row: any): LeaveRequest {
+export function rowToLeave(row: any): LeaveRequest {
   return {
     id: row.id,
     employeeId: row.employee_id,

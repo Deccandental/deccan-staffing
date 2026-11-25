@@ -1,4 +1,5 @@
 import { secureData as supabase } from "./secureData";
+import { requestOdSync } from "./openDental/clientSync";
 
 export interface TempAssignment {
   id: string;
@@ -31,6 +32,7 @@ export async function addTempAssignment(assignment: Omit<TempAssignment, "id">):
     id, date: assignment.date, temp_id: assignment.tempId, role: assignment.role, notes: assignment.notes,
   });
   if (error) console.error("addTempAssignment error:", error);
+  else requestOdSync(assignment.date);
 }
 
 export async function removeTempAssignment(id: string): Promise<void> {

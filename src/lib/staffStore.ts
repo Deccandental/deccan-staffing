@@ -4,7 +4,7 @@ import { getSessionToken } from "./secureData";
 
 export type DentistPrefs = Record<number, number[]>;
 
-function rowToEmployee(row: any): Employee {
+export function rowToEmployee(row: any): Employee {
   // Handle default_schedule being either a string or an object
   let defaultSchedule = row.default_schedule;
   if (typeof defaultSchedule === "string") {
@@ -50,6 +50,8 @@ function rowToEmployee(row: any): Employee {
     ceFirstRenewalExempt: row.ce_first_renewal_exempt ?? false,
     employmentType: row.employment_type ?? "full_time",
     archived: row.archived ?? false,
+    // undefined (not "") when the column wasn't loaded, so a save never clears it by accident.
+    birthday: "birthday" in row ? row.birthday ?? "" : undefined,
     defaultSchedule,
   };
 }
@@ -59,9 +61,10 @@ export async function loadStaff(): Promise<Employee[]> {
   // for display purposes (names, schedules, dropdowns), and PIN
   // verification now happens server-side via /api/auth/login instead of
   // comparing against a full list of PINs shipped to the browser.
-  const { data, error } = await supabase.from("staff").select(
-    "id, name, role, specialty, color, skills, email, can_admin, can_manage_leave, can_manage_events, can_manage_certs, can_manage_payroll, can_manage_staff_notes, pto_balance_hours, sick_balance_hours, exclude_from_payroll, remote_days, hire_date, growth_bonus_eligible, growth_bonus_multiplier, growth_bonus_start_date, pv_bonus_eligible, net_production_start_date, hygiene_bonus_eligible, net_production_bonus_percent, ho_bonus_eligible, exempt_from_policy_signing, exempt_from_checkin, sedation_permit, ce_first_renewal_exempt, employment_type, archived, default_schedule"
-  ).order("id");
+  const cols = "id, name, role, specialty, color, skills, email, can_admin, can_manage_leave, can_manage_events, can_manage_certs, can_manage_payroll, can_manage_staff_notes, pto_balance_hours, sick_balance_hours, exclude_from_payroll, remote_days, hire_date, growth_bonus_eligible, growth_bonus_multiplier, growth_bonus_start_date, pv_bonus_eligible, net_production_start_date, hygiene_bonus_eligible, net_production_bonus_percent, ho_bonus_eligible, exempt_from_policy_signing, exempt_from_checkin, sedation_permit, ce_first_renewal_exempt, employment_type, archived, default_schedule";
+  let { data, error } = await supabase.from("staff").select(`${cols}, birthday`).order("id");
+  // Until the birthday column has been added to the database, load without it.
+  if (error) ({ data, error } = await supabase.from("staff").select(cols).order("id"));
   if (error) { console.error("loadStaff error:", error); return []; }
   return (data ?? []).map(rowToEmployee);
 }
@@ -114,6 +117,11 @@ export async function updateEmployee(emp: Employee): Promise<{ ok: boolean; erro
   // otherwise every routine edit (name, role, permissions, etc.) would
   // silently null out the employee's existing PIN and lock them out.
   if (emp.pin) payload.pin = emp.pin;
+  if (emp.birthday !== undefined) {
+    const birthday = normalizeBirthday(emp.birthday);
+    if (birthday === "invalid") return { ok: false, error: "Birthday should be month/day, like 03/14." };
+    payload.birthday = birthday;
+  }
   const res = await staffWrite({ action: "update", id: emp.id, payload });
   if (!res.ok) { console.error("updateEmployee error:", res.error); return { ok: false, error: res.error }; }
   return { ok: true };
@@ -163,11 +171,31 @@ export async function setDentistPrefs(dentistId: number, assistantIds: number[])
 // so it can never alter permissions, PIN, bonus eligibility or pay fields —
 // unlike updateEmployee(), which writes the whole record and is admin-only.
 export async function updateOwnProfile(
-  employeeId: number, updates: { name: string; email: string }
+  employeeId: number, updates: { name: string; email: string; birthday?: string }
 ): Promise<{ ok: boolean; error?: string }> {
   const name = updates.name.trim();
   if (!name) return { ok: false, error: "Name can't be empty." };
-  const res = await staffWrite({ action: "updateOwnProfile", id: employeeId, name, email: updates.email.trim() });
+  const birthday = updates.birthday === undefined ? undefined : normalizeBirthday(updates.birthday);
+  if (birthday === "invalid") return { ok: false, error: "Birthday should be month/day, like 03/14." };
+  const res = await staffWrite({ action: "updateOwnProfile", id: employeeId, name, email: updates.email.trim(), ...(birthday !== undefined ? { birthday } : {}) });
   if (!res.ok) { console.error("updateOwnProfile error:", res.error); return { ok: false, error: res.error }; }
   return { ok: true };
 }
+
+/**
+ * Turns what someone typed ("3/14", "03/14", "03-14") into "MM-DD".
+ * Empty means no birthday (null); anything unrecognisable is "invalid".
+ */
+export function normalizeBirthday(input: string): string | null | "invalid" {
+  const t = String(input ?? "").trim();
+  if (!t) return null;
+  const m = t.match(/^(\d{1,2})\s*[\/\-.]\s*(\d{1,2})$/);
+  if (!m) return "invalid";
+  const month = Number(m[1]), day = Number(m[2]);
+  const daysIn = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+  if (!daysIn || day < 1 || day > daysIn) return "invalid";
+  return `${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** "03-14" -> "03/14" for display and editing. */
+export const birthdayLabel = (b?: string | null) => (b ? b.replace("-", "/") : "");

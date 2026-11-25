@@ -7,7 +7,7 @@ import AccessDenied from "@/components/AccessDenied";
 import { Employee, EmployeeRole, DentistSpecialty, SedationPermitValue } from "@/types/employee";
 import {
   loadStaff, addEmployee, updateEmployee, removeEmployee, setEmployeeArchived,
-  loadPrefs, setDentistPrefs, DentistPrefs,
+  loadPrefs, setDentistPrefs, DentistPrefs, birthdayLabel,
 } from "@/lib/staffStore";
 import { secureData as supabase } from "@/lib/secureData";
 
@@ -112,6 +112,7 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       sickBalanceHours: emp.sickBalanceHours ?? 0, excludeFromPayroll: emp.excludeFromPayroll ?? false,
       remoteDays: emp.remoteDays ? { ...emp.remoteDays } : undefined,
       hireDate: emp.hireDate ?? "", growthBonusEligible: emp.growthBonusEligible ?? false,
+      birthday: emp.birthday === undefined ? undefined : birthdayLabel(emp.birthday),
       growthBonusMultiplier: emp.growthBonusMultiplier ?? 1,
       growthBonusStartDate: emp.growthBonusStartDate ?? "",
       netProductionStartDate: emp.netProductionStartDate ?? "",
@@ -359,6 +360,15 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                       className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" />
                     <p className="text-xs text-gray-400 mt-1">Used for the Growth Bonus's 5-month new-hire grace period.</p>
                   </div>
+                  {editing && form.birthday !== undefined && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500 mb-1">Birthday (month/day)</label>
+                      <input value={form.birthday ?? ""} placeholder="MM/DD" maxLength={5}
+                        onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))}
+                        className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" />
+                      <p className="text-xs text-gray-400 mt-1">Shown in Open Dental on the day. Staff can also set this on their dashboard.</p>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-500 mb-1">Employment Type</label>
                     <div className="flex rounded-xl border border-gray-200 overflow-hidden w-fit">

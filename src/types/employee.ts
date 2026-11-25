@@ -100,5 +100,8 @@ export interface Employee {
   netProductionStartDate?: string | null;
   /** A licensee renewing for the very first time is exempt from CE. */
   ceFirstRenewalExempt?: boolean;
+  // Birthday as "MM-DD" (no year). Shown on the Deccan App blockout in Open
+  // Dental on the day. Staff can set or clear their own.
+  birthday?: string;
   defaultSchedule: WeekdaySchedule;
 }

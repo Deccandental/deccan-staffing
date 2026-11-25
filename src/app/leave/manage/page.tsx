@@ -13,6 +13,8 @@ import { loadHolidays, Holiday } from "@/lib/holidays";
 import { getOpenTuesdays, OpenTuesday } from "@/lib/openTuesdays";
 import { Employee } from "@/types/employee";
 import { secureData as supabase } from "@/lib/secureData";
+import OdLeaveInfo from "@/components/OdLeaveInfo";
+import { requestOdSync } from "@/lib/openDental/clientSync";
 
 const REASON_LABELS: Record<LeaveReason, string> = {
   sick: "Paid Sick Leave", pto: "PTO", leave: "Unpaid Personal Leave", other: "Other",
@@ -102,6 +104,7 @@ function LeaveManagePageBody() {
       return;
     }
     await applyToAvailability(req);
+    requestOdSync(req.startDate, req.endDate);
     if (isPaidLeaveReason(req.reason)) {
       const hours = req.paidHours ?? req.totalDays * 8;
       await adjustLeaveBalance(req.employeeId, req.reason as "pto" | "sick", -hours);
@@ -147,6 +150,7 @@ function LeaveManagePageBody() {
     }
     if (req.status === "approved") {
       await removeFromAvailability(req);
+      requestOdSync(req.startDate, req.endDate);
       if (isPaidLeaveReason(req.reason)) {
         const hours = req.paidHours ?? req.totalDays * 8;
         await adjustLeaveBalance(req.employeeId, req.reason as "pto" | "sick", hours);
@@ -160,6 +164,7 @@ function LeaveManagePageBody() {
     if (!confirm(`Permanently delete this request from ${req.employeeName}? This can't be undone.`)) return;
     setProcessing(req.id);
     await deleteLeaveRequest(req.id);
+    if (req.status === "approved") requestOdSync(req.startDate, req.endDate);
     setProcessing(null);
     await refresh();
   }
@@ -199,6 +204,8 @@ function LeaveManagePageBody() {
     }
     if (req.status === "approved") {
       await applyToAvailability({ ...req, startDate: editForm.startDate, endDate: editForm.endDate });
+      // Old and new dates both change in Open Dental.
+      requestOdSync(req.startDate < editForm.startDate ? req.startDate : editForm.startDate, req.endDate > editForm.endDate ? req.endDate : editForm.endDate);
     }
     setEditing(null);
     setProcessing(null);
@@ -389,6 +396,8 @@ function LeaveManagePageBody() {
                             ) : null}
 
                             {req.notes && <div className="mb-3 rounded-xl border border-gray-100 bg-white px-4 py-3 text-sm text-gray-500 italic">"{req.notes}"</div>}
+
+                            {editing !== req.id && <OdLeaveInfo requestId={req.id} startDate={req.startDate} endDate={req.endDate} status={req.status} />}
 
                             {req.status === "pending" && editing !== req.id && (
                               <div className="space-y-3">
