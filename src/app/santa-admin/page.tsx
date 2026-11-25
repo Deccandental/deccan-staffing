@@ -209,7 +209,7 @@ function SantaAdminBody({ identity }: { identity: AppIdentity }) {
         {/* Exclusions */}
         <div className="rounded-2xl bg-white shadow p-5">
           <p className="font-semibold text-slate-700">Don't pair these people</p>
-          <p className="text-xs text-slate-400 mb-3">For family members or anyone who shouldn't draw each other. Works both ways.</p>
+          <p className="text-xs text-slate-400 mb-3">For family members or anyone who shouldn't draw each other. Works both ways. Doctors are never paired with each other automatically.</p>
           {(s.exclusions ?? []).map((x) => (
             <div key={x.id} className="flex items-center gap-2 text-sm py-1">
               <span>{x.aName} ↔ {x.bName}</span>
