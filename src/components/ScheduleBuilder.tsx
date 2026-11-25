@@ -1,7 +1,9 @@
 "use client";
 
 import OdBlockoutPanel from "@/components/OdBlockoutPanel";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { sessionHeaders } from "@/lib/secureData";
+import { syncOdNow } from "@/lib/openDental/clientSync";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
@@ -46,6 +48,32 @@ export default function ScheduleBuilder() {
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
+  // Open Dental: each day's status for the calendar, and the "send this month" button.
+  const [od, setOd] = useState<{ configured: boolean; enabled: boolean; statuses: Record<string, string> } | null>(null);
+  const [odSending, setOdSending] = useState(false);
+  const [odMsg, setOdMsg] = useState("");
+  const loadOdMonth = useCallback(async () => {
+    try {
+      const res = await fetch("/api/opendental/day", { method: "POST", headers: sessionHeaders(), body: JSON.stringify({ date: `${year}-${String(month).padStart(2, "0")}-01`, action: "month" }) });
+      const json = await res.json();
+      setOd(json.ok ? { configured: json.configured, enabled: json.enabled, statuses: json.statuses ?? {} } : null);
+    } catch { setOd(null); }
+  }, [year, month]);
+  useEffect(() => { setOdMsg(""); loadOdMonth(); }, [loadOdMonth]);
+
+  async function sendMonthToOd() {
+    const mm = String(month).padStart(2, "0");
+    const from = `${year}-${mm}-01`;
+    const to = `${year}-${mm}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;
+    setOdSending(true);
+    setOdMsg("");
+    const r = await syncOdNow({ from, to });
+    setOdSending(false);
+    setOdMsg(r.skipped ? r.skipped
+      : r.ok ? (r.flagged?.length ? `Sent. ${r.flagged.length} day${r.flagged.length === 1 ? "" : "s"} need a look (marked OD!).` : "Sent to Open Dental.")
+      : `Some days didn't send: ${r.errors?.[0]?.message ?? r.error ?? "unknown error"}`);
+    loadOdMonth();
+  }
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [prefs, setPrefs] = useState<DentistPrefs>({});
   const [openTuesdays, setOpenTuesdays] = useState<OpenTuesday[]>([]);
@@ -491,14 +519,27 @@ export default function ScheduleBuilder() {
                 </span>
                 {saving && <span className="ml-3 text-xs text-cyan-500">💾 Saving...</span>}
               </div>
-              <button onClick={applyDefaults} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">↺ Re-apply Defaults</button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {odMsg && <span className="text-xs text-slate-500">{odMsg}</span>}
+                {od?.configured && od.enabled ? (
+                  <button onClick={sendMonthToOd} disabled={odSending}
+                    title="Days before today are left alone"
+                    className="rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50"
+                    style={{ borderColor: "#c4b5fd", color: "#6d28d9", background: "#f5f3ff" }}>
+                    {odSending ? "Sending…" : "↗ Send this month to Open Dental"}
+                  </button>
+                ) : od?.configured ? (
+                  <a href="/open-dental" className="text-xs font-semibold hover:underline" style={{ color: "#6d28d9" }}>Open Dental sync is off — set up</a>
+                ) : null}
+                <button onClick={applyDefaults} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">↺ Re-apply Defaults</button>
+              </div>
             </div>
             <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
               <div className="h-full rounded-full bg-cyan-500 transition-all" style={{ width: `${totalDays > 0 ? (completedDays / totalDays) * 100 : 0}%` }} />
             </div>
           </div>
 
-          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} dayAssignments={monthAssignments} dayEvents={dayEvents} />
+          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} dayAssignments={monthAssignments} dayEvents={dayEvents} odStatuses={od?.configured && od.enabled ? od.statuses : undefined} />
 
           {selectedDate ? (
             <div className="grid gap-6 lg:grid-cols-2">
@@ -603,6 +644,7 @@ export default function ScheduleBuilder() {
               <OdBlockoutPanel
                 date={selectedDate}
                 canEdit
+                onChanged={loadOdMonth}
                 refreshKey={JSON.stringify([schedule[selectedDate] ?? null, monthTempAssignments.filter((ta) => ta.date === selectedDate), overrides.filter((o) => o.date === selectedDate)])}
               />
             </div>
