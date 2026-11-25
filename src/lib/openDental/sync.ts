@@ -19,7 +19,7 @@ import { todayStr } from "@/lib/today";
 import { odConfigured, OdError, OdBlockout, createBlockout, updateBlockout, deleteBlockout, listBlockouts, listAppointments, BlockoutInput } from "./client";
 import { buildDayPlans, eachDate, addDays, DayPlan, StaffLink } from "./dayPlan";
 import type { Employee } from "@/types/employee";
-import { buildAppBlockLines, appBlockSpan, providerSpan, providerNote, DayTimes, splitLines, mergeStaffNote, toMinutes } from "./staffNote";
+import { buildAppBlockLines, placeAppBlock, providerSpan, providerNote, DayTimes, splitLines, mergeStaffNote, toMinutes } from "./staffNote";
 
 export interface OdSettings {
   enabled: boolean;
@@ -60,7 +60,7 @@ export function desiredBlockouts(plan: DayPlan, s: OdSettings, links: Map<number
   if (plan.content && s.notesOperatoryNum && s.staffBlockoutType) {
     const lines = buildAppBlockLines({ ...plan.content, warnings: [...plan.content.warnings, ...extraWarnings] });
     out.push({ kind: "staff", employeeId: null, input: {
-      date: plan.date, ...appBlockSpan(lines.length, times), blockoutType: s.staffBlockoutType, operatoryNums: [s.notesOperatoryNum], note: lines.join("\n"),
+      date: plan.date, ...placeAppBlock(lines.length, times, []), blockoutType: s.staffBlockoutType, operatoryNums: [s.notesOperatoryNum], note: lines.join("\n"),
     } });
   }
   if (plan.isOpen && s.providerBlockoutType) {
@@ -111,6 +111,8 @@ export async function bookingWarnings(plans: DayPlan[], links: Map<number, Staff
   return out;
 }
 
+const DELETED_MSG = "The Deccan App blockout was deleted in Open Dental, so the app is leaving this day alone.";
+
 export interface SyncResult { date: string; status: "ok" | "error" | "skipped_manual" | "edited_in_od" | "deleted_in_od"; message?: string; changes: number }
 
 async function setDayStatus(date: string, status: SyncResult["status"], message?: string) {
@@ -152,48 +154,50 @@ async function syncOneDay(plan: DayPlan, s: OdSettings, links: Map<number, Staff
     const hash = hashOf(d.input);
 
     if (d.kind === "staff") {
+      if (rec?.deleted_in_od && !force) {
+        flags.push({ status: "deleted_in_od", message: DELETED_MSG });
+        continue;
+      }
+      const day = await inOd();
+      const current = rec && !rec.deleted_in_od ? day.find((b) => Number(b.ScheduleNum) === Number(rec.schedule_num)) ?? null : null;
+      // Everything else in the Notes column (the team's own note, reminders...): the block goes in the first free stretch below.
+      const others = day
+        .filter((b) => sameOps(b.operatories, [s.notesOperatoryNum!]) && Number(b.ScheduleNum) !== Number(rec?.schedule_num))
+        .map((b) => ({ start: String(b.StartTime), stop: String(b.StopTime) }));
+      const place = (n: number) => placeAppBlock(n, times, others);
       const desiredLines = splitLines(d.input.note);
-      if (!rec) {
-        await record(null, d, await createBlockout(d.input), { last_note: d.input.note });
-        changes++;
-        continue;
-      }
-      if (rec.deleted_in_od && !force) {
-        flags.push({ status: "deleted_in_od", message: "The Deccan App blockout was deleted in Open Dental, so the app is leaving this day alone." });
-        continue;
-      }
-      if (rec.content_hash === hash && !rec.deleted_in_od && !force) continue; // nothing new to write
 
-      const current = rec.deleted_in_od ? null : await findInOd(Number(rec.schedule_num));
-      if (!current) {
-        if (force) { await record(rec, d, await createBlockout(d.input), { last_note: d.input.note }); changes++; }
-        else {
-          await supabaseAdmin.from("od_blockouts").update({ deleted_in_od: true }).eq("id", rec.id);
-          flags.push({ status: "deleted_in_od", message: "The Deccan App blockout was deleted in Open Dental, so the app is leaving this day alone." });
-        }
+      if (rec && !current && !force) {
+        await supabaseAdmin.from("od_blockouts").update({ deleted_in_od: true }).eq("id", rec.id);
+        flags.push({ status: "deleted_in_od", message: DELETED_MSG });
         continue;
       }
-      if (force) {
-        await updateBlockout(Number(rec.schedule_num), d.input);
-        await record(rec, d, Number(rec.schedule_num), { last_note: d.input.note });
+      if (!rec || !current || force) {
+        const input = { ...d.input, ...place(desiredLines.length) };
+        const num = current ? Number(rec.schedule_num) : await createBlockout(input);
+        if (current) await updateBlockout(num, input);
+        await record(rec ?? null, d, num, { last_note: d.input.note });
         changes++;
         continue;
       }
+
       const merge = mergeStaffNote(splitLines(current.Note), rec.last_note ? splitLines(rec.last_note) : null, desiredLines);
       if (merge.action === "conflict") {
         const parts = [
           merge.theirs.length ? `Open Dental has: ${merge.theirs.join(" · ")}` : "",
           merge.ours.length ? `the app had: ${merge.ours.join(" · ")}` : "",
         ].filter(Boolean).join("; ");
-        flags.push({ status: "edited_in_od", message: `Someone changed the Deccan App blockout in Open Dental (${parts}). The app hasn't overwritten it. Update the Schedule Builder to match, or use the staffing app's version.` });
+        flags.push({ status: "edited_in_od", message: `Someone changed the Deccan App blockout in Open Dental (${parts}). The app hasn't overwritten it. Change the day in the Schedule Builder, or choose which version to keep there.` });
         continue;
       }
-      if (merge.action === "write") {
-        const input = { ...d.input, ...appBlockSpan(merge.lines.length, times), note: merge.lines.join("\n") };
-        await updateBlockout(Number(rec.schedule_num), input);
+      const lines = merge.action === "write" ? merge.lines : splitLines(current.Note);
+      const span = place(lines.length);
+      const moved = String(current.StartTime).slice(0, 5) !== span.start || String(current.StopTime).slice(0, 5) !== span.stop;
+      if (merge.action === "write" || moved) {
+        await updateBlockout(Number(rec.schedule_num), { ...d.input, ...span, note: lines.join("\n") });
         changes++;
       }
-      await record(rec, d, Number(rec.schedule_num), { last_note: d.input.note });
+      if (rec.content_hash !== hash || rec.last_note !== d.input.note) await record(rec, d, Number(rec.schedule_num), { last_note: d.input.note });
       continue;
     }
 

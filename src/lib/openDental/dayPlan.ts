@@ -13,7 +13,7 @@ import type { Employee } from "@/types/employee";
 import type { LeaveRequest } from "@/types/leave";
 import type { StaffOverride } from "@/lib/overrides";
 import type { DaySchedule } from "@/lib/scheduleStore";
-import { Absence, DayContent, DayEvent, DayRoster, defaultDisplayName } from "./staffNote";
+import { Absence, DayContent, DayEvent, DayRoster, defaultDisplayName, splitLines } from "./staffNote";
 
 export interface StaffLink { employeeId: number; displayName: string; provNum: number | null; operatoryNums: number[] }
 
@@ -34,7 +34,7 @@ interface Loaded {
   openTuesdays: { date: string; halfDay: "AM" | "PM" | null }[];
   holidays: { date: string; name: string }[];
   leave: LeaveRequest[];
-  schedules: Record<string, DaySchedule & { floaterNote?: string }>;
+  schedules: Record<string, DaySchedule & { floaterNote?: string; odExtraLines?: string; odOverride?: string | null }>;
   temps: { date: string; role: string; notes: string; name: string }[];
   events: DayEvent[];
   links: Map<number, StaffLink>;
@@ -91,6 +91,7 @@ async function load(from: string, to: string): Promise<Loaded> {
       dentists: r.dentists ?? [], frontDeskRequired: r.front_desk_required ?? 2, hygienistsRequired: r.hygienists_required ?? 1,
       assistantOverrides: r.assistant_overrides ?? {}, hygienistOverrides: r.hygienist_overrides ?? {},
       assistantCounts: r.assistant_counts ?? {}, floaterAssistantId: r.floater_assistant_id ?? null, floaterNote: r.floater_note ?? "",
+      odExtraLines: r.od_extra_lines ?? "", odOverride: r.od_override ?? null,
     };
   }
   const tempName = new Map(tempRows.map((t) => [t.id, String(t.name ?? "")]));
@@ -266,6 +267,8 @@ export async function buildDayPlans(from: string, to: string): Promise<{ plans: 
       date, isOpen, absences, workingIds,
       content: {
         date,
+        extraLines: splitLines(d.schedules[date]?.odExtraLines ?? ""),
+        override: d.schedules[date]?.odOverride != null ? splitLines(d.schedules[date]!.odOverride!) : null,
         closedReason: isOpen ? null : holiday,
         warnings, roster, absences,
         events: d.events.filter((e) => e.date === date),

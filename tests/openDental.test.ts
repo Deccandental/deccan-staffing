@@ -141,13 +141,14 @@ async function main() {
   process.env.OPEN_DENTAL_API_URL = `http://127.0.0.1:${(odServer.address() as AddressInfo).port}/api/v1`;
   process.env.OPEN_DENTAL_DEVELOPER_KEY = "dev-key";
   process.env.OPEN_DENTAL_CUSTOMER_KEY = "cust-key";
+  process.env.SESSION_SECRET = "test-secret-test-secret-test-secret";
 
   const note = await import("../src/lib/openDental/staffNote");
   const { syncRange } = await import("../src/lib/openDental/sync");
 
   console.log("formatting");
   const content = (over: Partial<import("../src/lib/openDental/staffNote").DayContent> = {}) => ({
-    date: "2026-11-23", closedReason: null, warnings: [], roster: null, absences: [], events: [], birthdays: [],
+    date: "2026-11-23", extraLines: [] as string[], override: null as string[] | null, closedReason: null, warnings: [], roster: null, absences: [], events: [], birthdays: [],
     upcoming: { out: [], events: [], closed: [] }, ...over,
   });
   const lines = note.buildAppBlockLines(content({
@@ -171,7 +172,12 @@ async function main() {
   check("doctor initials", note.defaultDisplayName("Dr. Anita Chopra", "Dentist") === "AC");
   check("single-name doctor", note.defaultDisplayName("Dr. Ho", "Dentist") === "HO");
   check("assistant first name", note.defaultDisplayName("Unique Smith", "Assistant") === "UNIQUE");
-  check("block sits at the bottom of the day", JSON.stringify(note.appBlockSpan(9, { dayStart: "07:00", midday: "12:00", dayEnd: "18:00", rowMinutes: 10 })) === JSON.stringify({ start: "16:30", stop: "18:00" }));
+  const T = { dayStart: "07:00", midday: "12:00", dayEnd: "18:00", rowMinutes: 10 };
+  check("no team note -> top of the day", JSON.stringify(note.placeAppBlock(9, T, [])) === JSON.stringify({ start: "07:00", stop: "08:30" }));
+  check("just under the team's note", JSON.stringify(note.placeAppBlock(3, T, [{ start: "07:00:00", stop: "08:40:00" }])) === JSON.stringify({ start: "08:40", stop: "09:10" }));
+  check("skips past anything else in the way", JSON.stringify(note.placeAppBlock(3, T, [{ start: "07:00", stop: "08:00" }, { start: "08:10", stop: "09:00" }])) === JSON.stringify({ start: "09:00", stop: "09:30" }));
+  check("extra lines go under the title", note.buildAppBlockLines(content({ extraLines: ["Dr. Chopra late start 9am"], closedReason: "X" })).join("|") === "DECCAN APP - do not edit|Dr. Chopra late start 9am|CLOSED - X");
+  check("whole text replaces everything, title kept", note.buildAppBlockLines(content({ override: ["My own text"], closedReason: "X" })).join("|") === "DECCAN APP - do not edit|My own text");
   const { normalizeBirthday } = await import("../src/lib/staffStore");
   check("birthday input", normalizeBirthday("3/14") === "03-14" && normalizeBirthday("12-01") === "12-01" && normalizeBirthday("2/30") === "invalid" && normalizeBirthday("") === null);
 
@@ -183,7 +189,7 @@ async function main() {
   const head = (date = monday) => (appBlk(date)?.Note ?? "").split("\n-- REST OF")[0];
   check("one change", r.results[0]?.changes === 1, r);
   check("block text", head() === "DECCAN APP - do not edit\n-- TEAM --\nAC/UNIQUE\nHYG/ JANTSEN\nFRONT/ ARI/KETKI\nFLOAT/ MARGOT (help Jansten too)", appBlk()?.Note);
-  check("own blockout type, ends with the day", appBlk()?.StopTime === "18:00:00" && appBlk()!.StartTime > "08:00:00", appBlk());
+  check("own blockout type, just under the team's note", appBlk()?.StartTime === "08:00:00" && appBlk()?.StopTime === "09:00:00", appBlk());
   check("team's own note untouched", od.blockouts.find((b) => b.ScheduleNum === 1)?.Note === "Staff Schedules\nFront Desk:\nARI");
   check("recorded", db.od_blockouts.length === 1 && db.od_blockouts[0].kind === "staff");
 
@@ -280,6 +286,47 @@ async function main() {
   check("re-created", od.blockouts.some((b) => b.operatories === "3" && b.SchedDate === monday), od.blockouts);
   db.leave_requests[0].status = "cancelled";
   await syncRange(monday, wednesday);
+
+  console.log("changes made in the Schedule Builder");
+  db.schedules[0].od_extra_lines = "Dr. Chopra late start 9am";
+  r = await syncRange(monday, monday);
+  check("extra line under the title", (appBlk()?.Note ?? "").startsWith("DECCAN APP - do not edit\nDr. Chopra late start 9am\n-- TEAM --"), appBlk()?.Note);
+  db.schedules[0].od_override = "Short day\nAC/UNIQUE only";
+  r = await syncRange(monday, monday);
+  check("whole text sent as typed", appBlk()?.Note === "DECCAN APP - do not edit\nShort day\nAC/UNIQUE only", appBlk()?.Note);
+  db.schedules[0].od_override = null; db.schedules[0].od_extra_lines = null;
+  r = await syncRange(monday, monday);
+  check("back to automatic", (appBlk()?.Note ?? "").startsWith("DECCAN APP - do not edit\n-- TEAM --"), appBlk()?.Note);
+
+  console.log("the team's note grows -> the block moves down");
+  od.blockouts.find((b) => b.ScheduleNum === 1)!.StopTime = "08:30:00";
+  r = await syncRange(monday, monday);
+  check("moved below it", appBlk()?.StartTime === "08:30:00", appBlk());
+
+  console.log("Schedule Builder section (API)");
+  const { createSessionToken } = await import("../src/lib/session");
+  const { POST: dayRoute } = await import("../src/app/api/opendental/day/route");
+  const { NextRequest } = await import("next/server");
+  const tok = (canAdmin: boolean) => createSessionToken({ mode: "staff", employeeId: 1, canAdmin, canManageLeave: true, canManageEvents: false, canManageCerts: false, canManagePayroll: false });
+  const callDay = async (body: any, admin = true) => {
+    const res = await dayRoute(new NextRequest("http://x/api/opendental/day", { method: "POST", headers: { "x-session-token": tok(admin), "content-type": "application/json" }, body: JSON.stringify(body) }));
+    return { status: res.status, json: await res.json() };
+  };
+  let res = await callDay({ date: monday, action: "get" });
+  check("get: shows the block and what Open Dental has", res.json.ok && res.json.final[0] === "DECCAN APP - do not edit" && res.json.final.join("\n") === res.json.inOd?.lines.join("\n"), res.json);
+  res = await callDay({ date: monday, action: "save", extraLines: "Lab pickup 3pm", override: null }, false);
+  check("save needs admin", res.status === 403);
+  res = await callDay({ date: monday, action: "save", extraLines: "Lab pickup 3pm\u2014today", override: null });
+  check("save: stored and sent", res.json.synced?.status === "ok" && (appBlk()?.Note ?? "").includes("\nLab pickup 3pm-today\n"), [res.json.synced, appBlk()?.Note]);
+  setNote(appBlk()!.Note.replace("AC/UNIQUE", "AC/MARGOT"));
+  db.schedules[0].floater_note = "x1";
+  await syncRange(monday, monday);
+  res = await callDay({ date: monday, action: "get" });
+  check("get: reports the Open Dental edit", res.json.status?.status === "edited_in_od" && res.json.inOd.lines.includes("AC/MARGOT"), res.json.status);
+  res = await callDay({ date: monday, action: "useOd" });
+  check("keep Open Dental's version", res.json.synced?.status === "ok" && db.schedules[0].od_override?.includes("AC/MARGOT") && appBlk()?.Note.includes("AC/MARGOT"), [res.json.synced, db.schedules[0].od_override]);
+  res = await callDay({ date: monday, action: "save", extraLines: "", override: null });
+  check("back to automatic", res.json.synced?.status === "ok" && appBlk()?.Note.includes("AC/UNIQUE") && !appBlk()?.Note.includes("Lab pickup"), appBlk()?.Note);
 
   console.log("past dates are never touched");
   r = await syncRange(addDays(todayPacific, -10), addDays(todayPacific, -1));

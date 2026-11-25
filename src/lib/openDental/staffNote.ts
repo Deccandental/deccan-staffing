@@ -47,6 +47,10 @@ export interface DayEvent { date: string; time: string; title: string; mandatory
 
 export interface DayContent {
   date: string;
+  /** Lines added from the Schedule Builder; shown under the title. */
+  extraLines: string[];
+  /** The whole text as typed in the Schedule Builder; replaces everything automatic. */
+  override: string[] | null;
   closedReason: string | null;  // holiday/closure name when the office is closed for it
   warnings: string[];
   roster: DayRoster | null;
@@ -94,7 +98,18 @@ const eventLine = (e: DayEvent, withDate: boolean) =>
   plain(`${withDate ? `${shortDate(e.date)} ` : ""}${e.time ? `${shortTime(e.time)} ` : ""}${e.title}${e.mandatory ? " - required" : ""}`);
 
 export function buildAppBlockLines(c: DayContent): string[] {
-  const lines = [APP_BLOCK_TITLE];
+  if (c.override) {
+    const own = c.override.map(plain).filter(Boolean);
+    // The title stays first so everyone can tell where the block came from.
+    return own[0] === APP_BLOCK_TITLE ? own : [APP_BLOCK_TITLE, ...own];
+  }
+  return [APP_BLOCK_TITLE, ...autoLines(c, true)];
+}
+
+/** Everything the app writes on its own, without the title. */
+export function autoLines(c: DayContent, withExtras = false): string[] {
+  const lines: string[] = [];
+  if (withExtras) for (const l of c.extraLines) if (plain(l)) lines.push(plain(l));
   if (c.closedReason) lines.push(plain(`CLOSED - ${c.closedReason}`));
   if (c.warnings.length > 0) {
     lines.push("-- WARNINGS --");
@@ -132,6 +147,23 @@ export function buildAppBlockLines(c: DayContent): string[] {
   return lines;
 }
 
+/**
+ * Where the Deccan App block goes in the Notes column: the first free stretch
+ * from the top of the day that's tall enough, so it lands just under the
+ * team's own note (or at the top when there isn't one). `others` are the
+ * other blockouts already in the Notes column.
+ */
+export function placeAppBlock(lineCount: number, t: DayTimes, others: { start: string; stop: string }[]): { start: string; stop: string } {
+  const len = Math.max(1, lineCount) * Math.max(5, t.rowMinutes);
+  const end = toMinutes(t.dayEnd);
+  const taken = others.map((o) => ({ s: toMinutes(o.start.slice(0, 5)), e: toMinutes(o.stop.slice(0, 5)) })).sort((a, b) => a.s - b.s);
+  let start = toMinutes(t.dayStart);
+  for (const o of taken) if (o.s < start + len && o.e > start) start = Math.max(start, o.e);
+  // No room left before the day ends: take the last stretch of the day.
+  if (start + len > end) start = Math.max(toMinutes(t.dayStart), end - len);
+  return { start: fromMinutes(start), stop: fromMinutes(Math.min(end, start + len)) };
+}
+
 /** Default name shown in Open Dental: initials for doctors ("Dr. Anita Chopra" -> "AC"), first name for everyone else. */
 export function defaultDisplayName(name: string, role: string): string {
   const clean = name.replace(/^dr\.?\s+/i, "").trim();
@@ -157,17 +189,6 @@ export function fromMinutes(min: number): string {
 }
 
 export interface DayTimes { dayStart: string; midday: string; dayEnd: string; rowMinutes: number }
-
-/**
- * The Deccan App block sits at the bottom of the Notes column (ending when
- * the day ends), so it stays clear of the team's own note at the top. It is
- * tall enough to show every line, but never starts before the day does.
- */
-export function appBlockSpan(lineCount: number, t: DayTimes): { start: string; stop: string } {
-  const stop = toMinutes(t.dayEnd);
-  const start = Math.max(toMinutes(t.dayStart), stop - Math.max(1, lineCount) * Math.max(5, t.rowMinutes));
-  return { start: fromMinutes(start), stop: fromMinutes(stop) };
-}
 
 /** A provider's blockout covers the half (or whole day) they are away. */
 export function providerSpan(half: "AM" | "PM" | null, t: DayTimes): { start: string; stop: string } {

@@ -1,5 +1,6 @@
 "use client";
 
+import OdBlockoutPanel from "@/components/OdBlockoutPanel";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { buildDailyAssignments } from "@/lib/assignmentEngine";
@@ -598,6 +599,11 @@ export default function ScheduleBuilder() {
                 onTempAssignmentsChange={handleTempAssignmentsChange}
                 frontDeskRequired={frontDeskRequired}
                 leaveRequests={leaveRequests}
+              />
+              <OdBlockoutPanel
+                date={selectedDate}
+                canEdit
+                refreshKey={JSON.stringify([schedule[selectedDate] ?? null, monthTempAssignments.filter((ta) => ta.date === selectedDate), overrides.filter((o) => o.date === selectedDate)])}
               />
             </div>
           ) : (

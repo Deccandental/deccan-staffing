@@ -1,7 +1,8 @@
 -- Open Dental schedule sync.
 --
 -- The app writes two kinds of blockouts into Open Dental:
---   * one "Deccan App" blockout per day at the bottom of the Notes column, in
+--   * one "Deccan App" blockout per day in the Notes column (just under the
+--     team's own note, if there is one), in
 --     its own blockout type/colour: warnings, the day's team, who is off,
 --     events, birthdays, holidays and the rest of the month. The team's own
 --     hand-typed Staff Schedules note is left alone;
@@ -72,6 +73,12 @@ create table if not exists public.od_sync_days (
 
 -- One-off note for the day's floater, e.g. "help Jansten too".
 alter table public.schedules add column if not exists floater_note text;
+
+-- Changes made to a day's Deccan App blockout from the Schedule Builder:
+--   od_extra_lines  extra lines added under the title (kept as the plan changes)
+--   od_override     the whole text, written exactly as typed; null = automatic
+alter table public.schedules add column if not exists od_extra_lines text;
+alter table public.schedules add column if not exists od_override text;
 
 -- Birthday as "MM-DD" (no year), shown on the Deccan App blockout on the day.
 -- Staff can set or clear their own from their dashboard.
