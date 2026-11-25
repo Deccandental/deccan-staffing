@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import AppIdentityGate from "@/components/AppIdentityGate";
 import AccessDenied from "@/components/AccessDenied";
 import { Employee, EmployeeRole, DentistSpecialty, SedationPermitValue } from "@/types/employee";
 import {
   loadStaff, addEmployee, updateEmployee, removeEmployee, setEmployeeArchived,
-  loadPrefs, setDentistPrefs, DentistPrefs, birthdayLabel,
+  loadPrefs, setDentistPrefs, DentistPrefs, birthdayLabel, formatBirthdayInput,
 } from "@/lib/staffStore";
 import { secureData as supabase } from "@/lib/secureData";
 
@@ -84,6 +84,12 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     setPrefs(p);
     setLoading(false);
   }
+
+  // Opening the edit/add form scrolls it into view, so it's obvious where to type.
+  const formRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if ((adding || editing) && formRef.current) formRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [adding, editing?.id]);
 
   async function handleSave() {
     if (!form.name.trim()) return;
@@ -262,8 +268,20 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
             )}
 
             {(adding || editing) && (
-              <div className="rounded-2xl bg-white p-6 shadow space-y-5">
-                <h2 className="section-heading">{editing ? "Edit Employee" : "Add Employee"}</h2>
+              <div ref={formRef} className="rounded-2xl bg-white p-6 shadow space-y-5 scroll-mt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="section-heading">{editing ? `Edit Employee${editing.name ? `: ${editing.name}` : ""}` : "Add Employee"}</h2>
+                  <div className="flex gap-2">
+                    <button onClick={handleSave} className="rounded-xl px-5 py-2 text-sm font-semibold text-white hover:opacity-90 transition"
+                      style={{ backgroundColor: "#e8622a" }}>
+                      {editing ? "Save Changes" : "Add Employee"}
+                    </button>
+                    <button onClick={() => { setEditing(null); setAdding(false); }}
+                      className="rounded-xl border border-gray-200 px-5 py-2 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
@@ -363,8 +381,8 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                   {editing && form.birthday !== undefined && (
                     <div>
                       <label className="block text-sm font-medium text-gray-500 mb-1">Birthday (month/day)</label>
-                      <input value={form.birthday ?? ""} placeholder="MM/DD" maxLength={5}
-                        onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))}
+                      <input value={form.birthday ?? ""} placeholder="MM/DD" maxLength={5} inputMode="numeric"
+                        onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, birthday: formatBirthdayInput(f.birthday ?? "", v) })); }}
                         className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" />
                       <p className="text-xs text-gray-400 mt-1">Shown in Open Dental on the day. Staff can also set this on their dashboard.</p>
                     </div>
@@ -525,7 +543,8 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                   </div>
                 </div>
 
-                <div className="flex gap-3 pt-2">
+                {/* Stays stuck to the bottom of the screen while the form is open, so Save is never out of sight. */}
+                <div className="sticky bottom-0 z-10 -mx-6 -mb-6 flex gap-3 rounded-b-2xl border-t border-gray-100 bg-white px-6 py-4">
                   <button onClick={handleSave} className="rounded-xl px-5 py-2 text-sm font-semibold text-white hover:opacity-90 transition"
                     style={{ backgroundColor: "#e8622a" }}>
                     {editing ? "Save Changes" : "Add Employee"}
