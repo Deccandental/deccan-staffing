@@ -51,7 +51,7 @@ const LEAVE_STATUS_STYLES: Record<string, string> = {
 };
 
 const ROLE_ICONS: Record<UpcomingShift["role"], string> = {
-  Dentist: "🦷", Assistant: "🤝", "Front Desk": "🖥️", Hygienist: "✨", Floater: "🔄",
+  Dentist: "🦷", Assistant: "🤝", "Front Desk": "🖥️", Hygienist: "✨", Floater: "🔄", Admin: "📋",
 };
 
 const QUARTER_LABELS: Record<1 | 2 | 3 | 4, string> = { 1: "Q1 (Jan–Mar)", 2: "Q2 (Apr–Jun)", 3: "Q3 (Jul–Sep)", 4: "Q4 (Oct–Dec)" };

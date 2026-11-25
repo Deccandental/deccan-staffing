@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
-import { buildDailyAssignments } from "@/lib/assignmentEngine";
+import { buildDailyAssignments, dayExtras } from "@/lib/assignmentEngine";
 import { loadStaff, loadPrefs, DentistPrefs } from "@/lib/staffStore";
 import { getOpenTuesdays } from "@/lib/openTuesdays";
 import { loadHolidays } from "@/lib/holidays";
@@ -50,7 +50,7 @@ export default function PrintIndividualScheduleCalendar({ year, month, schedule 
       daySched.assistantCounts ?? {},
       daySched.floaterAssistantId ?? null,
       leaveRequests,
-      daySched.assistantOverrides ?? {}
+      daySched.assistantOverrides ?? {}, dayExtras(daySched)
     );
 
     const tempName = (tempId: string) => temps.find((t) => t.id === tempId)?.name ?? "Temp";

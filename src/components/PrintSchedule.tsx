@@ -1,7 +1,7 @@
 "use client";
 
 import { generateMonth, formatMonthYear } from "@/utils/calendar";
-import { buildDailyAssignments } from "@/lib/assignmentEngine";
+import { buildDailyAssignments, dayExtras } from "@/lib/assignmentEngine";
 import { loadStaff, loadPrefs } from "@/lib/staffStore";
 import { loadHolidays } from "@/lib/holidays";
 import { getOpenTuesdays } from "@/lib/openTuesdays";
@@ -80,7 +80,7 @@ export default function PrintSchedule({ year, month, schedule }: Props) {
         daySched.assistantCounts ?? {},
         daySched.floaterAssistantId ?? null,
         leaveRequests,
-        daySched.assistantOverrides ?? {}
+        daySched.assistantOverrides ?? {}, dayExtras(daySched)
       );
 
       // Apply assistant overrides (per-slot, supports more than one assistant per dentist)

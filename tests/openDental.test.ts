@@ -167,6 +167,7 @@ async function main() {
     "-- BIRTHDAYS --", "KETKI",
     "-- REST OF NOVEMBER --", "Off: CHO 11/25-11/26", "Event: 11/24 12pm Lunch & learn", "Closed: 11/27 Thanksgiving",
   ].join("|"), lines);
+  check("admin line", note.buildAppBlockLines(content({ roster: { frontDesk: ["ARI", "KARLA"], pairs: [], hygienists: [], floater: null, floaterNote: "", admin: ["KETKI"] } })).join("|") === "DECCAN APP - do not edit|-- TEAM --|FRONT/ ARI/KARLA|ADMIN/ KETKI");
   check("holiday", note.buildAppBlockLines(content({ closedReason: "Christmas Day" })).join("|") === "DECCAN APP - do not edit|CLOSED - Christmas Day");
   check("times", note.shortTime("09:00") === "9am" && note.shortTime("12:15") === "12:15pm" && note.shortTime("00:30") === "12:30am");
   check("doctor initials", note.defaultDisplayName("Dr. Anita Chopra", "Dentist") === "AC");
