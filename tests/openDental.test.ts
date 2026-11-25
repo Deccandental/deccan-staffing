@@ -326,7 +326,7 @@ async function main() {
   res = await callDay({ date: monday, action: "useOd" });
   check("keep Open Dental's version", res.json.synced?.status === "ok" && db.schedules[0].od_override?.includes("AC/MARGOT") && appBlk()?.Note.includes("AC/MARGOT"), [res.json.synced, db.schedules[0].od_override]);
   res = await callDay({ date: monday, action: "save", extraLines: "", override: null });
-  check("back to automatic", res.json.synced?.status === "ok" && appBlk()?.Note.includes("AC/UNIQUE") && !appBlk()?.Note.includes("Lab pickup"), appBlk()?.Note);
+  check("back to automatic", res.json.synced?.status === "ok" && !!appBlk()?.Note.includes("AC/UNIQUE") && !appBlk()?.Note.includes("Lab pickup"), appBlk()?.Note);
 
   console.log("past dates are never touched");
   r = await syncRange(addDays(todayPacific, -10), addDays(todayPacific, -1));
