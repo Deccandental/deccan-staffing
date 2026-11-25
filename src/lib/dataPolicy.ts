@@ -108,7 +108,8 @@ const TEMP_PUBLIC = ["id", "name", "role", "skills"];
 
 export const TABLE_RULES: Record<string, TableRule> = {
   // Scheduling: the public calendar shows these without a login.
-  schedules: { read: "public", write: ["admin"] },
+  // The Open Dental blockout text is only read and written by the server.
+  schedules: { read: "public", write: ["admin"], hidden: ["od_extra_lines", "od_override"] },
   holidays: { read: "public", write: ["admin"] },
   open_tuesdays: { read: "public", write: ["admin"] },
   dentist_prefs: { read: "public", write: ["admin"] },
