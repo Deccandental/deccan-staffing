@@ -158,10 +158,10 @@ function OpenDentalPageBody() {
                 ✓ Connected to Open Dental — {od?.providers.length ?? 0} providers, {od?.operatories.length ?? 0} columns.
               </div>
             )}
-            <label className="mt-4 flex items-center gap-2 text-sm text-slate-600">
-              <input type="checkbox" checked={settings.enabled} onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })} />
-              Sync to Open Dental is <b>{settings.enabled ? "on" : "off"}</b>
-            </label>
+            <p className="mt-4 text-sm text-slate-600">
+              Sync to Open Dental is <b>{data.settings.enabled ? "on" : "off"}</b>.{" "}
+              <a href="/schedule-builder" className="font-semibold hover:underline" style={{ color: ORANGE }}>Turn it on or off in the Schedule Builder</a>.
+            </p>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <button onClick={syncAll} disabled={syncing || !data.configured || !data.settings.enabled}
                 className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-gray-50 disabled:opacity-40">

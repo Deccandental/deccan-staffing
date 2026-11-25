@@ -69,9 +69,11 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
   const body = await req.json().catch(() => ({}));
   const s = body?.settings ?? {};
+  // On/off is switched from the Schedule Builder; saving the settings here leaves it as it is.
+  const current = await loadOdSettings();
   const settingsRow = {
     id: 1,
-    enabled: !!s.enabled,
+    enabled: current.enabled,
     notes_operatory_num: intOrNull(s.notesOperatoryNum),
     staff_blockout_type: intOrNull(s.staffBlockoutType),
     provider_blockout_type: intOrNull(s.providerBlockoutType),
@@ -93,7 +95,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Row minutes must be 5–60 and days ahead 7–120." }, { status: 400 });
   }
   if (settingsRow.enabled && (!settingsRow.notes_operatory_num || !settingsRow.staff_blockout_type)) {
-    return NextResponse.json({ ok: false, error: "Pick the Notes column and the Deccan App blockout type before turning the sync on." }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Sync is on, so the Notes column and the Deccan App blockout type can't be left empty. Turn the sync off in the Schedule Builder first." }, { status: 400 });
   }
 
   const links = Array.isArray(body?.links) ? body.links : [];

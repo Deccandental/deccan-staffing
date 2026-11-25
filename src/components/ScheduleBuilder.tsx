@@ -50,7 +50,7 @@ export default function ScheduleBuilder() {
   const [staff, setStaff] = useState<Employee[]>([]);
   const [overrides, setOverrides] = useState<StaffOverride[]>([]);
   // Open Dental: each day's status for the calendar, and the "send this month" button.
-  const [od, setOd] = useState<{ configured: boolean; enabled: boolean; statuses: Record<string, string> } | null>(null);
+  const [od, setOd] = useState<{ configured: boolean; enabled: boolean; ready: boolean; statuses: Record<string, string> } | null>(null);
   const [odSending, setOdSending] = useState(false);
   const [odMsg, setOdMsg] = useState("");
   // How much to send: the month on screen, or a number of days from today.
@@ -59,10 +59,22 @@ export default function ScheduleBuilder() {
     try {
       const res = await fetch("/api/opendental/day", { method: "POST", headers: sessionHeaders(), body: JSON.stringify({ date: `${year}-${String(month).padStart(2, "0")}-01`, action: "month" }) });
       const json = await res.json();
-      setOd(json.ok ? { configured: json.configured, enabled: json.enabled, statuses: json.statuses ?? {} } : null);
+      setOd(json.ok ? { configured: json.configured, enabled: json.enabled, ready: !!json.ready, statuses: json.statuses ?? {} } : null);
     } catch { setOd(null); }
   }, [year, month]);
   useEffect(() => { setOdMsg(""); loadOdMonth(); }, [loadOdMonth]);
+
+  async function setOdEnabled(enabled: boolean) {
+    if (!enabled && !confirm("Turn off syncing to Open Dental? Nothing already in Open Dental is removed; changes just stop being sent until you turn it back on.")) return;
+    setOdMsg("");
+    try {
+      const res = await fetch("/api/opendental/day", { method: "POST", headers: sessionHeaders(), body: JSON.stringify({ date: `${year}-${String(month).padStart(2, "0")}-01`, action: "setEnabled", enabled }) });
+      const json = await res.json();
+      if (!json.ok) { setOdMsg(json.error ?? "Couldn't change it."); return; }
+      setOdMsg(enabled ? "Open Dental sync is on. Use Send to fill in the days you want." : "Open Dental sync is off.");
+    } catch { setOdMsg("Couldn't change it."); }
+    loadOdMonth();
+  }
 
   async function sendMonthToOd() {
     const mm = String(month).padStart(2, "0");
@@ -546,9 +558,19 @@ export default function ScheduleBuilder() {
                       <option value="90">Next 90 days</option>
                     </select>
                   </div>
-                ) : od?.configured ? (
-                  <a href="/open-dental" className="text-xs font-semibold hover:underline" style={{ color: "#6d28d9" }}>Open Dental sync is off — set up</a>
                 ) : null}
+                {od?.configured && (
+                  od.ready ? (
+                    <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none" style={{ color: "#6d28d9" }}
+                      title="Turns sending to Open Dental on or off. Columns, blockout types and times are on the Open Dental page.">
+                      <input type="checkbox" checked={od.enabled} onChange={(e) => setOdEnabled(e.target.checked)} />
+                      Open Dental sync {od.enabled ? "on" : "off"}
+                    </label>
+                  ) : (
+                    <a href="/open-dental" className="text-xs font-semibold hover:underline" style={{ color: "#6d28d9" }}>Set up Open Dental first</a>
+                  )
+                )}
+                {od?.configured && <a href="/open-dental" title="Open Dental settings" className="text-xs text-slate-400 hover:text-slate-600">⚙</a>}
                 <button onClick={applyDefaults} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">↺ Re-apply Defaults</button>
               </div>
             </div>
