@@ -12,6 +12,7 @@ import { odConfigured, listBlockouts } from "@/lib/openDental/client";
 //   { date, action: "useApp" }   Open Dental was edited or deleted there: replace it with the app's version
 //   { date, action: "useOd" }    keep what Open Dental shows, and make it the app's version for this day
 //   { date, action: "month" }    each day's Open Dental status for date's month (calendar dots)
+//   { date, action: "setEnabled", enabled }   turn the sync on or off (admins)
 // Viewing needs leave or admin access; changing needs admin (like the Schedule Builder).
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -73,6 +74,19 @@ export async function POST(req: NextRequest) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return NextResponse.json({ ok: false, error: "Bad date." }, { status: 400 });
   const action = String(body?.action ?? "get");
 
+  // Turn the sync on or off from the Schedule Builder (admins).
+  if (action === "setEnabled") {
+    if (!hasPerm(session, "admin")) return NextResponse.json({ ok: false, error: "Only an admin can turn the sync on or off." }, { status: 403 });
+    const enabled = body?.enabled === true;
+    const s = await loadOdSettings();
+    if (enabled && (!s.notesOperatoryNum || !s.staffBlockoutType)) {
+      return NextResponse.json({ ok: false, error: "Pick the Notes column and the Deccan App blockout type on the Open Dental page first." }, { status: 400 });
+    }
+    const { error } = await supabaseAdmin.from("od_settings").update({ enabled, updated_at: new Date().toISOString() }).eq("id", 1);
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, enabled });
+  }
+
   // The month's Open Dental status, for the dots on the Schedule Builder calendar.
   if (action === "month") {
     const from = `${date.slice(0, 7)}-01`;
@@ -86,7 +100,7 @@ export async function POST(req: NextRequest) {
     for (const d of days ?? []) statuses[d.date] = d.status;
     const sent = new Set((recs ?? []).map((r: any) => r.date));
     for (const [d, st] of Object.entries(statuses)) if (st === "ok" && !sent.has(d)) delete statuses[d];
-    return NextResponse.json({ ok: true, configured: odConfigured(), enabled: settings.enabled, statuses });
+    return NextResponse.json({ ok: true, configured: odConfigured(), enabled: settings.enabled, ready: !!(settings.notesOperatoryNum && settings.staffBlockoutType), statuses });
   }
 
   try {
