@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { Employee } from "@/types/employee";
 import { loadStaff } from "@/lib/staffStore";
 import { storeSessionToken, clearSessionToken, hasSessionToken } from "@/lib/secureData";
+import { LoginScene, LoginHeading } from "@/components/LoginWelcome";
 
 export type DashboardIdentity =
   | { mode: "staff"; employeeId: number; employeeName: string }
@@ -86,10 +87,9 @@ export default function DashboardLoginGate({ children }: Props) {
       <main className="app-shell">
         <Sidebar />
         <div className="pt-16 lg:pt-0 lg:ml-64 flex items-center justify-center min-h-screen px-4">
-          <div className="rounded-2xl bg-white p-6 sm:p-10 shadow-lg w-full max-w-sm text-center">
-            <div className="text-5xl mb-4">🔐</div>
-            <h1 className="text-2xl font-bold mb-1" style={{ color: "#5a5a5a" }}>Who's this?</h1>
-            <p className="text-gray-400 text-sm mb-8">Enter your personal PIN to see your own dashboard. Managers can enter their passcode instead.</p>
+          <LoginScene>
+            <LoginHeading />
+            <p className="text-gray-400 text-sm mt-3 mb-8">Enter your personal PIN to see your own dashboard. Managers can enter their passcode instead.</p>
             <input
               type="password"
               inputMode="numeric"
@@ -112,7 +112,7 @@ export default function DashboardLoginGate({ children }: Props) {
             >
               Continue
             </button>
-          </div>
+          </LoginScene>
         </div>
       </main>
     );
