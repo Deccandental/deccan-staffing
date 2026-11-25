@@ -175,6 +175,9 @@ async function main() {
   const T = { dayStart: "07:00", midday: "12:00", dayEnd: "18:00", rowMinutes: 10 };
   check("no team note -> top of the day", JSON.stringify(note.placeAppBlock(9, T, [])) === JSON.stringify({ start: "07:00", stop: "08:30" }));
   check("just under the team's note", JSON.stringify(note.placeAppBlock(3, T, [{ start: "07:00:00", stop: "08:40:00" }])) === JSON.stringify({ start: "08:40", stop: "09:10" }));
+  check("below the team's note even when there's room above it", JSON.stringify(note.placeAppBlock(3, T, [{ start: "09:00", stop: "10:00" }])) === JSON.stringify({ start: "10:00", stop: "10:30" }));
+  check("no room below -> room above", JSON.stringify(note.placeAppBlock(3, T, [{ start: "08:00", stop: "17:50" }])) === JSON.stringify({ start: "07:00", stop: "07:30" }));
+  check("no gap big enough -> biggest gap, cut to fit", JSON.stringify(note.placeAppBlock(9, T, [{ start: "07:00", stop: "08:00" }, { start: "08:20", stop: "12:00" }, { start: "12:40", stop: "18:00" }])) === JSON.stringify({ start: "12:00", stop: "12:40" }));
   check("skips past anything else in the way", JSON.stringify(note.placeAppBlock(3, T, [{ start: "07:00", stop: "08:00" }, { start: "08:10", stop: "09:00" }])) === JSON.stringify({ start: "09:00", stop: "09:30" }));
   check("extra lines go under the title", note.buildAppBlockLines(content({ extraLines: ["Dr. Chopra late start 9am"], closedReason: "X" })).join("|") === "DECCAN APP - do not edit|Dr. Chopra late start 9am|CLOSED - X");
   check("whole text replaces everything, title kept", note.buildAppBlockLines(content({ override: ["My own text"], closedReason: "X" })).join("|") === "DECCAN APP - do not edit|My own text");

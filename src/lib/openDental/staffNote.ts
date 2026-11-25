@@ -148,20 +148,47 @@ export function autoLines(c: DayContent, withExtras = false): string[] {
 }
 
 /**
- * Where the Deccan App block goes in the Notes column: the first free stretch
- * from the top of the day that's tall enough, so it lands just under the
- * team's own note (or at the top when there isn't one). `others` are the
- * other blockouts already in the Notes column.
+ * Where the Deccan App block goes in the Notes column. `others` are the other
+ * blockouts already there (the team's own note first of all).
+ *   1. Below the team's note: the first free stretch tall enough, from the
+ *      end of the earliest blockout in the column down.
+ *   2. Otherwise anywhere: the first free stretch tall enough, from the top.
+ *   3. Otherwise the biggest free stretch, with the block cut down to fit it
+ *      (better than overlapping something, which Open Dental may refuse).
+ *   4. With no free space at all, the last stretch of the day.
  */
 export function placeAppBlock(lineCount: number, t: DayTimes, others: { start: string; stop: string }[]): { start: string; stop: string } {
-  const len = Math.max(1, lineCount) * Math.max(5, t.rowMinutes);
-  const end = toMinutes(t.dayEnd);
-  const taken = others.map((o) => ({ s: toMinutes(o.start.slice(0, 5)), e: toMinutes(o.stop.slice(0, 5)) })).sort((a, b) => a.s - b.s);
-  let start = toMinutes(t.dayStart);
-  for (const o of taken) if (o.s < start + len && o.e > start) start = Math.max(start, o.e);
-  // No room left before the day ends: take the last stretch of the day.
-  if (start + len > end) start = Math.max(toMinutes(t.dayStart), end - len);
-  return { start: fromMinutes(start), stop: fromMinutes(Math.min(end, start + len)) };
+  const row = Math.max(5, t.rowMinutes);
+  const len = Math.max(1, lineCount) * row;
+  const dayStart = toMinutes(t.dayStart);
+  const dayEnd = toMinutes(t.dayEnd);
+  const taken = others
+    .map((o) => ({ s: toMinutes(String(o.start).slice(0, 5)), e: toMinutes(String(o.stop).slice(0, 5)) }))
+    .filter((o) => o.e > o.s)
+    .sort((x, y) => x.s - y.s);
+
+  // Free stretches of the day between the other blockouts.
+  const gaps: { s: number; e: number }[] = [];
+  let cursor = dayStart;
+  for (const o of taken) {
+    if (o.s > cursor) gaps.push({ s: cursor, e: Math.min(o.s, dayEnd) });
+    cursor = Math.max(cursor, o.e);
+  }
+  if (cursor < dayEnd) gaps.push({ s: cursor, e: dayEnd });
+  const usable = gaps.filter((g) => g.e - g.s >= row);
+  const span = (s: number, l: number) => ({ start: fromMinutes(s), stop: fromMinutes(Math.min(dayEnd, s + l)) });
+
+  const below = taken.length > 0 ? taken[0].e : dayStart;
+  for (const g of usable) {
+    const s = Math.max(g.s, below);
+    if (g.e - s >= len) return span(s, len);
+  }
+  for (const g of usable) if (g.e - g.s >= len) return span(g.s, len);
+  if (usable.length > 0) {
+    const biggest = usable.reduce((x, y) => (y.e - y.s > x.e - x.s ? y : x));
+    return span(biggest.s, Math.floor((biggest.e - biggest.s) / row) * row);
+  }
+  return span(Math.max(dayStart, dayEnd - len), len);
 }
 
 /** Default name shown in Open Dental: initials for doctors ("Dr. Anita Chopra" -> "AC"), first name for everyone else. */
