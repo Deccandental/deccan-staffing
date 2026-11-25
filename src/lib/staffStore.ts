@@ -199,3 +199,17 @@ export function normalizeBirthday(input: string): string | null | "invalid" {
 
 /** "03-14" -> "03/14" for display and editing. */
 export const birthdayLabel = (b?: string | null) => (b ? b.replace("-", "/") : "");
+
+/**
+ * Formats a birthday as it's typed: digits only, with the slash put in for
+ * you ("0314" -> "03/14", "3" -> "03/"). Deleting is left alone so the
+ * slash can be backspaced over.
+ */
+export function formatBirthdayInput(prev: string, next: string): string {
+  if (next.length < prev.length) return next;
+  const typedSlash = next.endsWith("/") || next.endsWith("-") || next.endsWith(".");
+  const d = next.replace(/\D/g, "").slice(0, 4);
+  if (d.length === 0) return "";
+  if (d.length === 1) return d > "1" || typedSlash ? `0${d}/` : d;
+  return `${d.slice(0, 2)}/${d.slice(2)}`;
+}

@@ -5,7 +5,7 @@ import { useState, useEffect, Fragment } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import ChangePinForm from "@/components/ChangePinForm";
 import { Employee } from "@/types/employee";
-import { loadStaff, updateOwnProfile, birthdayLabel } from "@/lib/staffStore";
+import { loadStaff, updateOwnProfile, birthdayLabel, formatBirthdayInput } from "@/lib/staffStore";
 import { LeaveRequest } from "@/types/leave";
 import { loadLeaveRequests } from "@/lib/leaveStore";
 import {
@@ -553,8 +553,8 @@ function DashboardPageBody({ identity, logout }: { identity: AppIdentity; logout
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-center text-sm focus:outline-none" />
                     {profileForm.birthday !== undefined && (
                       <div>
-                        <input value={profileForm.birthday} onChange={(e) => setProfileForm((f) => ({ ...f, birthday: e.target.value }))}
-                          placeholder="Birthday MM/DD (optional)" maxLength={5}
+                        <input value={profileForm.birthday} onChange={(e) => { const v = e.target.value; setProfileForm((f) => ({ ...f, birthday: formatBirthdayInput(f.birthday ?? "", v) })); }}
+                          placeholder="Birthday MM/DD (optional)" maxLength={5} inputMode="numeric"
                           className="w-full rounded-xl border border-slate-200 px-3 py-2 text-center text-sm focus:outline-none" />
                         <p className="text-[11px] text-slate-400 mt-1">Month and day only. It shows on the Open Dental schedule on your birthday. Leave blank to keep it private.</p>
                       </div>

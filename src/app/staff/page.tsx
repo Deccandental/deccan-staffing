@@ -7,7 +7,7 @@ import AccessDenied from "@/components/AccessDenied";
 import { Employee, EmployeeRole, DentistSpecialty, SedationPermitValue } from "@/types/employee";
 import {
   loadStaff, addEmployee, updateEmployee, removeEmployee, setEmployeeArchived,
-  loadPrefs, setDentistPrefs, DentistPrefs, birthdayLabel,
+  loadPrefs, setDentistPrefs, DentistPrefs, birthdayLabel, formatBirthdayInput,
 } from "@/lib/staffStore";
 import { secureData as supabase } from "@/lib/secureData";
 
@@ -381,8 +381,8 @@ function StaffPageBody({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                   {editing && form.birthday !== undefined && (
                     <div>
                       <label className="block text-sm font-medium text-gray-500 mb-1">Birthday (month/day)</label>
-                      <input value={form.birthday ?? ""} placeholder="MM/DD" maxLength={5}
-                        onChange={(e) => setForm((f) => ({ ...f, birthday: e.target.value }))}
+                      <input value={form.birthday ?? ""} placeholder="MM/DD" maxLength={5} inputMode="numeric"
+                        onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, birthday: formatBirthdayInput(f.birthday ?? "", v) })); }}
                         className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:outline-none" />
                       <p className="text-xs text-gray-400 mt-1">Shown in Open Dental on the day. Staff can also set this on their dashboard.</p>
                     </div>
