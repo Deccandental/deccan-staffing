@@ -153,8 +153,17 @@ export async function POST(req: NextRequest) {
       ]);
       const ids = (people ?? []).map((p: any) => p.employee_id as number);
       if (ids.length < 3) return NextResponse.json({ error: "You need at least 3 people to draw names." }, { status: 400 });
-      const result = drawNames(ids, (excl ?? []).map((x: any) => [x.a_employee_id, x.b_employee_id] as [number, number]));
-      if (!result) return NextResponse.json({ error: "The exclusions make a fair draw impossible. Remove one and try again." }, { status: 400 });
+      const exclusions = (excl ?? []).map((x: any) => [x.a_employee_id, x.b_employee_id] as [number, number]);
+      // Doctors never draw each other: every pair of doctors taking part is kept apart.
+      const { data: roles } = await supabaseAdmin.from("staff").select("id, role").in("id", ids);
+      const doctors = (roles ?? []).filter((r: any) => r.role === "Dentist").map((r: any) => r.id as number);
+      for (let i = 0; i < doctors.length; i++) for (let j = i + 1; j < doctors.length; j++) exclusions.push([doctors[i], doctors[j]]);
+      const result = drawNames(ids, exclusions);
+      if (!result) {
+        return NextResponse.json({ error: doctors.length * 2 > ids.length
+          ? "There aren't enough non-doctors taking part for every doctor to draw someone who isn't a doctor. Add more people and try again."
+          : "The exclusions make a fair draw impossible. Remove one and try again." }, { status: 400 });
+      }
       await supabaseAdmin.from("santa_pairs").delete().eq("event_id", event.id);
       const { error } = await supabaseAdmin.from("santa_pairs").insert([...result.entries()].map(([g, r]) => ({ event_id: event.id, giver_employee_id: g, recipient_employee_id: r })));
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
