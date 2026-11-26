@@ -44,6 +44,8 @@ export interface DayRoster {
   floaterNote: string;
   /** Working that day but doing admin, e.g. "KETKI". */
   admin?: string[];
+  /** The day's charge assistant (rotates fairly; see lib/charge.ts). */
+  charge?: string | null;
 }
 
 export interface DayEvent { date: string; time: string; title: string; mandatory: boolean }
@@ -121,6 +123,7 @@ export function autoLines(c: DayContent, withExtras = false): string[] {
   const r = c.roster;
   if (r && (r.pairs.length || r.hygienists.length || r.frontDesk.length || r.floater || r.admin?.length)) {
     lines.push("-- TEAM --");
+    if (r.charge) lines.push(`CHARGE/ ${r.charge}`);
     for (const p of r.pairs) lines.push(`${p.dentist}/${p.assistants.length > 0 ? p.assistants.join("/") : " (no assistant)"}`);
     if (r.hygienists.length > 0) lines.push(`HYG/ ${r.hygienists.join("/")}`);
     if (r.frontDesk.length > 0) lines.push(`FRONT/ ${r.frontDesk.join("/")}`);

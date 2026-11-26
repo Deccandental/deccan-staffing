@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test:gateway": "npx --yes tsx --tsconfig tsconfig.json tests/gateway.test.ts",
-    "test:opendental": "npx --yes tsx --tsconfig tsconfig.json tests/openDental.test.ts"
+    "test:opendental": "npx --yes tsx --tsconfig tsconfig.json tests/openDental.test.ts",
+    "test:charge": "npx --yes tsx --tsconfig tsconfig.json tests/charge.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

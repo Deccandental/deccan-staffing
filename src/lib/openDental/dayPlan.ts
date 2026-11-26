@@ -25,6 +25,10 @@ export interface DayPlan {
   absences: Absence[];
   /** Everyone on the day's plan, so Open Dental bookings can be checked against it. */
   workingIds: number[];
+  /** Assistants on the day's plan (with a dentist or floating): who can be the charge assistant. */
+  chargeCandidates: number[];
+  /** People away for half of the day. */
+  halfOffIds: number[];
 }
 
 interface Loaded {
@@ -38,6 +42,8 @@ interface Loaded {
   temps: { date: string; role: string; notes: string; name: string }[];
   events: DayEvent[];
   links: Map<number, StaffLink>;
+  /** Charge assistant by date (already decided; see lib/charge.ts). */
+  charges: Map<string, number>;
 }
 
 async function must<T>(p: PromiseLike<{ data: T | null; error: any }>, what: string): Promise<T> {
@@ -83,6 +89,9 @@ async function load(from: string, to: string): Promise<Loaded> {
     must<any[]>(supabaseAdmin.from("events").select("date, time, title, mandatory").gte("date", from).lte("date", to), "events"),
     loadStaffLinks(),
   ]);
+  // Charge assistants decided so far; the table may not exist on an older database.
+  const { data: chargeRows } = await supabaseAdmin.from("charge_assignments").select("date, employee_id").gte("date", from).lte("date", to);
+  const charges = new Map<string, number>((chargeRows ?? []).map((r: any) => [r.date, r.employee_id]));
   const prefs: Record<number, number[]> = {};
   for (const r of prefRows) prefs[r.dentist_id] = r.assistant_ids ?? [];
   const schedules: Loaded["schedules"] = {};
@@ -97,7 +106,7 @@ async function load(from: string, to: string): Promise<Loaded> {
   }
   const tempName = new Map(tempRows.map((t) => [t.id, String(t.name ?? "")]));
   return {
-    staff, prefs, links, schedules,
+    staff, prefs, links, schedules, charges,
     overrides: ovRows.map((r) => ({ employeeId: r.employee_id, date: r.date, reason: r.reason, halfDay: r.half_day ?? null })),
     openTuesdays: otRows.map((r) => ({ date: r.date, halfDay: r.half_day ?? null })),
     holidays: holRows.map((r) => ({ date: r.date, name: r.name })),
@@ -140,7 +149,7 @@ function absencesFor(date: string, d: Loaded): Absence[] {
   return [...out.values()];
 }
 
-function rosterFor(date: string, isOpenTuesday: boolean, d: Loaded): { roster: DayRoster | null; warnings: string[]; workingIds: number[] } {
+function rosterFor(date: string, isOpenTuesday: boolean, d: Loaded): { roster: DayRoster | null; warnings: string[]; workingIds: number[]; chargeCandidates: number[] } {
   const weekday = getWeekday(date);
   // A day nobody has opened in the Schedule Builder yet gets the same
   // defaults the builder would give it: every dentist who normally works
@@ -149,7 +158,7 @@ function rosterFor(date: string, isOpenTuesday: boolean, d: Loaded): { roster: D
     dentists: d.staff.filter((e) => e.role === "Dentist" && !e.archived && weekday && e.defaultSchedule?.[weekday]).map((e) => e.name),
     frontDeskRequired: 2, hygienistsRequired: 1, assistantOverrides: {}, hygienistOverrides: {}, assistantCounts: {}, floaterAssistantId: null, floaterNote: "",
   };
-  if (day.dentists.length === 0) return { roster: null, warnings: [], workingIds: [] };
+  if (day.dentists.length === 0) return { roster: null, warnings: [], workingIds: [], chargeCandidates: [] };
 
   const a = buildDailyAssignments(
     d.staff, day.dentists, date, d.prefs, d.overrides, isOpenTuesday,
@@ -161,6 +170,7 @@ function rosterFor(date: string, isOpenTuesday: boolean, d: Loaded): { roster: D
   const ac = day.assistantCounts ?? {};
   const ao = day.assistantOverrides ?? {};
   const working = new Set<number>();
+  const assistantsIn = new Set<number>();
   const warnings: string[] = [];
   // Hand-picked people can still be on approved leave (picked before it was approved).
   const offButAssigned = (e: Employee, where: string) => {
@@ -170,7 +180,7 @@ function rosterFor(date: string, isOpenTuesday: boolean, d: Loaded): { roster: D
   const pairs = a.dentists.map(({ dentist, assistants }) => {
     working.add(dentist.id);
     const resolved = resolveDentistAssistants(dentist.id, assistants, ac, ao, d.staff).filter((x): x is Employee => !!x);
-    resolved.forEach((x) => { working.add(x.id); offButAssigned(x, name(dentist)); });
+    resolved.forEach((x) => { working.add(x.id); assistantsIn.add(x.id); offButAssigned(x, name(dentist)); });
     const names = resolved.map(name);
     // A temp booked for this dentist fills the gap.
     for (const t of temps) if (t.role === "Assistant" && t.notes === `dentist:${dentist.id}`) names.push(tempLabel(t.name));
@@ -192,7 +202,11 @@ function rosterFor(date: string, isOpenTuesday: boolean, d: Loaded): { roster: D
   for (const t of temps) if (t.role === "Front Desk") frontDesk.push(tempLabel(t.name));
 
   const floaterEmp = day.floaterAssistantId != null ? d.staff.find((e) => e.id === day.floaterAssistantId) ?? null : null;
-  if (floaterEmp) { working.add(floaterEmp.id); offButAssigned(floaterEmp, "floater"); }
+  if (floaterEmp) { working.add(floaterEmp.id); assistantsIn.add(floaterEmp.id); offButAssigned(floaterEmp, "floater"); }
+  // Nobody on full-day leave can be in charge, even if they were hand-picked into a seat.
+  const chargeCandidates = [...assistantsIn].filter((id) => !d.leave.some((r) => r.employeeId === id && isFullDayLeave(r, date)));
+  const chargeId = d.charges.get(date);
+  const chargeEmp = chargeId != null && chargeCandidates.includes(chargeId) ? d.staff.find((e) => e.id === chargeId) ?? null : null;
 
   // The Schedule Builder's own warnings, with names as they appear in Open Dental.
   // A temp who has been booked covers the gap, so those warnings are dropped.
@@ -211,9 +225,10 @@ function rosterFor(date: string, isOpenTuesday: boolean, d: Loaded): { roster: D
   }
 
   return {
-    roster: { frontDesk, pairs, hygienists, floater: floaterEmp ? name(floaterEmp) : null, floaterNote: day.floaterNote ?? "", admin: a.admin.map(name) },
+    roster: { frontDesk, pairs, hygienists, floater: floaterEmp ? name(floaterEmp) : null, floaterNote: day.floaterNote ?? "", admin: a.admin.map(name), charge: chargeEmp ? name(chargeEmp) : null },
     warnings,
     workingIds: [...working],
+    chargeCandidates,
   };
 }
 
@@ -237,10 +252,10 @@ export async function buildDayPlans(from: string, to: string): Promise<{ plans: 
     const isOpen = !!info?.isOpen;
     const holiday = holidayOn.get(date) ?? null;
     if (!isOpen && !(holiday && !info?.isWeekend)) {
-      plans.push({ date, isOpen, content: null, absences: [], workingIds: [] });
+      plans.push({ date, isOpen, content: null, absences: [], workingIds: [], chargeCandidates: [], halfOffIds: [] });
       continue;
     }
-    const { roster, warnings, workingIds } = isOpen ? rosterFor(date, !!(info?.isTuesday && info?.isOpenTuesday), d) : { roster: null, warnings: [], workingIds: [] };
+    const { roster, warnings, workingIds, chargeCandidates } = isOpen ? rosterFor(date, !!(info?.isTuesday && info?.isOpenTuesday), d) : { roster: null, warnings: [], workingIds: [], chargeCandidates: [] };
     const absences = isOpen ? absencesFor(date, d) : [];
     const mmdd = date.slice(5);
 
@@ -266,7 +281,7 @@ export async function buildDayPlans(from: string, to: string): Promise<{ plans: 
       .map((x) => ({ date: x, name: holidayOn.get(x)! }));
 
     plans.push({
-      date, isOpen, absences, workingIds,
+      date, isOpen, absences, workingIds, chargeCandidates, halfOffIds: absences.filter((a) => a.half).map((a) => a.employeeId),
       content: {
         date,
         extraLines: splitLines(d.schedules[date]?.odExtraLines ?? ""),

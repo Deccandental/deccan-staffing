@@ -19,6 +19,7 @@ import { todayStr } from "@/lib/today";
 import { odConfigured, OdError, OdBlockout, createBlockout, updateBlockout, deleteBlockout, listBlockouts, listAppointments, BlockoutInput } from "./client";
 import { buildDayPlans, eachDate, addDays, DayPlan, StaffLink } from "./dayPlan";
 import type { Employee } from "@/types/employee";
+import { ensureCharges } from "@/lib/charge";
 import { buildAppBlockLines, placeAppBlock, providerSpan, providerNote, DayTimes, splitLines, mergeStaffNote, toMinutes } from "./staffNote";
 
 export interface OdSettings {
@@ -240,6 +241,8 @@ export async function syncRange(from: string, to: string, opts: { force?: boolea
   if (from < today) from = today;
   if (to < from) return { results: [] };
 
+  // Decide the charge assistants first, so the blocks can show them.
+  await ensureCharges(to).catch((e) => console.error("Couldn't decide the charge assistants:", e));
   const { plans, links, staff } = await buildDayPlans(from, to);
   const { data: recs, error } = await supabaseAdmin.from("od_blockouts").select("*").gte("date", from).lte("date", to);
   if (error) throw new Error(`Couldn't read the sync record: ${error.message}`);

@@ -1,6 +1,7 @@
 "use client";
 
 import OdBlockoutPanel from "@/components/OdBlockoutPanel";
+import ChargePanel from "@/components/ChargePanel";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { sessionHeaders } from "@/lib/secureData";
 import { syncOdNow } from "@/lib/openDental/clientSync";
@@ -63,6 +64,17 @@ export default function ScheduleBuilder() {
     } catch { setOd(null); }
   }, [year, month]);
   useEffect(() => { setOdMsg(""); loadOdMonth(); }, [loadOdMonth]);
+
+  // Charge assistant for each day of the month (rotates fairly; see lib/charge.ts).
+  const [charges, setCharges] = useState<Record<string, string>>({});
+  const loadCharges = useCallback(async () => {
+    try {
+      const res = await fetch("/api/charge", { method: "POST", headers: sessionHeaders(), body: JSON.stringify({ date: `${year}-${String(month).padStart(2, "0")}-01`, action: "month" }) });
+      const json = await res.json();
+      if (json.ok) setCharges(Object.fromEntries(Object.entries(json.days as Record<string, { name: string }>).map(([d, v]) => [d, v.name])));
+    } catch { /* the calendar just shows no charge names */ }
+  }, [year, month]);
+  useEffect(() => { loadCharges(); }, [loadCharges]);
 
   async function setOdEnabled(enabled: boolean) {
     if (!enabled && !confirm("Turn off syncing to Open Dental? Nothing already in Open Dental is removed; changes just stop being sent until you turn it back on.")) return;
@@ -590,7 +602,7 @@ export default function ScheduleBuilder() {
             </div>
           </div>
 
-          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} dayAssignments={monthAssignments} dayEvents={dayEvents} odStatuses={od?.configured && od.enabled ? od.statuses : undefined} />
+          <MonthlyOverview year={year} month={month} dayStatuses={dayStatuses} selectedDate={selectedDate} onSelectDate={handleSelectDate} openTuesdays={openTuesdays} holidays={holidays} dayAssignments={monthAssignments} dayEvents={dayEvents} odStatuses={od?.configured && od.enabled ? od.statuses : undefined} charges={charges} />
 
           {selectedDate ? (
             <div className="grid gap-6 lg:grid-cols-2">
@@ -674,6 +686,12 @@ export default function ScheduleBuilder() {
                     })}
                   </div>
                 </div>
+                <ChargePanel
+                  date={selectedDate}
+                  canEdit
+                  onChanged={loadCharges}
+                  refreshKey={JSON.stringify([schedule[selectedDate] ?? null, overrides.filter((o) => o.date === selectedDate), leaveRequests.length])}
+                />
                 <OdBlockoutPanel
                   date={selectedDate}
                   canEdit
