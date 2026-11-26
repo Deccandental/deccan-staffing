@@ -36,6 +36,7 @@ import {
   loadDentalMonthlySummaries, saveDentalMonthlySummary, deleteDentalMonthlySummary, DentalMonthlySummary,
   buildOccurrences, buildStatementOccurrences, StatementOutflows, computeSafeToSpend, addDays, checkBillPayment, projectBalance,
   computeAccountForecast, computeSuggestedTransfer, computeCardRecommendation, computeRequiredCollectionsMulti, computeSuggestedTransferMulti,
+  estimateDailyCollections, collectionsAccountId, buildExpectedCollections,
 } from "@/lib/cashflow";
 
 const FREQ_LABELS: Record<BillFrequency, string> = { weekly: "Weekly", biweekly: "Biweekly", monthly: "Monthly", once: "One-time" };
@@ -441,7 +442,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
 
   useEffect(() => {
     Promise.all([
-      loadLatestWeeklyReview(), loadWeeklyReviewHistory(8), loadLatestArAging(), loadDentalMonthlyHistory(),
+      loadLatestWeeklyReview(), loadWeeklyReviewHistory(20), loadLatestArAging(), loadDentalMonthlyHistory(),
       loadStaff(),
     ]).then(async ([latest, hist, ar, dentalHist, staffList]) => {
       // Compensation and bonuses are paid as they are calculated, so the cash
@@ -456,8 +457,16 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
 
   const today = todayStr();
   const monthStart = today.slice(0, 8) + "01";
+  // Collections are the main inflow but are never scheduled as bills, so without this the outlook counted
+  // $0 coming in and every account looked short. The estimate comes from the weekly reviews' month-to-date
+  // income and is added to the account payroll is paid from (skipped once deposits are scheduled by hand).
+  const dailyCollections = estimateDailyCollections(history, today);
+  const depositAccountId = collectionsAccountId(cashAccounts, allBills);
+  const expectedCollections = (days: number, accountId?: string) =>
+    dailyCollections != null && depositAccountId && (!accountId || String(accountId) === String(depositAccountId))
+      ? buildExpectedCollections(depositAccountId, dailyCollections, today, days) : [];
   // Unpaid statements count as outflows on their due dates, from the account they'll be paid from.
-  const occurrences = [...buildOccurrences(allBills, allPayments, monthStart, addDays(today, 14)), ...stmtOut.occurrences.filter((o) => o.dueDate <= addDays(today, 14))];
+  const occurrences = [...buildOccurrences(allBills, allPayments, monthStart, addDays(today, 14)), ...stmtOut.occurrences.filter((o) => o.dueDate <= addDays(today, 14)), ...expectedCollections(14)];
   // Works for however many bank accounts are open (it used to assume exactly Fifth Third and Chase).
   const forecasts = cashAccounts.map((a) => computeAccountForecast(a, latestBalances[a.name]?.balance ?? 0, occurrences, today, 0));
   const transfer = computeSuggestedTransferMulti(forecasts);
@@ -514,7 +523,7 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
     let accountForecast = null;
     if (linkedAccount) {
       const accountBills = allBills.filter((b) => b.cashAccountId === linkedAccount.id);
-      const accountOccurrences = [...buildOccurrences(accountBills, allPayments, monthStart, addDays(today, WINDOW_DAYS)), ...stmtOut.occurrences.filter((o) => String(o.cashAccountId) === String(linkedAccount.id))];
+      const accountOccurrences = [...buildOccurrences(accountBills, allPayments, monthStart, addDays(today, WINDOW_DAYS)), ...stmtOut.occurrences.filter((o) => String(o.cashAccountId) === String(linkedAccount.id)), ...expectedCollections(14, linkedAccount.id)];
       accountForecast = computeAccountForecast(linkedAccount, latestBalances[linkedAccount.name]?.balance ?? 0, accountOccurrences, today, 0);
       // If this account's excess is already earmarked for a transfer to the
       // other account, don't also offer it up for card paydown — that would
@@ -537,9 +546,10 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
 
   const checkAccount = cashAccounts.find((a) => a.id === checkAccountId);
   const checkOccurrences = checkAccount
-    ? buildOccurrences(allBills.filter((b) => b.cashAccountId === checkAccount.id), allPayments, today, addDays(today, 90))
+    ? [...buildOccurrences(allBills.filter((b) => b.cashAccountId === checkAccount.id), allPayments, today, addDays(today, 90)), ...expectedCollections(90, checkAccount.id)]
     : [];
-  const upcomingForCheck = checkOccurrences.filter((o) => o.dueDate >= today && !o.isPaid);
+  // The estimated deposits help the projection but aren't bills to pick from.
+  const upcomingForCheck = checkOccurrences.filter((o) => o.dueDate >= today && !o.isPaid && o.direction === "outflow");
 
   function handleRunCheck() {
     if (!checkAccount) return;
@@ -600,6 +610,8 @@ function OverviewPanel({ staleItems, cashAccounts, cards, charges, allBills, all
       ...(stmt ? [{ k: `Statement ${stmtMonthLabel(stmt.month)}`, v: `$${formatMoney(stmt.balance)}` }] : []),
       { k: "Cushion target", v: `$${formatMoney(fc.cushion)}` },
       { k: "Next 14 days", v: `+$${formatMoney(fc.expectedDeposits14d)} / −$${formatMoney(fc.obligations14d)}` },
+      ...(String(a.id) === String(depositAccountId) && dailyCollections != null
+        ? [{ k: "Deposits (estimated)", v: `≈ $${formatMoney(Math.round(dailyCollections))}/day from recent collections` }] : []),
       { k: "Excess / (shortfall)", v: formatUSD(fc.excessOrShortfall), color: safeColor(fc.excessOrShortfall) },
     ];
     return { key: a.id, kind: "bank" as const, defaultMonth: previousMonth(), payBill: undefined as RecurringBill | undefined, name: a.name, tag: "Bank account", balance: bal?.balance ?? null, checkedAt: bal?.checkedAt, stats, warns, series: [balSeries(a.name, "week"), stmtSeries(a.id)] };

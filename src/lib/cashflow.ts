@@ -1364,3 +1364,58 @@ export async function renameBalanceHistory(oldName: string, newName: string): Pr
   if (error) { console.error("renameBalanceHistory error:", error); return { ok: false, error: error.message }; }
   return { ok: true };
 }
+
+// ---------------- Expected collections (deposits) ----------------
+// Collections are the practice's main inflow, but they are never entered as scheduled bills, so the 14-day
+// outlook used to count $0 coming in against every bill going out and showed a shortfall even with a healthy
+// balance. These helpers estimate what will be deposited from the collections the weekly reviews record.
+
+// Average collected per calendar day, from the month-to-date "current income" on the weekly reviews. Each
+// month uses its latest review (income so far ÷ day of the month it was entered). Reviews in a month's first
+// week are skipped because a few days of deposits say little about the rest of the month.
+export function estimateDailyCollections(reviews: WeeklyCashReview[], today: string, monthsBack: number = 3): number | null {
+  const oldest = addMonthsToDate(today.slice(0, 8) + "01", -(monthsBack - 1)).slice(0, 7);
+  const latestByMonth = new Map<string, WeeklyCashReview>();
+  for (const r of reviews) {
+    if (r.currentIncome == null || !(r.currentIncome > 0) || r.reviewDate > today) continue;
+    const month = r.reviewDate.slice(0, 7);
+    if (month < oldest || Number(r.reviewDate.slice(8, 10)) < 7) continue;
+    const seen = latestByMonth.get(month);
+    if (!seen || r.reviewDate > seen.reviewDate) latestByMonth.set(month, r);
+  }
+  const rates = [...latestByMonth.values()].map((r) => Number(r.currentIncome) / Number(r.reviewDate.slice(8, 10)));
+  if (rates.length === 0) return null;
+  return rates.reduce((sum, x) => sum + x, 0) / rates.length;
+}
+
+// The account collections are deposited into: the one payroll is paid from (that is the operating account),
+// otherwise the one carrying the most scheduled outflows. Null when an account already has deposits scheduled
+// as inflow items, so an estimate never doubles what was entered by hand.
+export function collectionsAccountId(accounts: CashAccount[], bills: RecurringBill[]): string | null {
+  const active = bills.filter((b) => b.active && b.cashAccountId && accounts.some((a) => String(a.id) === String(b.cashAccountId)));
+  if (active.some((b) => b.direction === "inflow")) return null;
+  const score = (id: string, pick: (b: RecurringBill) => boolean) =>
+    active.filter((b) => String(b.cashAccountId) === String(id) && b.direction === "outflow" && pick(b)).reduce((sum, b) => sum + b.estimatedAmount, 0);
+  const ranked = [...accounts].sort((a, b) => (score(b.id, (x) => x.category === "payroll") - score(a.id, (x) => x.category === "payroll")) || (score(b.id, () => true) - score(a.id, () => true)));
+  return ranked.length > 0 && score(ranked[0].id, () => true) > 0 ? ranked[0].id : null;
+}
+
+export const EXPECTED_COLLECTIONS_ID = "est:collections";
+
+// One estimated deposit per business day (Mon–Fri) from tomorrow through `days` ahead. The daily rate is per
+// calendar day, so each business day carries 7/5 of it and a full week adds up to seven days' collections.
+export function buildExpectedCollections(accountId: string, dailyRate: number, today: string, days: number): Occurrence[] {
+  const out: Occurrence[] = [];
+  if (!(dailyRate > 0)) return out;
+  const perBusinessDay = Math.round((dailyRate * 7) / 5 * 100) / 100;
+  for (let d = 1; d <= days; d++) {
+    const date = addDays(today, d);
+    const dow = parseLocal(date).getDay();
+    if (dow === 0 || dow === 6) continue;
+    out.push({
+      billId: EXPECTED_COLLECTIONS_ID, billName: "Expected collections (estimate)", category: "bill", categoryLabel: "Estimated deposits",
+      dueDate: date, amount: perBusinessDay, isPaid: false, cashAccountId: String(accountId), direction: "inflow", essential: false,
+    });
+  }
+  return out;
+}
