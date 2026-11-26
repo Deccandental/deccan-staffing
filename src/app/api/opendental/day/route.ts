@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sessionFrom, hasPerm } from "@/lib/routeAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildDayPlans } from "@/lib/openDental/dayPlan";
+import { ensureCharges } from "@/lib/charge";
 import { autoLines, buildAppBlockLines, splitLines, plain, APP_BLOCK_TITLE } from "@/lib/openDental/staffNote";
 import { bookingWarnings, loadOdSettings, syncRange } from "@/lib/openDental/sync";
 import { odConfigured, listBlockouts } from "@/lib/openDental/client";
@@ -20,6 +21,7 @@ export const maxDuration = 60;
 const MAX_LINES = 60;
 
 async function describe(date: string) {
+  await ensureCharges(date).catch(() => undefined);
   const [{ plans, links, staff }, settings] = await Promise.all([buildDayPlans(date, date), loadOdSettings()]);
   const plan = plans[0];
   const extra = (await bookingWarnings(plans, links, staff, settings).catch(() => new Map<string, string[]>())).get(date) ?? [];

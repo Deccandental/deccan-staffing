@@ -30,6 +30,8 @@ interface Props {
   dayEvents?: Record<string, DayEventSummary[]>;
   /** Open Dental status per date (ok, edited_in_od, deleted_in_od, error); shown as a small "OD" tag. */
   odStatuses?: Record<string, string>;
+  /** Charge assistant's name by date. */
+  charges?: Record<string, string>;
 }
 
 const OD_TAG: Record<string, { bg: string; color: string; title: string }> = {
@@ -50,7 +52,7 @@ function OdTag({ status }: { status?: string }) {
   );
 }
 
-export default function MonthlyOverview({ year, month, dayStatuses, selectedDate, onSelectDate, openTuesdays = [], holidays = [], dayAssignments, dayEvents, odStatuses }: Props) {
+export default function MonthlyOverview({ year, month, dayStatuses, selectedDate, onSelectDate, openTuesdays = [], holidays = [], dayAssignments, dayEvents, odStatuses, charges }: Props) {
   const days = generateMonth(year, month, openTuesdays, holidays);
   const firstDow = new Date(year, month - 1, 1).getDay();
   const blanks = Array.from({ length: firstDow });
@@ -128,6 +130,12 @@ export default function MonthlyOverview({ year, month, dayStatuses, selectedDate
               {!isSelected && status === "complete" && !info && <div className="mt-0.5 text-xs text-green-500 text-center">✓</div>}
               {!isSelected && status === "warning" && !info && <div className="mt-0.5 text-xs text-amber-500 text-center">⚠</div>}
               {isOpenTue && !status && !info && <div className="mt-0.5 text-xs text-blue-400 text-center">Open</div>}
+              {charges?.[day.date] && (
+                <div className="truncate text-[9px] font-semibold leading-tight mt-0.5" title={`Charge: ${charges[day.date]}`}
+                  style={{ color: isSelected ? "white" : "#b45309" }}>
+                  ⭐ {charges[day.date].split(" ")[0]}
+                </div>
+              )}
               {events.length > 0 && (
                 <div className="mt-0.5 space-y-0.5">
                   {events.map((ev, i) => (

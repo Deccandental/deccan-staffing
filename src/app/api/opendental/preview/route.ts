@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessionFrom, hasPerm } from "@/lib/routeAuth";
 import { buildDayPlans } from "@/lib/openDental/dayPlan";
+import { ensureCharges } from "@/lib/charge";
 import { buildAppBlockLines } from "@/lib/openDental/staffNote";
 import { desiredBlockouts, loadOdSettings, bookingWarnings } from "@/lib/openDental/sync";
 
@@ -18,6 +19,7 @@ export async function POST(req: NextRequest) {
   const date = String(body?.date ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return NextResponse.json({ ok: false, error: "Bad date." }, { status: 400 });
   try {
+    await ensureCharges(date).catch(() => undefined);
     const [{ plans, links, staff }, settings] = await Promise.all([buildDayPlans(date, date), loadOdSettings()]);
     const plan = plans[0];
     // Booking checks need Open Dental; without it the preview simply leaves them out.
