@@ -11,7 +11,42 @@ import { useEffect, useState } from "react";
 // to the address.
 
 type TimeOfDay = "morning" | "afternoon" | "evening" | "night";
-type Season = "january" | "february" | "spring" | "summer" | "september" | "october" | "november" | "december";
+type Season = "january" | "february" | "spring" | "summer" | "september" | "october" | "november" | "december"
+  | "lunarNewYear" | "diwali" | "halloween";
+
+// Festivals that move every year (main day). The theme shows for a few days around each.
+// Dates after 2030 come from a single published table; check them when the time comes.
+const LUNAR_NEW_YEAR: Record<number, [string, string]> = {
+  2026: ["2026-02-17", "Horse"], 2027: ["2027-02-06", "Goat"], 2028: ["2028-01-26", "Monkey"],
+  2029: ["2029-02-13", "Rooster"], 2030: ["2030-02-03", "Dog"], 2031: ["2031-01-23", "Pig"],
+  2032: ["2032-02-11", "Rat"], 2033: ["2033-01-31", "Ox"], 2034: ["2034-02-19", "Tiger"], 2035: ["2035-02-08", "Rabbit"],
+};
+const DIWALI: Record<number, string> = {
+  2026: "2026-11-08", 2027: "2027-10-29", 2028: "2028-10-17", 2029: "2029-11-05", 2030: "2030-10-26",
+  2031: "2031-11-14", 2032: "2032-11-02", 2033: "2033-10-22", 2034: "2034-11-10", 2035: "2035-10-30",
+};
+
+const dayNumber = (ymd: string) => Math.round(Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10)) / 86400000);
+const localYmd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** A festival on or near this date, which takes over from the season. */
+function occasion(d: Date): Season | null {
+  const today = dayNumber(localYmd(d));
+  const y = d.getFullYear();
+  const near = (ymd: string | undefined, before: number, after: number) => !!ymd && today >= dayNumber(ymd) - before && today <= dayNumber(ymd) + after;
+  if (near(LUNAR_NEW_YEAR[y]?.[0], 2, 7)) return "lunarNewYear";
+  if (near(DIWALI[y], 2, 2)) return "diwali";
+  if (d.getMonth() === 9 && d.getDate() >= 24) return "halloween";
+  return null;
+}
+
+/** This year's Chinese zodiac animal (or next year's, early in January). */
+function zodiac(d: Date): string {
+  const y = d.getFullYear();
+  const entry = LUNAR_NEW_YEAR[y];
+  if (!entry) return "";
+  return dayNumber(localYmd(d)) >= dayNumber(entry[0]) - 2 ? entry[1] : LUNAR_NEW_YEAR[y - 1]?.[1] ?? entry[1];
+}
 
 const ORANGE = "#e8622a";
 
@@ -24,6 +59,8 @@ function timeOfDay(d: Date): TimeOfDay {
 }
 
 function season(d: Date): Season {
+  const special = occasion(d);
+  if (special) return special;
   const m = d.getMonth() + 1;
   if (m === 1) return "january";
   if (m === 2) return "february";
@@ -48,7 +85,10 @@ const SEASON_LINE: Record<Season, string> = {
   spring: "Spring has sprung, so keep smiling 🌷",
   summer: "Sunny days and bright smiles ☀️",
   september: "Back to school, back to brushing 🍎",
-  october: "Treats today? Floss tonight! 🎃",
+  october: "Fall is in the air 🍁",
+  halloween: "Happy Halloween! Floss after the treats 🎃",
+  lunarNewYear: "Happy Chinese New Year! 🧧",
+  diwali: "Happy Diwali! May your smile shine bright 🪔",
   november: "Thankful for this team 🍂",
   december: "Happy holidays from Deccan Dental 🎄",
 };
@@ -86,7 +126,9 @@ export function LoginHeading() {
       <h1 className="text-2xl font-bold flex items-center justify-center gap-2" style={{ color: "#5a5a5a" }}>
         {g.text} <span aria-hidden>{g.emoji}</span>
       </h1>
-      <p className="text-sm font-semibold mt-1" style={{ color: ORANGE }}>{SEASON_LINE[m.season]}</p>
+      <p className="text-sm font-semibold mt-1" style={{ color: ORANGE }}>
+        {m.season === "lunarNewYear" && zodiac(new Date()) ? `Chinese New Year: Year of the ${zodiac(new Date())} 🧧` : SEASON_LINE[m.season]}
+      </p>
     </div>
   );
 }
@@ -148,7 +190,7 @@ function Tooth({ season }: { season: Season }) {
           <circle cx="0" cy="-106" r="5" fill="#facc15" stroke="#3b3b3b" strokeWidth="2" />
         </g>
       )}
-      {season === "october" && (
+      {season === "halloween" && (
         <g>
           <path d="M-34 -64 L0 -112 L34 -64 Z" fill="#1f2937" stroke="#3b3b3b" strokeWidth="2.5" strokeLinejoin="round" />
           <ellipse cx="0" cy="-64" rx="46" ry="7" fill="#1f2937" />
@@ -159,8 +201,9 @@ function Tooth({ season }: { season: Season }) {
 }
 
 function Plant({ x, season }: { x: number; season: Season }) {
-  const leaf = season === "november" || season === "september" ? "#d97706" : "#3f8f4f";
-  const leaf2 = season === "november" || season === "september" ? "#b45309" : "#2f6b3b";
+  const autumn = season === "november" || season === "september" || season === "october";
+  const leaf = autumn ? "#d97706" : "#3f8f4f";
+  const leaf2 = autumn ? "#b45309" : "#2f6b3b";
   return (
     <g transform={`translate(${x} 0)`}>
       <path d="M0 292 C-26 262 -24 236 -6 224 C-4 248 0 266 0 292 Z" fill={leaf} stroke="#2b2b2b" strokeWidth="2" />
@@ -225,6 +268,27 @@ function ClinicDoor({ time, season }: { time: TimeOfDay; season: Season }) {
           {[70, 112, 156, 200, 244, 288, 330].map((x, i) => <circle key={x} cx={x} cy={118 + (i % 2) * 4} r="4" fill={["#dc2626", "#facc15", "#2563eb"][i % 3]} />)}
         </g>
       )}
+      {season === "lunarNewYear" && (
+        <g>
+          {[78, 322].map((x) => (
+            <g key={x}>
+              <line x1={x} y1="110" x2={x} y2="124" stroke="#2b2b2b" strokeWidth="2" />
+              <rect x={x - 7} y="122" width="14" height="5" rx="1.5" fill="#facc15" stroke="#2b2b2b" strokeWidth="1.5" />
+              <ellipse cx={x} cy="142" rx="17" ry="16" fill="#dc2626" stroke="#2b2b2b" strokeWidth="2.5" />
+              <path d={`M${x - 9} 130 Q${x} 142 ${x - 9} 154 M${x + 9} 130 Q${x} 142 ${x + 9} 154`} stroke="#991b1b" strokeWidth="1.5" fill="none" />
+              <rect x={x - 7} y="156" width="14" height="5" rx="1.5" fill="#facc15" stroke="#2b2b2b" strokeWidth="1.5" />
+              <path d={`M${x - 3} 161 L${x - 4} 176 M${x} 161 L${x} 178 M${x + 3} 161 L${x + 4} 176`} stroke="#facc15" strokeWidth="2" />
+            </g>
+          ))}
+        </g>
+      )}
+      {season === "diwali" && (
+        <g>
+          {[52, 72, 92, 112, 132, 152, 172, 192, 212, 232, 252, 272, 292, 312, 332, 352].map((x, i) => (
+            <circle key={x} cx={x} cy={113 + (i % 2) * 3} r="6" fill={i % 2 ? "#facc15" : "#f97316"} stroke="#9a3412" strokeWidth="1" />
+          ))}
+        </g>
+      )}
       {/* lights by the door */}
       <rect x="132" y="150" width="8" height="20" rx="2" fill="#2b2b2b" />
       <rect x="260" y="150" width="8" height="20" rx="2" fill="#2b2b2b" />
@@ -240,13 +304,40 @@ function ClinicDoor({ time, season }: { time: TimeOfDay; season: Season }) {
       <rect x="40" y="296" width="320" height="10" fill="#9fc0b8" stroke="#2b2b2b" strokeWidth="2.5" />
       <Plant x={78} season={season} />
       <Plant x={322} season={season} />
+      {season === "diwali" && (
+        <g>
+          {[132, 166, 234, 268].map((x) => (
+            <g key={x} transform={`translate(${x} 296)`}>
+              <path d="M-12 -2 Q0 12 12 -2 Z" fill="#c2410c" stroke="#2b2b2b" strokeWidth="2" strokeLinejoin="round" />
+              <path d="M0 -4 C-5 -10 -2 -16 0 -20 C2 -16 5 -10 0 -4 Z" fill="#facc15" stroke="#ea580c" strokeWidth="1.5" />
+            </g>
+          ))}
+        </g>
+      )}
+      {season === "lunarNewYear" && (
+        <g>
+          {[[132, 288], [262, 288]].map(([x, y]) => (
+            <g key={x} transform={`translate(${x} ${y}) rotate(-8)`}>
+              <rect x="-9" y="-12" width="18" height="24" rx="2" fill="#dc2626" stroke="#2b2b2b" strokeWidth="2" />
+              <circle cx="0" cy="-2" r="4" fill="#facc15" />
+            </g>
+          ))}
+        </g>
+      )}
 
       {season === "december" && (
         <g fill="#fff" opacity="0.95">
           {[[40, 60], [90, 44], [300, 30], [370, 110], [24, 160], [380, 200], [150, 40], [250, 46]].map(([x, y]) => <circle key={`${x}-${y}`} cx={x} cy={y} r="3" />)}
         </g>
       )}
-      {season === "october" && (
+      {season === "halloween" && (
+        <g fill={night ? "#c4b5fd" : "#1f2937"}>
+          {[[60, 50], [110, 36], [300, 60]].map(([x, y]) => (
+            <path key={`${x}-${y}`} d={`M${x} ${y} q-8 -8 -16 -2 q6 0 8 6 q2 -4 8 -4 q6 0 8 4 q2 -6 8 -6 q-8 -6 -16 2 Z`} />
+          ))}
+        </g>
+      )}
+      {season === "halloween" && (
         <g transform="translate(262 300)">
           <ellipse cx="0" cy="0" rx="20" ry="15" fill="#f97316" stroke="#2b2b2b" strokeWidth="2.5" />
           <path d="M-7 0 L-3 -5 L1 0 Z M5 0 L9 -5 L13 0 Z" fill="#2b2b2b" transform="translate(-3 -2)" />
@@ -254,7 +345,7 @@ function ClinicDoor({ time, season }: { time: TimeOfDay; season: Season }) {
           <rect x="-2" y="-21" width="4" height="8" fill="#3f8f4f" />
         </g>
       )}
-      {(season === "november" || season === "september") && (
+      {(season === "november" || season === "september" || season === "october") && (
         <g>
           {[[48, 140, "#d97706"], [356, 170, "#b45309"], [30, 230, "#ea580c"], [370, 250, "#d97706"]].map(([x, y, c]) => (
             <path key={`${x}`} d={`M${x} ${y} q8 -10 16 0 q-8 10 -16 0 Z`} fill={String(c)} stroke="#2b2b2b" strokeWidth="1.5" />
